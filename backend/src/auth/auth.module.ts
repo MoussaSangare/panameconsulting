@@ -22,9 +22,9 @@ import { CleanupService } from "./cleanup.service";
 import { RefreshTokenService } from "./refresh-token.service";
 import { RevokedTokenService } from "./revoked-token.service";
 import { SessionService } from "./session.service";
-import { JwtStrategy } from "./strategies/jwt.strategy";
 import { LocalStrategy } from "./strategies/local.strategy";
 import { User, UserSchema } from "../schemas/user.schema";
+import { JwtStrategy } from "./strategies/jwt.strategy";
 
 @Module({
   imports: [
@@ -56,13 +56,12 @@ import { User, UserSchema } from "../schemas/user.schema";
   controllers: [AuthController],
   providers: [
     AuthService,
-    JwtStrategy,
     SessionService,
     RefreshTokenService,
     RevokedTokenService,
     CleanupService,
     LocalStrategy,
-    JwtStrategy,
+    JwtStrategy
   ],
   exports: [
     AuthService,

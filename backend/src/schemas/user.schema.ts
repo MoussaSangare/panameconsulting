@@ -110,6 +110,7 @@ export class User extends Document {
 
   @Prop({ type: Date })
   updatedAt?: Date;
+  id: any;
 
   // Virtuals
   public get fullName(): string {

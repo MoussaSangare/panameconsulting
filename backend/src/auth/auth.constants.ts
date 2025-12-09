@@ -10,7 +10,12 @@ export const AuthConstants = {
   REFRESH_TOKEN_EXPIRATION_SECONDS: 30 * 60, // 30 minutes = 1800 secondes
   SESSION_EXPIRATION_SECONDS: 30 * 60, // 30 minutes
   SESSION_EXPIRATION_MS: 30 * 60 * 1000,
-
+  REVOCATION_REASONS:{
+        SESSION_EXPIRED: "SESSION EXPIRED",
+        MANUAL_REVOKE: "MANUAL REVOKE",
+        ADMIN_CLEANUP: "ADMIN CLEANUP",
+        REVOKE_ALL: "REVOKE ALL"
+  },
   // Token Configuration
   RESET_TOKEN_EXPIRATION_MS: 20 * 60 * 1000, // 20 minutes
 
@@ -19,6 +24,7 @@ export const AuthConstants = {
   LOGIN_ATTEMPTS_TTL_MINUTES: 30, // 30 minutes
   MIN_PASSWORD_LENGTH: 8,
   BCRYPT_SALT_ROUNDS: 12,
+GLOBAL_LOGOUT_DURATION: 24 * 60 * 60 * 1000, // 24h en millisecondes
 
   // Cleanup Intervals - Valeurs 15, 20, 30 minutes
   TOKEN_BLACKLIST_CLEANUP_INTERVAL: 30 * 60 * 1000, // 30 minutes

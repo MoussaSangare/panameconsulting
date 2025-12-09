@@ -1,82 +1,62 @@
-// local.strategy.ts - Version simplifiée
-import { Strategy } from "passport-local";
-import { PassportStrategy } from "@nestjs/passport";
-import { Injectable, UnauthorizedException, Logger } from "@nestjs/common";
-import { AuthService } from "../auth.service";
-import { AuthConstants } from "../auth.constants";
+// strategies/jwt.strategy.ts
+import { ExtractJwt, Strategy } from 'passport-jwt';
+import { PassportStrategy } from '@nestjs/passport';
+import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { UsersService } from '../../users/users.service';
+import { AuthConstants } from '../auth.constants';
 
 @Injectable()
-export class LocalStrategy extends PassportStrategy(Strategy) {
-  private readonly logger = new Logger(LocalStrategy.name);
-
-  constructor(private authService: AuthService) {
+export class JwtStrategy extends PassportStrategy(Strategy) {
+  constructor(
+    private configService: ConfigService,
+    private usersService: UsersService,
+  ) {
     super({
-      usernameField: "email",
-      passwordField: "password",
+      jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
+      ignoreExpiration: false,
+      secretOrKey: configService.get('JWT_SECRET'),
     });
   }
 
-  async validate(email: string, password: string): Promise<any> {
+  async validate(payload: any) {
     try {
-      // ✅ Normaliser l'email
-      const normalizedEmail = email.toLowerCase().trim();
+      // ✅ Vérifier d'abord l'accès avec la méthode complète
+      const accessCheck = await this.usersService.checkUserAccess(payload.sub);
       
-      // ✅ Appeler validateUser qui peut lancer des exceptions spécifiques
-      const user = await this.authService.validateUser(normalizedEmail, password);
-
-      if (!user) {
-        throw new UnauthorizedException({
-          message: "Email ou mot de passe incorrect",
-          code: "INVALID_CREDENTIALS"
-        });
+      if (!accessCheck.canAccess) {
+        // Gérer les différents types d'erreurs d'accès
+        if (accessCheck.reason?.includes('Compte désactivé')) {
+          throw new UnauthorizedException(AuthConstants.ERROR_MESSAGES.COMPTE_DESACTIVE);
+        } else if (accessCheck.reason?.includes('Mode maintenance')) {
+          throw new UnauthorizedException(AuthConstants.ERROR_MESSAGES.MAINTENANCE_MODE);
+        } else if (accessCheck.reason?.includes('Déconnecté temporairement')) {
+          throw new UnauthorizedException(AuthConstants.ERROR_MESSAGES.COMPTE_TEMPORAIREMENT_DECONNECTE);
+        } else {
+          throw new UnauthorizedException(accessCheck.reason || "Accès refusé");
+        }
       }
 
-      return user;
-
+      // ✅ Retourner les informations utilisateur formatées
+      return {
+        sub: payload.sub, // ID utilisateur
+        email: accessCheck.user.email,
+        role: accessCheck.user.role,
+        firstName: accessCheck.user.firstName,
+        lastName: accessCheck.user.lastName,
+        userId: payload.sub, // Alias pour compatibilité
+      };
     } catch (error) {
-      // ✅ PROPAGER DIRECTEMENT si c'est déjà une UnauthorizedException
+      // ✅ Log détaillé des erreurs
+      console.error(`JWT Validation Error: ${error.message}`, {
+        userId: payload.sub,
+        error: error.stack
+      });
+      
       if (error instanceof UnauthorizedException) {
-        const errorMessage = error.message;
-        
-        if (errorMessage === AuthConstants.ERROR_MESSAGES.PASSWORD_RESET_REQUIRED) {
-          throw new UnauthorizedException({
-            message: "Un mot de passe doit être défini pour ce compte",
-            code: AuthConstants.ERROR_MESSAGES.PASSWORD_RESET_REQUIRED,
-            requiresPasswordReset: true,
-            email: email
-          });
-        }
-        
-        if (errorMessage === AuthConstants.ERROR_MESSAGES.COMPTE_DESACTIVE) {
-          throw new UnauthorizedException({
-            message: "Votre compte a été désactivé",
-            code: AuthConstants.ERROR_MESSAGES.COMPTE_DESACTIVE,
-            requiresAdmin: true
-          });
-        }
-        
-        if (errorMessage === AuthConstants.ERROR_MESSAGES.COMPTE_TEMPORAIREMENT_DECONNECTE) {
-          throw new UnauthorizedException({
-            message: "Votre compte est temporairement déconnecté",
-            code: AuthConstants.ERROR_MESSAGES.COMPTE_TEMPORAIREMENT_DECONNECTE,
-            duration: "30 minutes"
-          });
-        }
-        
-        if (errorMessage === AuthConstants.ERROR_MESSAGES.MAINTENANCE_MODE) {
-          throw new UnauthorizedException({
-            message: "Système en maintenance",
-            code: AuthConstants.ERROR_MESSAGES.MAINTENANCE_MODE
-          });
-        }
-        
         throw error;
       }
-
-      throw new UnauthorizedException({
-        message: "Email ou mot de passe incorrect",
-        code: "AUTH_ERROR"
-      });
+      throw new UnauthorizedException('Token invalide ou expiré');
     }
   }
 }
