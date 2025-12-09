@@ -21,6 +21,7 @@ import { RevokedTokenService } from "./revoked-token.service";
 import { RefreshTokenService } from "./refresh-token.service";
 import { SessionService } from "./session.service";
 import { AuthConstants } from "./auth.constants";
+import { isValidObjectId } from "mongoose";
 
 @Injectable()
 export class AuthService {
@@ -50,28 +51,30 @@ export class AuthService {
   ) {}
 
   private convertObjectIdToString(id: any): string {
-    if (!id) {
-      throw new Error("ID utilisateur manquant");
-    }
-
-    if (id instanceof Types.ObjectId) {
-      return id.toString();
-    }
-
-    if (typeof id === "string") {
-      if (Types.ObjectId.isValid(id)) {
-        return id;
-      }
-      throw new Error(`Format ID string invalide.`);
-    }
-
-    const stringId = String(id);
-    if (Types.ObjectId.isValid(stringId)) {
-      return stringId;
-    }
-
-    throw new Error(`Impossible de convertir l'ID.`);
+  if (!id) {
+    throw new Error("ID utilisateur manquant");
   }
+
+  if (id instanceof Types.ObjectId) {
+    return id.toString();
+  }
+
+  if (typeof id === "string") {
+    // SOLUTION : Utiliser isValidObjectId de mongoose
+    if (isValidObjectId(id)) {
+      return id;
+    }
+    throw new Error(`Format ID string invalide.`);
+  }
+
+  const stringId = String(id);
+  // SOLUTION : Utiliser isValidObjectId de mongoose
+  if (isValidObjectId(stringId)) {
+    return stringId;
+  }
+
+  throw new Error(`Impossible de convertir l'ID.`);
+}
 
   // Gestion des tentatives de connexion
   private getLoginAttempts(email: string): {
@@ -890,7 +893,8 @@ async logoutAll(): Promise<{
 
       const cleanUserId = userId.trim();
 
-      if (Types.ObjectId.isValid(cleanUserId)) {
+      // CORRECTION 1 : Utiliser isValidObjectId importé de mongoose
+      if (isValidObjectId(cleanUserId)) {
         const user = await this.usersService.findById(cleanUserId);
 
         if (!user) {

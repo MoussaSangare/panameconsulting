@@ -44,80 +44,56 @@ export class AuthController {
     private usersService: UsersService,
   ) {}
 
-  // ==================== 🔐 ENDPOINTS D'AUTHENTIFICATION ====================
-
-  private getCookieOptions(req?: any): any {
-    const isProduction = process.env.NODE_ENV === 'production';
-    const isVercelApp =req?.headers?.host?.includes('panameconsulting.vercel.app') || 
-                       req?.headers?.origin?.includes('panameconsulting.vercel.app');
-    
-    if (!isProduction || isVercelApp) {
-      return {
-        httpOnly: true,
-        secure: true,
-        sameSite: 'none',
-        path: '/',
-      };
-    }
-
+  private getCookieOptions(): any {
     return {
       httpOnly: true,
       secure: true,
       sameSite: 'none',
-      domain: '.panameconsulting.com',
       path: '/',
     };
   }
 
-@Post("login")
-@UseGuards(ThrottleGuard, LocalAuthGuard)
-@ApiOperation({ summary: "Connexion utilisateur" })
-@ApiResponse({ status: 200, description: "Connexion réussie" })
-@ApiResponse({ status: 401, description: "Identifiants invalides" })
-async login(@Body() loginDto: LoginDto, @Request() req: { user: any }, @Res() res: Response) {
-  this.logger.log(`🔐 Tentative de connexion pour: ${this.maskEmail(loginDto.email)}`);
-  
-  // ✅ GÉRER LE CAS SPÉCIAL PASSWORD_RESET_REQUIRED
-   if (!req.user) {
-    return res.status(401).json({
-      message: "Email ou mot de passe incorrect",
-      code: "INVALID_CREDENTIALS",
-      timestamp: new Date().toISOString()
+  @Post("login")
+  @UseGuards(ThrottleGuard, LocalAuthGuard)
+  @ApiOperation({ summary: "Connexion utilisateur" })
+  @ApiResponse({ status: 200, description: "Connexion réussie" })
+  @ApiResponse({ status: 401, description: "Identifiants invalides" })
+  async login(@Body() loginDto: LoginDto, @Request() req: { user: any }, @Res() res: Response) {
+    if (!req.user) {
+      return res.status(401).json({
+        message: "Email ou mot de passe incorrect",
+        code: "INVALID_CREDENTIALS",
+        timestamp: new Date().toISOString()
+      });
+    }
+    
+    const result = await this.authService.login(req.user);
+    
+    const cookieOptions = this.getCookieOptions();
+
+    res.cookie("refresh_token", result.refresh_token, {
+      ...cookieOptions,
+      maxAge: AuthConstants.REFRESH_TOKEN_EXPIRATION_SECONDS * 1000, // 30 minutes
     });
-      
+
+    res.cookie("access_token", result.access_token, {
+      ...cookieOptions,
+      maxAge: AuthConstants.ACCESS_TOKEN_EXPIRATION_SECONDS * 1000, // 15 minutes
+    });
+
+    return res.json({
+      access_token: result.access_token,
+      user: {
+        id: result.user.id,
+        email: result.user.email,
+        firstName: result.user.firstName,
+        lastName: result.user.lastName,
+        role: result.user.role,
+        isAdmin: result.user.role === UserRole.ADMIN,
+      },
+      message: "Connexion réussie",
+    });
   }
-  
-  // ✅ CAS NORMAL : connexion réussie
-  const result = await this.authService.login(req.user);
-  
-  const cookieOptions = this.getCookieOptions(req);
-
-  res.cookie("refresh_token", result.refresh_token, {
-    ...cookieOptions,
-    maxAge: AuthConstants.REFRESH_TOKEN_EXPIRATION_SECONDS * 1000,
-  });
-
-  res.cookie("access_token", result.access_token, {
-    ...cookieOptions,
-    httpOnly: false,
-    maxAge: AuthConstants.ACCESS_TOKEN_EXPIRATION_SECONDS * 1000,
-  });
-
-  this.logger.log(`✅ Connexion réussie pour: ${this.maskEmail(loginDto.email)}`);
-
-  return res.json({
-    access_token: result.access_token,
-    user: {
-      id: result.user.id,
-      email: result.user.email,
-      firstName: result.user.firstName,
-      lastName: result.user.lastName,
-      role: result.user.role,
-      isAdmin: result.user.role === UserRole.ADMIN,
-    },
-    message: "Connexion réussie",
-  });
-}
 
   @Post("refresh")
   @ApiOperation({ summary: "Rafraîchir le token" })
@@ -128,12 +104,9 @@ async login(@Body() loginDto: LoginDto, @Request() req: { user: any }, @Res() re
     @Body() body: any,
     @Res() res: Response,
   ) {
-    this.logger.log("🔄 Requête de rafraîchissement de token reçue");
-
     const refresh_token = req.cookies?.refresh_token || body?.refresh_token;
 
     if (!refresh_token) {
-      this.logger.warn("❌ Refresh token manquant dans les cookies et body");
       this.clearAuthCookies(res);
       return res.status(401).json({
         message: "Refresh token manquant",
@@ -145,37 +118,31 @@ async login(@Body() loginDto: LoginDto, @Request() req: { user: any }, @Res() re
       const result = await this.authService.refresh(refresh_token);
 
       if (result.sessionExpired) {
-        this.logger.log("🔒 Session expirée - nettoyage cookies");
         this.clearAuthCookies(res);
         return res.status(401).json({
           loggedOut: true,
           sessionExpired: true,
-          message: "Session expirée après 25 minutes",
+          message: "Session expirée après 30 minutes",
         });
       }
 
       if (!result.access_token) {
-        this.logger.error("❌ Access token non généré");
         throw new BadRequestException("Access token non généré");
       }
 
-      const cookieOptions = this.getCookieOptions(req);
+      const cookieOptions = this.getCookieOptions();
 
       if (result.refresh_token) {
         res.cookie("refresh_token", result.refresh_token, {
           ...cookieOptions,
-          maxAge: AuthConstants.REFRESH_TOKEN_EXPIRATION_SECONDS * 1000,
+          maxAge: AuthConstants.REFRESH_TOKEN_EXPIRATION_SECONDS * 1000, // 30 minutes
         });
-        this.logger.log("✅ Refresh token cookie mis à jour");
       }
 
       res.cookie("access_token", result.access_token, {
         ...cookieOptions,
-        httpOnly: false,
-        maxAge: AuthConstants.ACCESS_TOKEN_EXPIRATION_SECONDS * 1000,
+        maxAge: AuthConstants.ACCESS_TOKEN_EXPIRATION_SECONDS * 1000, // 15 minutes
       });
-
-      this.logger.log("✅ Tokens rafraîchis avec succès");
 
       return res.json({
         access_token: result.access_token,
@@ -185,7 +152,6 @@ async login(@Body() loginDto: LoginDto, @Request() req: { user: any }, @Res() re
       });
 
     } catch (error: any) {
-      this.logger.error(`❌ Erreur rafraîchissement: ${error.message}`);
       this.clearAuthCookies(res);
 
       let errorMessage = "Session expirée - veuillez vous reconnecter";
@@ -205,143 +171,108 @@ async login(@Body() loginDto: LoginDto, @Request() req: { user: any }, @Res() re
   }
 
   @Post("register")
-@ApiOperation({ summary: "Inscription utilisateur" })
-@ApiResponse({ status: 201, description: "Utilisateur créé" })
-@ApiResponse({ status: 400, description: "Données invalides" })
-async register(@Body() registerDto: RegisterDto, @Res() res: Response) {
-  const maskedEmail = this.maskEmail(registerDto.email);
-  this.logger.log(`📝 Tentative d'inscription pour: ${maskedEmail}`);
+  @ApiOperation({ summary: "Inscription utilisateur" })
+  @ApiResponse({ status: 201, description: "Utilisateur créé" })
+  @ApiResponse({ status: 400, description: "Données invalides" })
+  async register(@Body() registerDto: RegisterDto, @Res() res: Response) {
+    try {
+      const result = await this.authService.register(registerDto);
+      const cookieOptions = this.getCookieOptions();
 
-  try {
-    const result = await this.authService.register(registerDto);
-    const cookieOptions = this.getCookieOptions();
+      res.cookie("refresh_token", result.refresh_token, {
+        ...cookieOptions,
+        maxAge: AuthConstants.REFRESH_TOKEN_EXPIRATION_SECONDS * 1000, // 30 minutes
+      });
 
-    res.cookie("refresh_token", result.refresh_token, {
-      ...cookieOptions,
-      maxAge: AuthConstants.REFRESH_TOKEN_EXPIRATION_SECONDS * 1000,
-    });
+      res.cookie("access_token", result.access_token, {
+        ...cookieOptions,
+        maxAge: AuthConstants.ACCESS_TOKEN_EXPIRATION_SECONDS * 1000, // 15 minutes
+      });
 
-    res.cookie("access_token", result.access_token, {
-      ...cookieOptions,
-      httpOnly: false,
-      maxAge: AuthConstants.ACCESS_TOKEN_EXPIRATION_SECONDS * 1000,
-    });
+      return res.status(201).json({
+        access_token: result.access_token,
+        user: {
+          id: result.user.id,
+          email: result.user.email,
+          firstName: result.user.firstName,
+          lastName: result.user.lastName,
+          role: result.user.role,
+          isAdmin: result.user.role === UserRole.ADMIN,
+          isActive: result.user.isActive,
+        },
+        message: "Inscription réussie",
+      });
 
-    this.logger.log(`✅ Inscription réussie pour: ${maskedEmail}`);
+    } catch (error: any) {
+      if (error instanceof BadRequestException) {
+        throw error;
+      }
 
-    return res.status(201).json({
-      access_token: result.access_token,
-      user: {
-        id: result.user.id,
-        email: result.user.email,
-        firstName: result.user.firstName,
-        lastName: result.user.lastName,
-        role: result.user.role,
-        isAdmin: result.user.role === UserRole.ADMIN,
-        isActive: result.user.isActive,
-      },
-      message: "Inscription réussie",
-    });
+      throw new BadRequestException(
+        error.message || "Une erreur est survenue lors de l'inscription"
+      );
+    }
+  }
 
-  } catch (error: any) {
-    // ✅ Log plus précis
-    this.logger.error(`❌ Erreur inscription pour ${maskedEmail}: ${error.message}`);
-    
-    // ✅ Propager l'erreur telle quelle (elle contient déjà le bon message)
-    if (error instanceof BadRequestException) {
-      throw error;
+  @Post("logout")
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: "Déconnexion" })
+  async logout(@Request() req: any, @Res() res: Response) {
+    const userId = req.user?.sub;
+    const token = req.headers.authorization?.split(" ")[1] || 
+                  req.cookies?.access_token || "";
+
+    if (userId && token) {
+      await this.authService.logoutWithSessionDeletion(userId, token);
     }
 
-    // ✅ Message d'erreur générique seulement si nécessaire
-    throw new BadRequestException(
-      error.message || "Une erreur est survenue lors de l'inscription"
-    );
-  }
-}
+    this.clearAuthCookies(res);
 
-// Dans auth.controller.ts - POST logout
-@Post("logout")
-@UseGuards(JwtAuthGuard)
-@ApiOperation({ summary: "Déconnexion" })
-async logout(@Request() req: any, @Res() res: Response) {
-  // ✅ Standardiser sur 'sub' pour l'ID utilisateur
-  const userId = req.user?.sub;
-  const token = req.headers.authorization?.split(" ")[1] || 
-                req.cookies?.access_token || "";
-
-  this.logger.log(`🚪 Déconnexion pour l'utilisateur ID: ${this.maskUserId(userId)}`);
-
-  if (userId && token) {
-    // ✅ Utiliser la même raison partout
-    await this.authService.logoutWithSessionDeletion(userId, token);
-  }
-
-  this.clearAuthCookies(res);
-
-  this.logger.log(`✅ Déconnexion réussie pour l'utilisateur ID: ${this.maskUserId(userId)}`);
-
-  return res.json({ 
-    message: "Déconnexion réussie",
-    timestamp: new Date().toISOString()
-  });
-}
-
-
-  // CORRECTION : Ajouter la réponse manquante
-@Post("logout-all")
-@UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(UserRole.ADMIN)
-@ApiOperation({ summary: "Déconnexion de tous les utilisateurs non-admin" })
-async logoutAll(@Request() req: any, @Res() res: Response) {
-  const currentAdmin = req.user;
-  this.logger.log(`🛡️ Admin initie une déconnexion globale: ${this.maskEmail(currentAdmin.email)}`);
-
-  try {
-    const result = await this.authService.logoutAll();
-
-    this.logger.log(`✅ Déconnexion globale réussie: ${result.stats.usersLoggedOut} utilisateurs déconnectés`);
-
-    // ✅ CORRECTION : Retourner la structure attendue par le frontend
-    return res.json({
-      success: result.success,
-      message: result.message,
-      stats: {
-        usersLoggedOut: result.stats.usersLoggedOut,
-        adminPreserved: result.stats.adminPreserved,
-        duration: result.stats.duration || "24h",
-        timestamp: result.stats.timestamp || new Date().toISOString(),
-        userEmails: result.stats.userEmails || []
-      },
-    });
-  } catch (error: any) {
-    this.logger.error(`❌ Erreur déconnexion globale: ${error.message}`);
-    return res.status(500).json({
-      success: false,
-      message: "Erreur lors de la déconnexion globale",
+    return res.json({ 
+      message: "Déconnexion réussie",
+      timestamp: new Date().toISOString()
     });
   }
-}
 
-  // ==================== 👤 ENDPOINTS PROFIL UTILISATEUR ====================
+  @Post("logout-all")
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({ summary: "Déconnexion de tous les utilisateurs non-admin" })
+  async logoutAll(@Request() req: any, @Res() res: Response) {
+    try {
+      const result = await this.authService.logoutAll();
+
+      return res.json({
+        success: result.success,
+        message: result.message,
+        stats: {
+          usersLoggedOut: result.stats.usersLoggedOut,
+          adminPreserved: result.stats.adminPreserved,
+          duration: result.stats.duration || "30 minutes",
+          timestamp: result.stats.timestamp || new Date().toISOString(),
+          userEmails: result.stats.userEmails || []
+        },
+      });
+    } catch (error: any) {
+      return res.status(500).json({
+        success: false,
+        message: "Erreur lors de la déconnexion globale",
+      });
+    }
+  }
 
   @Get("me")
   @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: "Récupérer le profil utilisateur" })
   async getProfile(@Request() req: any) {
-    // ✅ Standardiser sur 'sub' pour l'ID utilisateur
     const userId = req.user?.sub;
 
     if (!userId) {
-      this.logger.error("❌ ID utilisateur manquant dans la requête");
       throw new BadRequestException("ID utilisateur manquant dans le token");
     }
 
-    this.logger.log(`📋 Récupération du profil pour l'utilisateur ID: ${this.maskUserId(userId)}`);
-
     try {
       const user = await this.authService.getProfile(userId);
-
-      this.logger.log(`✅ Profil récupéré avec succès pour: ${this.maskEmail(user.email)}`);
 
       return {
         id: user._id,
@@ -354,83 +285,67 @@ async logoutAll(@Request() req: any, @Res() res: Response) {
         isActive: user.isActive,
       };
     } catch (error: any) {
-      this.logger.error(`❌ Erreur récupération profil pour ID ${this.maskUserId(userId)}: ${error.message}`);
       throw error;
     }
   }
 
   @Post("update-password")
-@UseGuards(JwtAuthGuard)
-@ApiOperation({ summary: "Mettre à jour le mot de passe" })
-async updatePassword(
-  @Request() req: any,
-  @Body()
-  body: {
-    currentPassword: string;
-    newPassword: string;
-    confirmNewPassword: string;
-  },
-) {
-  const userId = req.user?.sub;
-  const maskedId = this.maskUserId(userId);
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: "Mettre à jour le mot de passe" })
+  async updatePassword(
+    @Request() req: any,
+    @Body()
+    body: {
+      currentPassword: string;
+      newPassword: string;
+      confirmNewPassword: string;
+    },
+  ) {
+    const userId = req.user?.sub;
 
-  this.logger.log(`🔑 Mise à jour mot de passe pour l'utilisateur ID: ${maskedId}`);
-
-  // ✅ Validation améliorée
-  if (!body.currentPassword || body.currentPassword.trim() === '') {
-    throw new BadRequestException("Le mot de passe actuel est requis");
-  }
-
-  if (body.newPassword !== body.confirmNewPassword) {
-    this.logger.warn("❌ Les mots de passe ne correspondent pas");
-    throw new BadRequestException("Les mots de passe ne correspondent pas");
-  }
-
-  // ✅ Validation de la force du mot de passe
-  if (body.newPassword.length < 8) {
-    throw new BadRequestException("Le mot de passe doit contenir au moins 8 caractères");
-  }
-
-  try {
-    await this.usersService.updatePassword(userId, {
-      currentPassword: body.currentPassword,
-      newPassword: body.newPassword,
-      confirmNewPassword: body.confirmNewPassword,
-    });
-
-    this.logger.log(`✅ Mot de passe mis à jour avec succès pour l'utilisateur ID: ${maskedId}`);
-
-    return { 
-      success: true,
-      message: "Mot de passe mis à jour avec succès",
-      timestamp: new Date().toISOString()
-    };
-  } catch (error: any) {
-    this.logger.error(`❌ Erreur mise à jour mot de passe: ${error.message}`);
-    
-    // ✅ Messages d'erreur plus clairs
-    if (error.message.includes('mot de passe actuel incorrect')) {
-      throw new BadRequestException("Le mot de passe actuel est incorrect");
+    if (!body.currentPassword || body.currentPassword.trim() === '') {
+      throw new BadRequestException("Le mot de passe actuel est requis");
     }
-    
-    if (error.message.includes('Configuration du compte invalide')) {
-      throw new BadRequestException(
-        "Problème technique avec votre compte. Contactez l'administrateur."
-      );
+
+    if (body.newPassword !== body.confirmNewPassword) {
+      throw new BadRequestException("Les mots de passe ne correspondent pas");
     }
-    
-    throw error;
+
+    if (body.newPassword.length < 8) {
+      throw new BadRequestException("Le mot de passe doit contenir au moins 8 caractères");
+    }
+
+    try {
+      await this.usersService.updatePassword(userId, {
+        currentPassword: body.currentPassword,
+        newPassword: body.newPassword,
+        confirmNewPassword: body.confirmNewPassword,
+      });
+
+      return { 
+        success: true,
+        message: "Mot de passe mis à jour avec succès",
+        timestamp: new Date().toISOString()
+      };
+    } catch (error: any) {
+      if (error.message.includes('mot de passe actuel incorrect')) {
+        throw new BadRequestException("Le mot de passe actuel est incorrect");
+      }
+      
+      if (error.message.includes('Configuration du compte invalide')) {
+        throw new BadRequestException(
+          "Problème technique avec votre compte. Contactez l'administrateur."
+        );
+      }
+      
+      throw error;
+    }
   }
-}
 
   @Post("forgot-password")
   @ApiOperation({ summary: "Demande de réinitialisation de mot de passe" })
   async forgotPassword(@Body() forgotPasswordDto: ForgotPasswordDto) {
-    this.logger.log(`📧 Demande de réinitialisation pour: ${this.maskEmail(forgotPasswordDto.email)}`);
-
     await this.authService.sendPasswordResetEmail(forgotPasswordDto.email);
-
-    this.logger.log(`✅ Email de réinitialisation envoyé à: ${this.maskEmail(forgotPasswordDto.email)}`);
 
     return {
       message: "Si votre email est enregistré, vous recevrez un lien de réinitialisation",
@@ -440,60 +355,23 @@ async updatePassword(
   @Post("reset-password")
   @ApiOperation({ summary: "Réinitialiser le mot de passe" })
   async resetPassword(@Body() resetPasswordDto: ResetPasswordDto) {
-    this.logger.log("🔄 Réinitialisation du mot de passe");
-
     await this.authService.resetPassword(
       resetPasswordDto.token,
       resetPasswordDto.newPassword,
     );
 
-    this.logger.log("✅ Mot de passe réinitialisé avec succès");
-
     return { message: "Mot de passe réinitialisé avec succès" };
   }
 
-  // ==================== 🔧 MÉTHODES UTILITAIRES PRIVÉES ====================
-
   private clearAuthCookies(res: Response): void {
-    const isProduction = process.env.NODE_ENV === 'production';
-    
     const cookieOptions: any = {
       httpOnly: true,
+      secure: true,
+      sameSite: 'none',
       path: '/',
     };
 
-    if (isProduction) {
-      cookieOptions.secure = true;
-      cookieOptions.sameSite = 'none';
-    } else {
-      cookieOptions.secure = true;
-      cookieOptions.sameSite = 'none';
-    }
-
     res.clearCookie("refresh_token", cookieOptions);
-    res.clearCookie("access_token", { 
-      ...cookieOptions, 
-      httpOnly: false 
-    });
-
-    this.logger.log("🍪 Cookies d'authentification nettoyés");
-  }
-
-  private maskEmail(email: string): string {
-    if (!email) return '***@***';
-    const [name, domain] = email.split('@');
-    if (!name || !domain) return '***@***';
-    
-    const maskedName = name.length <= 2 
-      ? name.charAt(0) + '*'
-      : name.charAt(0) + '***' + (name.length > 1 ? name.charAt(name.length - 1) : '');
-    
-    return `${maskedName}@${domain}`;
-  }
-
-  private maskUserId(userId: string): string {
-    if (!userId) return 'user_***';
-    if (userId.length <= 8) return userId;
-    return `${userId.substring(0, 4)}***${userId.substring(userId.length - 4)}`;
+    res.clearCookie("access_token", cookieOptions);
   }
 }
