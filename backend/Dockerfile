@@ -6,7 +6,7 @@ RUN corepack enable && corepack prepare pnpm@8.15.0 --activate
 WORKDIR /app
 
 # Copie SEULEMENT les fichiers nécessaires pour l'installation
-COPY package.json pnpm-lock.yaml tsconfig.json tsconfig.build.json ./
+COPY ./backend/package.json backend/pnpm-lock.yaml backend/tsconfig.json backend/tsconfig.build.json ./
 
 # Installation des dépendances
 RUN pnpm install --frozen-lockfile --prefer-offline
