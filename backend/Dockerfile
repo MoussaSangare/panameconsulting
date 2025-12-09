@@ -1,44 +1,31 @@
-# ============ ÉTAPE DE BUILD ============
-FROM node:18-alpine AS builder
+# Mets ce fichier dans : C:\Users\DELL\Desktop\PROJETS\panameconsulting\backend\Dockerfile
 
-RUN corepack enable && corepack prepare pnpm@8.15.0 --activate
+FROM node:18-alpine
 
 WORKDIR /app
 
-# Copie SEULEMENT les fichiers nécessaires pour l'installation
-COPY backend/package.json backend/pnpm-lock.yaml ./
+# Copie les fichiers de config
+COPY package.json pnpm-lock.yaml tsconfig*.json nest-cli.json ./
 
-# Installation des dépendances
+# Active pnpm
+RUN corepack enable && corepack prepare pnpm@8.15.0 --activate
+
+# Installation
 RUN pnpm install --frozen-lockfile --prefer-offline
 
-# Copie le reste du code backend
-COPY . .
+# Copie le code source
+COPY src/ ./src/
 
-# Construction 
+
+# Build
 RUN pnpm build
 
-# ============ ÉTAPE DE PRODUCTION ============
-FROM node:18-alpine AS production
-
-ARG NODE_ENV=production
-ENV NODE_ENV=${NODE_ENV}
-ENV PORT=10000
-
-RUN corepack enable && corepack prepare pnpm@8.15.0 --activate
-
-WORKDIR /app
-
-COPY --from=builder /app/package.json /app/pnpm-lock.yaml ./
-
-RUN pnpm install --prod --frozen-lockfile --prefer-offline
-
-COPY --from=builder /app/dist ./dist
-
+# Dossiers pour les uploads
 RUN mkdir -p /app/uploads /app/logs && \
     chown -R node:node /app
 
 USER node
 
-EXPOSE $PORT
+EXPOSE 10000
 
 CMD ["node", "dist/main.js"]
