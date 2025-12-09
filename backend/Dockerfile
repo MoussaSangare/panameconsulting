@@ -5,14 +5,17 @@ RUN corepack enable && corepack prepare pnpm@8.15.0 --activate
 
 WORKDIR /app
 
-# Copie de tout le backend
-COPY . .
+# Copie SEULEMENT les fichiers nécessaires pour l'installation
+COPY backend/package.json backend/pnpm-lock.yaml ./
 
-# Installation
+# Installation des dépendances
 RUN pnpm install --frozen-lockfile --prefer-offline
 
+# Copie le reste du code backend
+COPY . .
+
 # Construction 
-RUN pnpm build 
+RUN pnpm build
 
 # ============ ÉTAPE DE PRODUCTION ============
 FROM node:18-alpine AS production
@@ -25,7 +28,7 @@ RUN corepack enable && corepack prepare pnpm@8.15.0 --activate
 
 WORKDIR /app
 
-COPY backend/package.json backend/pnpm-lock.yaml* ./
+COPY --from=builder /app/package.json /app/pnpm-lock.yaml ./
 
 RUN pnpm install --prod --frozen-lockfile --prefer-offline
 
