@@ -43,7 +43,7 @@ services:
     
     # Health check pour surveiller l'état de l'application
     healthcheck:
-      test: ["CMD", "curl", "-f", "https://panameconsulting.up.railway.app/health"]
+      test: ["CMD", "curl", "-f", "https://panameconsulting.up.railway.app"]
       interval: 30s
       timeout: 10s
       retries: 3
