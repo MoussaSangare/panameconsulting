@@ -12,7 +12,9 @@ services:
     # Ports exposés (host:container)
     ports:
       - "10000:10000"
-    
+
+    env_file:
+      - .env  # Charger TOUTES les variables depuis .env
     # Variables d'environnement essentielles
     environment:
       - NODE_ENV=production
@@ -29,9 +31,6 @@ services:
       - RAILWAY_STATIC_URL=https://panameconsulting.up.railway.app
       - FRONTEND_URL=http://panameconsulting.vercerl.app
       
-    # Fichier de variables sensibles
-    env_file:
-      - .env
     
     # Politique de redémarrage automatique
     restart: unless-stopped
