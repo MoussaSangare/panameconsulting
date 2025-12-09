@@ -25,7 +25,7 @@ RUN corepack enable && corepack prepare pnpm@8.15.0 --activate
 
 WORKDIR /app
 
-COPY package.json pnpm-lock.yaml* ./
+COPY backend/package.json backend/pnpm-lock.yaml* ./
 
 RUN pnpm install --prod --frozen-lockfile --prefer-offline
 
