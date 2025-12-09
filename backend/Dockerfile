@@ -1,4 +1,3 @@
-# Mets ce fichier dans : C:\Users\DELL\Desktop\PROJETS\panameconsulting\backend\Dockerfile
 
 FROM node:18-alpine
 
@@ -14,7 +13,7 @@ RUN corepack enable && corepack prepare pnpm@8.15.0 --activate
 RUN pnpm install --frozen-lockfile --prefer-offline
 
 # Copie le code source
-COPY src/ ./src/
+COPY . .
 
 
 # Build
