@@ -1,0 +1,51 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Dependencies
+node_modules/
+/.pnpm-store
+
+# Build outputs
+dist/
+build/
+.out/
+.next/
+.nuxt/
+
+# Environment variables
+.env
+.env.*
+!.env.example
+
+# Cache
+.cache/
+.parcel-cache/
+
+# IDE
+.vscode/
+!.vscode/extensions.json
+.idea/
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+
+# Testing
+coverage/
+
+# Archives
+*.tgz
+*.tar.gz
+
+# Deployment
+.vercel/
+.netlify/
+.firebase/
+
+# Runtime
+*.local

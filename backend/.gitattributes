@@ -1,0 +1,21 @@
+# Normaliser les fins de ligne
+* text=auto
+
+# Forcer LF pour les fichiers de configuration
+*.json text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.js text eol=lf
+*.ts text eol=lf
+*.html text eol=lf
+*.css text eol=lf
+*.md text eol=lf
+
+# Fichiers binaires - pas de modification
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.pdf binary

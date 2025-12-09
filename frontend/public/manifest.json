@@ -1,0 +1,62 @@
+{
+  "name": "Paname Consulting",
+  "short_name": "Paname",
+  "description": "Paname Consulting — Services d'accompagnement pour études à l'étranger, voyages d'affaires et demandes de visa.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#0ea5e9",
+  "orientation": "any",
+  "icons": [
+    {
+      "src": "/paname-consulting.png",
+      "type": "image/png",
+      "sizes": "192x192"
+    },
+    {
+      "src": "/paname-consulting.png",
+      "type": "image/png",
+      "sizes": "512x512"
+    },
+    {
+      "src": "/paname-consulting.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    },
+    {
+      "src": "/paname-consulting.jpg",
+      "sizes": "1024x1024",
+      "type": "image/jpeg"
+    },
+    {
+      "src": "/paname-consulting.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "/paname-consulting.png",
+      "sizes": "640x1136",
+      "type": "image/png",
+      "form_factor": "narrow"
+    },
+    {
+      "src": "/paname-consulting.png",
+      "sizes": "1536x2048",
+      "type": "image/png",
+      "form_factor": "wide"
+    },
+    {
+      "src": "/paname-consulting.jpg",
+      "sizes": "1920x1080",
+      "type": "image/jpeg",
+      "form_factor": "wide"
+    }
+  ],
+  "categories": ["consulting", "services"],
+  "lang": "fr",
+  "dir": "ltr",
+  "scope": "/"
+}

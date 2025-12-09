@@ -1,0 +1,6 @@
+User-agent: *
+Disallow: /admin/
+Disallow: /gestionnaire/
+Allow: /
+
+Sitemap: https://panameconsulting.com/sitemap.xml
