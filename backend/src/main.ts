@@ -35,7 +35,8 @@ const productionOrigins = [
   "https://panameconsulting.vercel.app",
   "https://admin.panameconsulting.com",
   "https://panameconsulting.netlify.app",
-  "http://localhost:5173",
+  "https://panbameconsulting.vercel.app",
+  "https://vercel.live", // AJOUTÉ pour Vercel Live
 ];
 
 // Fonction pour vérifier si une origine correspond à un pattern avec wildcard
@@ -118,7 +119,7 @@ async function bootstrap() {
   server.get("/api", (_req: express.Request, res: express.Response) => {
     res.status(200).json({
       status: "success",
-      service: "paname-consulting-api",
+      service: "API panameconsulting",
       version: process.env.npm_package_version || "1.0.0",
       timestamp: new Date().toISOString(),
       environment: "production",
@@ -140,7 +141,7 @@ async function bootstrap() {
 
     useContainer(app.select(AppModule), { fallbackOnErrors: true });
 
-    // 🔐 CONFIGURATION DE SÉCURITÉ HELMET
+    // 🔐 CONFIGURATION DE SÉCURITÉ HELMET AVEC CSP CORRIGÉE
     app.use(
       helmet({
         contentSecurityPolicy: {
@@ -153,7 +154,8 @@ async function bootstrap() {
             fontSrc: ["'self'", "https:"],
             objectSrc: ["'none'"],
             mediaSrc: ["'self'"],
-            frameSrc: ["'none'"],
+            // CORRECTION: Ajouter vercel.live au frame-src
+            frameSrc: ["'self'", "https://vercel.live", "https://www.google.com"],
             baseUri: ["'self'"],
             formAction: ["'self'"],
           },
@@ -193,8 +195,6 @@ async function bootstrap() {
       origin: (origin, callback) => {
         // 🔒 EN PRODUCTION EXCLUSIVE: REFUSER les requêtes sans origine
         if (!origin) {
-          // Dans ce contexte, nous n'avons pas accès direct à req
-          // On loggera sans l'IP
           logger.warn(`❌ Requête sans origine rejetée en production`);
           callback(new Error('Origine requise en production'), false);
           return;

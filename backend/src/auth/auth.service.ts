@@ -469,7 +469,7 @@ async logoutAll(): Promise<{
         {
           isActive: false,
           deactivatedAt: new Date(),
-          revocationReason: "admin_global_logout_24h"
+          revocationReason: "admin global logout 24h"
         }
       ).exec(),
 
@@ -817,7 +817,7 @@ async logoutAll(): Promise<{
     if (!url) {
       url = nodeEnv === "production"
         ? "https://panameconsulting.com"
-        : "http://localhost:5173";
+        : "https://panbameconsulting.vercel.app";
     }
 
     return url.replace(/\/$/, "");

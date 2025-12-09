@@ -48,14 +48,14 @@ export class AuthController {
 
   private getCookieOptions(req?: any): any {
     const isProduction = process.env.NODE_ENV === 'production';
-    const isLocalhost = req?.headers?.host?.includes('localhost') || 
-                       req?.headers?.origin?.includes('localhost');
+    const isVercelApp =req?.headers?.host?.includes('panameconsulting.vercel.app') || 
+                       req?.headers?.origin?.includes('panameconsulting.vercel.app');
     
-    if (!isProduction || isLocalhost) {
+    if (!isProduction || isVercelApp) {
       return {
         httpOnly: true,
-        secure: false,
-        sameSite: 'lax',
+        secure: true,
+        sameSite: 'none',
         path: '/',
       };
     }
@@ -465,10 +465,9 @@ async updatePassword(
     if (isProduction) {
       cookieOptions.secure = true;
       cookieOptions.sameSite = 'none';
-      cookieOptions.domain = '.panameconsulting.com';
     } else {
-      cookieOptions.secure = false;
-      cookieOptions.sameSite = 'lax';
+      cookieOptions.secure = true;
+      cookieOptions.sameSite = 'none';
     }
 
     res.clearCookie("refresh_token", cookieOptions);
