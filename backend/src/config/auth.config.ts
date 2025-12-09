@@ -22,7 +22,7 @@ export const authConfig: AuthConfig = {
   jwtSecret: getEnv("JWT_SECRET"),
   jwtExpiresIn: getEnv("JWT_EXPIRES_IN", "1h"),
   refreshSecret: getEnv("REFRESH_SECRET"),
-  refreshExpiresIn: getEnv("REFRESH_EXPIRES_IN", "7d"),
+  refreshExpiresIn: getEnv("REFRESH_EXPIRES_IN", "20"),
   maxSessions: parseInt(getEnv("MAX_SESSIONS", "2"), 2),
   loginAttempts: parseInt(getEnv("LOGIN_ATTEMPTS", "5"), 10),
   blockDurationMinutes: parseInt(getEnv("BLOCK_DURATION_MINUTES", "15"), 10),
