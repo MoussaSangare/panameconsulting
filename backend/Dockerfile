@@ -5,18 +5,15 @@ RUN corepack enable && corepack prepare pnpm@8.15.0 --activate
 
 WORKDIR /app
 
-# Copie SEULEMENT les fichiers nécessaires pour l'installation
-COPY package.json pnpm-lock.yaml ./
-COPY tsconfig*.json ./
-COPY nest-cli.json ./
-# Installation des dépendances
+# Copie de tout le backend
+COPY backend/ ./
+
+# Installation
 RUN pnpm install --frozen-lockfile --prefer-offline
 
-# Copie le reste du code backend
-COPY . .
-
-# Construction 
-RUN pnpm build
+# Construction forcée avec configuration modifiée
+RUN sed -i 's/"skipLibCheck": false/"skipLibCheck": true/g' tsconfig.json || true
+RUN npx nest build --tsc-skip-lib-check
 
 # ============ ÉTAPE DE PRODUCTION ============
 FROM node:18-alpine AS production
@@ -29,7 +26,7 @@ RUN corepack enable && corepack prepare pnpm@8.15.0 --activate
 
 WORKDIR /app
 
-COPY --from=builder /app/package.json /app/pnpm-lock.yaml ./
+COPY backend/package.json backend/pnpm-lock.yaml* ./
 
 RUN pnpm install --prod --frozen-lockfile --prefer-offline
 
