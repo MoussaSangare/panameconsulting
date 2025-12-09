@@ -13,7 +13,7 @@ RUN pnpm install --frozen-lockfile --prefer-offline
 
 # Construction forcée avec configuration modifiée
 RUN sed -i 's/"skipLibCheck": false/"skipLibCheck": true/g' tsconfig.json || true
-RUN pnpm build --tsc-skip-lib-check
+RUN pnpm build 
 
 # ============ ÉTAPE DE PRODUCTION ============
 FROM node:18-alpine AS production
