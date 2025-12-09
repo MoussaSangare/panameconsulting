@@ -11,7 +11,7 @@ services:
     
     # Ports exposés (host:container)
     ports:
-      - "10000:10000"
+      - "0000:10000"
 
     env_file:
       - .env  # Charger TOUTES les variables depuis .env
