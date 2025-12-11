@@ -1,6 +1,7 @@
 import { Injectable, UnauthorizedException, Logger, ExecutionContext } from "@nestjs/common";
 import { AuthGuard } from "@nestjs/passport";
 import { AuthConstants } from "../../auth/auth.constants";
+import { request } from "express";
 
 @Injectable()
 export class JwtAuthGuard extends AuthGuard("jwt") {
@@ -16,7 +17,6 @@ export class JwtAuthGuard extends AuthGuard("jwt") {
         `Token JWT invalide ou expiré: ${this.maskToken(token)}`
       );
       
-      // Vérifier si c'est une erreur spécifique de token
       if (err?.name === 'TokenExpiredError') {
         throw new UnauthorizedException({
           message: "Token expiré",
@@ -38,8 +38,9 @@ export class JwtAuthGuard extends AuthGuard("jwt") {
       });
     }
 
-    // Vérifier que l'utilisateur est actif
-    if (!user.isActive) {
+    // CORRECTION : Ne vérifier isActive que si le champ existe
+    // isActive peut être undefined si non inclus dans le token
+    if (user.isActive === false) {
       this.logger.warn(
         `Tentative d'accès avec compte inactif: ${this.maskUserId(user.sub)}`
       );
@@ -50,7 +51,10 @@ export class JwtAuthGuard extends AuthGuard("jwt") {
       });
     }
 
-    // Vérifier le token type (doit être un access token)
+    // Alternative : considérer undefined comme actif
+    // const isActive = user.isActive !== undefined ? user.isActive : true;
+    // if (!isActive) { ... }
+
     if (user.tokenType && user.tokenType !== "access") {
       this.logger.warn(
         `Tentative d'accès avec mauvais type de token: ${user.tokenType}`
@@ -81,7 +85,17 @@ export class JwtAuthGuard extends AuthGuard("jwt") {
 
       this.logger.debug(`Validation du token JWT: ${this.maskToken(token)}`);
       
-      // Appel de la méthode parent
+      // CORRECTION : Ajouter un log pour voir le contenu du token décodé
+      if (process.env.NODE_ENV === 'development') {
+        const jwt = require('jsonwebtoken');
+        try {
+          const decoded = jwt.decode(token);
+          this.logger.debug(`Token décodé: ${JSON.stringify(decoded, null, 2)}`);
+        } catch (decodeErr) {
+          this.logger.debug(`Impossible de décoder le token: ${decodeErr.message}`);
+        }
+      }
+      
       const result = await super.canActivate(context);
       
       return result as boolean;
@@ -90,6 +104,15 @@ export class JwtAuthGuard extends AuthGuard("jwt") {
         `Erreur lors de la validation JWT: ${error.message}`,
         error.stack
       );
+      
+      // Ajouter plus d'informations pour le débogage
+      if (error.message === "Compte utilisateur inactif") {
+        this.logger.error(`Détails erreur isActive:`, {
+          token: this.maskToken(request.headers.authorization?.split(" ")[1]),
+          user: error.user || 'non disponible'
+        });
+      }
+      
       throw error;
     }
   }

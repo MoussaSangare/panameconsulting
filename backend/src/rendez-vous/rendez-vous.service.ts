@@ -6,7 +6,7 @@ import {
   ForbiddenException,
 } from "@nestjs/common";
 import { InjectModel } from "@nestjs/mongoose";
-import { Model } from "mongoose";
+import { Model, Types } from "mongoose";
 import { Cron } from "@nestjs/schedule";
 import { ProcedureService } from "../procedure/procedure.service";
 import { NotificationService } from "../notification/notification.service";
@@ -15,6 +15,7 @@ import { CreateRendezvousDto } from "./dto/create-rendezvous.dto";
 import { UpdateRendezvousDto } from "./dto/update-rendezvous.dto";
 import { UserRole } from "../schemas/user.schema";
 import { CreateProcedureDto } from "../procedure/dto/create-procedure.dto";
+import { User } from "../schemas/user.schema";
 const Holidays = require('date-holidays');
 
 // Constantes pour la cohérence - avec des types spécifiques
@@ -47,6 +48,7 @@ export class RendezvousService {
 
   constructor(
     @InjectModel(Rendezvous.name) private rendezvousModel: Model<Rendezvous>,
+    @InjectModel(User.name) private userModel: Model<User>,
     private procedureService: ProcedureService,
     private notificationService: NotificationService,
   ) {
@@ -55,11 +57,10 @@ export class RendezvousService {
 
   private initializeHolidays(): void {
     try {
-      this.holidays = new Holidays('ML'); // Devrait fonctionner avec esModuleInterop
+      this.holidays = new Holidays('ML');
       this.logger.log('Initialisation de la bibliothèque date-holidays pour le Mali');
     } catch (error) {
       this.logger.error(`Erreur d'initialisation de date-holidays: ${error.message}`);
-      // Fallback sur des jours fériés statiques en cas d'erreur
       this.holidays = null;
     }
   }
@@ -89,10 +90,10 @@ export class RendezvousService {
       }
 
       const fixedHolidays = [
-        `${year}-01-01`, // Nouvel An
-        `${year}-05-01`, // Fête du Travail
-        `${year}-09-22`, // Indépendance du Mali
-        `${year}-12-25`, // Noël
+        `${year}-01-01`,
+        `${year}-05-01`,
+        `${year}-09-22`,
+        `${year}-12-25`,
       ];
 
       const allHolidays = [...new Set([...holidayDates, ...fixedHolidays])]
@@ -136,35 +137,55 @@ export class RendezvousService {
   // ==================== CORE METHODS ====================
 
   async create(createDto: CreateRendezvousDto): Promise<Rendezvous> {
-    const maskedEmail = this.maskEmail(createDto.email);
-    this.logger.log(`Création rendez-vous pour l'utilisateur: ${maskedEmail}`);
+    this.logger.log(`Création rendez-vous pour l'utilisateur ID: ${createDto.userId}`);
     this.logger.debug(`Données DTO reçues: ${JSON.stringify(createDto, null, 2)}`);
 
-    // Vérifier s'il y a déjà un rendez-vous en cours
-    const pendingCount = await this.rendezvousModel.countDocuments({
-      email: this.normalizeEmail(createDto.email),
-      status: { $in: [RENDEZVOUS_STATUS.PENDING, RENDEZVOUS_STATUS.CONFIRMED] },
-    });
-
-    this.logger.log(`Nombre de rendez-vous en cours pour ${maskedEmail}: ${pendingCount}`);
-
-    if (pendingCount >= 1) {
-      this.logger.warn(`Tentative de création d'un deuxième rendez-vous pour: ${maskedEmail}`);
-      throw new BadRequestException("Vous avez déjà un rendez-vous en cours (en attente ou confirmé)");
+    // Valider que l'userId est un ObjectId valide
+    if (!Types.ObjectId.isValid(createDto.userId)) {
+      throw new BadRequestException("ID utilisateur invalide");
     }
 
-    // Traitement des champs "Autre" et validation (cohérent avec le schema)
+    // Vérifier que l'utilisateur existe
+    const user = await this.userModel.findById(createDto.userId).exec();
+    if (!user) {
+      this.logger.warn(`Utilisateur non trouvé pour l'ID: ${createDto.userId}`);
+      throw new BadRequestException("Utilisateur non trouvé");
+    }
+
+    // Vérifier que l'email fourni correspond à l'utilisateur
+    const normalizedDtoEmail = createDto.email.toLowerCase().trim();
+    const normalizedUserEmail = user.email.toLowerCase().trim();
+    
+    if (normalizedDtoEmail !== normalizedUserEmail) {
+      this.logger.warn(`Email mismatch: DTO=${normalizedDtoEmail}, User=${normalizedUserEmail}`);
+      throw new BadRequestException("L'email ne correspond pas à l'utilisateur");
+    }
+
+    // Vérifier s'il y a déjà un rendez-vous confirmé
+    const confirmedCount = await this.rendezvousModel.countDocuments({
+      userId: createDto.userId,
+      status: RENDEZVOUS_STATUS.CONFIRMED,
+    });
+
+    this.logger.log(`Nombre de rendez-vous confirmés pour l'utilisateur ${createDto.userId}: ${confirmedCount}`);
+
+    if (confirmedCount >= 1) {
+      this.logger.warn(`Tentative de création d'un deuxième rendez-vous pour l'utilisateur: ${createDto.userId}`);
+      throw new BadRequestException("Vous avez déjà un rendez-vous confirmé");
+    }
+
+    // Traitement des champs "Autre" et validation
     const processedData = this.processAndValidateRendezvousData(createDto);
     this.logger.debug(`Données traitées: ${JSON.stringify(processedData, null, 2)}`);
 
     // Validation spécifique pour les champs "Autre"
     if (processedData.destination === 'Autre' && (!processedData.destinationAutre || processedData.destinationAutre.trim() === '')) {
-      this.logger.warn(`Destination "Autre" sans précision pour ${maskedEmail}`);
+      this.logger.warn(`Destination "Autre" sans précision pour ${createDto.userId}`);
       throw new BadRequestException('La destination "Autre" nécessite une précision');
     }
     
     if (processedData.filiere === 'Autre' && (!processedData.filiereAutre || processedData.filiereAutre.trim() === '')) {
-      this.logger.warn(`Filière "Autre" sans précision pour ${maskedEmail}`);
+      this.logger.warn(`Filière "Autre" sans précision pour ${createDto.userId}`);
       throw new BadRequestException('La filière "Autre" nécessite une précision');
     }
 
@@ -175,7 +196,7 @@ export class RendezvousService {
     );
     
     if (!isAvailable) {
-      this.logger.warn(`Créneau non disponible: ${processedData.date} ${processedData.time} pour ${maskedEmail}`);
+      this.logger.warn(`Créneau non disponible: ${processedData.date} ${processedData.time} pour ${createDto.userId}`);
       throw new BadRequestException("Ce créneau horaire n'est pas disponible");
     }
 
@@ -186,7 +207,7 @@ export class RendezvousService {
     });
 
     if (dayCount >= MAX_SLOTS_PER_DAY) {
-      this.logger.warn(`Date complète: ${processedData.date} pour ${maskedEmail}`);
+      this.logger.warn(`Date complète: ${processedData.date} pour ${createDto.userId}`);
       throw new BadRequestException(
         "Tous les créneaux sont complets pour cette date",
       );
@@ -194,26 +215,28 @@ export class RendezvousService {
 
     // Préparer les données pour l'enregistrement
     const rendezvousData: any = {
+      userId: new Types.ObjectId(createDto.userId),
       firstName: processedData.firstName.trim(),
       lastName: processedData.lastName.trim(),
-      email: this.normalizeEmail(processedData.email),
+      email: processedData.email.toLowerCase().trim(),
       telephone: processedData.telephone.trim(),
       niveauEtude: processedData.niveauEtude,
       date: processedData.date,
       time: processedData.time,
-      status: RENDEZVOUS_STATUS.PENDING,
+      // Par défaut CONFIRMED
+      status: RENDEZVOUS_STATUS.CONFIRMED,
     };
 
     // Gestion des champs "Autre" pour la base de données
     if (processedData.destination === 'Autre' && processedData.destinationAutre) {
-      rendezvousData.destination = 'Autre'; // Garder "Autre" comme valeur
+      rendezvousData.destination = 'Autre';
       rendezvousData.destinationAutre = processedData.destinationAutre.trim();
     } else {
       rendezvousData.destination = processedData.destination;
     }
 
     if (processedData.filiere === 'Autre' && processedData.filiereAutre) {
-      rendezvousData.filiere = 'Autre'; // Garder "Autre" comme valeur
+      rendezvousData.filiere = 'Autre';
       rendezvousData.filiereAutre = processedData.filiereAutre.trim();
     } else {
       rendezvousData.filiere = processedData.filiere;
@@ -225,7 +248,7 @@ export class RendezvousService {
     const created = new this.rendezvousModel(rendezvousData);
     const saved = await created.save();
     
-    this.logger.log(`Rendez-vous créé avec ID: ${saved._id} pour ${maskedEmail}`);
+    this.logger.log(`Rendez-vous créé avec ID: ${saved._id} pour l'utilisateur ${createDto.userId} (Statut: Confirmé)`);
 
     // Notification
     await this.sendNotification(saved, "confirmation");
@@ -261,7 +284,6 @@ export class RendezvousService {
       ];
     }
 
-    // LOG pour déboguer
     this.logger.debug(`Filtres admin findAll: ${JSON.stringify(filters)}`);
     this.logger.debug(`Page: ${page}, Limit: ${limit}, Skip: ${skip}`);
 
@@ -271,12 +293,12 @@ export class RendezvousService {
         .skip(skip)
         .limit(limit)
         .sort({ date: 1, time: 1 })
+        .populate('userId', 'firstName lastName email telephone')
         .exec(),
       this.rendezvousModel.countDocuments(filters),
     ]);
 
     this.logger.debug(`Nombre de rendez-vous trouvés par admin: ${total}`);
-    this.logger.debug(`Premier rendez-vous trouvé: ${data.length > 0 ? data[0]._id : 'aucun'}`);
     
     return {
       data,
@@ -287,134 +309,94 @@ export class RendezvousService {
     };
   }
 
-  async findByUser(
-      email: string,
-      page: number = 1,
-      limit: number = 10,
-      status?: string,
-    ): Promise<{ 
-      data: Rendezvous[]; 
-      total: number;
-      page: number;
-      limit: number;
-      totalPages: number;
-    }> {
-      const maskedEmail = this.maskEmail(email);
-      this.logger.log(`Recherche des rendez-vous pour l'utilisateur: ${maskedEmail} - Page: ${page}, Limit: ${limit}, Statut: ${status || 'tous'}`);
-
-      // ✅ CORRECTION : Décode d'abord l'email (car il vient encodé dans l'URL)
-      const decodedEmail = decodeURIComponent(email);
-      
-      // ✅ Ensuite normalise l'email pour la recherche
-      const normalizedEmail = this.normalizeEmail(decodedEmail);
-      
-      // VALIDATIONS STRICTES (cohérentes avec le controller)
-      if (!normalizedEmail || normalizedEmail.trim() === '') {
-        this.logger.warn(`Email vide ou invalide fourni: ${email}`);
-        throw new BadRequestException("L'email est requis pour cette requête");
-      }
-
-      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-      if (!emailRegex.test(normalizedEmail)) {
-        this.logger.warn(`Format email invalide: ${maskedEmail}`);
-        throw new BadRequestException("Format d'email invalide");
-      }
-
-      if (page < 1) {
-        throw new BadRequestException('Le numéro de page doit être supérieur à 0');
-      }
-
-      if (limit < 1 || limit > 100) {
-        throw new BadRequestException('La limite doit être entre 1 et 100');
-      }
-
-      if (status && !Object.values(RENDEZVOUS_STATUS).includes(status as RendezvousStatus)) {
-        throw new BadRequestException(`Statut invalide. Valeurs autorisées: ${Object.values(RENDEZVOUS_STATUS).join(', ')}`);
-      }
-
-      // Calcul du skip pour la pagination
-      const skip = (page - 1) * limit;
-
-      // Construction des filtres (identique au frontend)
-      const filters: any = { 
-        email: normalizedEmail 
-      };
-      
-      if (status) {
-        filters.status = status;
-      }
-
-      this.logger.debug(`Filtres appliqués: ${JSON.stringify(filters)}`);
-      this.logger.debug(`Pagination: skip=${skip}, limit=${limit}`);
-
-      try {
-        // Exécution parallèle pour performance
-        const [data, total] = await Promise.all([
-          this.rendezvousModel
-            .find(filters)
-            .skip(skip)
-            .limit(limit)
-            .sort({ 
-              date: -1,   // Les plus récents d'abord
-              time: 1     // Puis par heure croissante
-            })
-            .lean()       // Retourne des objets JavaScript simples
-            .exec(),
-          this.rendezvousModel.countDocuments(filters).exec(),
-        ]);
-
-        // Calcul du nombre total de pages
-        const totalPages = Math.ceil(total / limit);
-
-        this.logger.log(`Rendez-vous trouvés pour ${maskedEmail}: ${data.length} sur ${total} (page ${page}/${totalPages})`);
-        
-        // LOG détaillé pour débogage
-        if (data.length > 0) {
-          this.logger.debug(`Premier rendez-vous: ID=${data[0]._id}, Date=${data[0].date}, Statut=${data[0].status}`);
-        } else {
-          this.logger.debug(`Aucun rendez-vous trouvé pour ${maskedEmail} avec les filtres appliqués`);
-        }
-
-        // Retourne la structure EXACTEMENT comme attendue par le frontend
-        return {
-          data: data as Rendezvous[], // Cast pour TypeScript
-          total,
-          page,
-          limit,
-          totalPages,
-        };
-
-      } catch (error: any) {
-        this.logger.error(`Erreur lors de la recherche des rendez-vous pour ${maskedEmail}: ${error.message}`);
-        this.logger.error(`Stack trace: ${error.stack}`);
-        
-        // Gestion spécifique des erreurs de base de données
-        if (error.name === 'MongoError' || error.name === 'MongoServerError') {
-          this.logger.error(`Erreur MongoDB: ${error.code} - ${error.message}`);
-          throw new BadRequestException('Erreur de base de données lors de la recherche');
-        }
-        
-        // Pour les autres erreurs
-        if (error instanceof BadRequestException) {
-          throw error; // Propagation des erreurs de validation
-        }
-        
-        throw new BadRequestException('Erreur lors de la récupération des rendez-vous');
-      }
+  async findByUserId(
+    userId: string,
+    page: number = 1,
+    limit: number = 10,
+    status?: string,
+  ): Promise<{ 
+    data: Rendezvous[]; 
+    total: number;
+    page: number;
+    limit: number;
+    totalPages: number;
+  }> {
+    
+    this.logger.log(`SERVICE - Recherche rendez-vous pour userId: "${userId}"`);
+    this.logger.log(`SERVICE - Paramètres: page=${page}, limit=${limit}, status=${status || 'tous'}`);
+    
+    // Valider que l'userId est un ObjectId valide
+    if (!Types.ObjectId.isValid(userId)) {
+      throw new BadRequestException('ID utilisateur invalide');
     }
 
-// ==================== MÉTHODES UTILITAIRES PRIVÉES ====================
-
-  async findOne(id: string): Promise<Rendezvous | null> {
-    this.logger.log(`Recherche du rendez-vous avec ID: ${id}`);
-    const rdv = await this.rendezvousModel.findById(id).exec();
-    if (rdv) {
-      const maskedEmail = this.maskEmail(rdv.email);
-      this.logger.log(`Rendez-vous trouvé: ${id} pour ${maskedEmail}`);
-      this.logger.debug(`Email du rendez-vous: ${rdv.email}`);
+    const objectIdUserId = new Types.ObjectId(userId);
+    
+    const filters: any = { 
+      userId: objectIdUserId 
+    };
+    
+    // Filtrer par statut SEULEMENT si spécifié
+    if (status) {
+      filters.status = status;
     } else {
-      this.logger.warn(`Rendez-vous non trouvé: ${id}`);
+      this.logger.log(`SERVICE - Pas de filtre de statut, retour de TOUS les rendez-vous`);
     }
+
+    this.logger.log(`SERVICE - Filtres MongoDB: ${JSON.stringify(filters)}`);
+
+    const [data, total] = await Promise.all([
+      this.rendezvousModel
+        .find(filters)
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .sort({ date: -1, time: 1 })
+        .lean()
+        .exec(),
+      this.rendezvousModel.countDocuments(filters).exec(),
+    ]);
+
+    this.logger.log(`SERVICE - Résultats: ${data.length} rendez-vous trouvés sur ${total} total`);
+    
+    if (data.length > 0) {
+      this.logger.log(`SERVICE - Statuts des rendez-vous trouvés:`, 
+        data.map(rdv => ({ id: rdv._id, status: rdv.status, date: rdv.date })));
+    }
+
+    return {
+      data: data as Rendezvous[],
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+    };
+  }
+
+  async findOne(id: string, userId?: string): Promise<Rendezvous | null> {
+    this.logger.log(`Recherche du rendez-vous avec ID: ${id}`);
+    
+    if (!Types.ObjectId.isValid(id)) {
+      throw new BadRequestException('ID rendez-vous invalide');
+    }
+
+    const rdv = await this.rendezvousModel.findById(id).exec();
+    
+    if (!rdv) {
+      this.logger.warn(`Rendez-vous non trouvé: ${id}`);
+      return null;
+    }
+    
+    // Vérifier si l'utilisateur est autorisé à voir ce rendez-vous
+    if (userId) {
+      const rdvUserId = rdv.userId?.toString();
+      
+      if (rdvUserId !== userId) {
+        this.logger.warn(`Accès non autorisé au rendez-vous: ${id}`);
+        return null;
+      }
+    }
+    
+    this.logger.log(`Rendez-vous trouvé: ${id}, statut: ${rdv.status}`);
     return rdv;
   }
 
@@ -423,8 +405,7 @@ export class RendezvousService {
     updateDto: UpdateRendezvousDto,
     user: any,
   ): Promise<Rendezvous> {
-    const maskedEmail = this.maskEmail(user.email);
-    this.logger.log(`Tentative de mise à jour du rendez-vous: ${id} par ${maskedEmail}`);
+    this.logger.log(`Tentative de mise à jour du rendez-vous: ${id} par ${user.email}`);
 
     const rdv = await this.rendezvousModel.findById(id);
     if (!rdv) {
@@ -432,15 +413,44 @@ export class RendezvousService {
       throw new NotFoundException("Rendez-vous non trouvé");
     }
 
-    // Vérifier les permissions avec email normalisé
-    if (user.role !== UserRole.ADMIN && 
-        this.normalizeEmail(rdv.email) !== this.normalizeEmail(user.email)) {
-      this.logger.warn(`Tentative d'accès non autorisé au rendez-vous: ${id} par ${maskedEmail}`);
-      this.logger.debug(`Email rdv: ${rdv.email}, Email user: ${user.email}`);
-      this.logger.debug(`Email rdv normalisé: ${this.normalizeEmail(rdv.email)}, Email user normalisé: ${this.normalizeEmail(user.email)}`);
-      throw new ForbiddenException(
-        "Vous ne pouvez modifier que vos propres rendez-vous",
-      );
+    // Vérifier les permissions avec userId - utiliser id directement
+    if (user.role !== UserRole.ADMIN) {
+      const rdvUserId = rdv.userId?.toString();
+      
+      // Utiliser user.id directement
+      if (rdvUserId !== user.id) {
+        this.logger.warn(`Tentative d'accès non autorisé au rendez-vous: ${id}`);
+        throw new ForbiddenException(
+          "Vous ne pouvez modifier que vos propres rendez-vous",
+        );
+      }
+    }
+
+    // Si admin modifie le userId, vérifier que le nouvel utilisateur existe
+    if (updateDto.userId && user.role === UserRole.ADMIN) {
+      if (!Types.ObjectId.isValid(updateDto.userId)) {
+        throw new BadRequestException("ID utilisateur invalide");
+      }
+      const newUser = await this.userModel.findById(updateDto.userId).exec();
+      if (!newUser) {
+        throw new BadRequestException("Nouvel utilisateur non trouvé");
+      }
+      // Mettre à jour l'email pour correspondre au nouvel utilisateur
+      updateDto.email = newUser.email;
+    }
+
+    // Si utilisateur normal, forcer le userId à rester le sien
+    if (user.role !== UserRole.ADMIN && updateDto.userId) {
+      throw new ForbiddenException("Vous ne pouvez pas changer l'utilisateur du rendez-vous");
+    }
+
+    // Si l'email est modifié, vérifier qu'il correspond à l'utilisateur
+    if (updateDto.email) {
+      const userIdToCheck = updateDto.userId || rdv.userId.toString();
+      const userToCheck = await this.userModel.findById(userIdToCheck).exec();
+      if (userToCheck && updateDto.email.toLowerCase().trim() !== userToCheck.email.toLowerCase().trim()) {
+        throw new BadRequestException("L'email doit correspondre à l'utilisateur");
+      }
     }
 
     // Validation des données si nécessaire
@@ -453,12 +463,47 @@ export class RendezvousService {
       if (updateDto.date || updateDto.time) {
         const isAvailable = await this.isSlotAvailable(date, time, id);
         if (!isAvailable) {
-          const maskedEmail = this.maskEmail(rdv.email);
-          this.logger.warn(`Créneau non disponible pour mise à jour: ${date} ${time} pour ${maskedEmail}`);
+          this.logger.warn(`Créneau non disponible pour mise à jour: ${date} ${time}`);
           throw new BadRequestException(
             "Ce créneau horaire n'est pas disponible",
           );
         }
+      }
+    }
+
+    // Si admin veut changer le statut
+    if (updateDto.status && user.role === UserRole.ADMIN) {
+      // Admin peut mettre en attente, confirmer, annuler ou terminer
+      if (!Object.values(RENDEZVOUS_STATUS).includes(updateDto.status as RendezvousStatus)) {
+        throw new BadRequestException("Statut invalide");
+      }
+      
+      // Pour "Terminé", vérifier avisAdmin obligatoire
+      if (updateDto.status === RENDEZVOUS_STATUS.COMPLETED && !updateDto.avisAdmin) {
+        throw new BadRequestException("L'avis admin est obligatoire pour terminer un rendez-vous");
+      }
+      
+      // Pour "Terminé", avisAdmin doit être Favorable ou Défavorable
+      if (updateDto.status === RENDEZVOUS_STATUS.COMPLETED && updateDto.avisAdmin) {
+        if (!Object.values(ADMIN_OPINION).includes(updateDto.avisAdmin as AdminOpinion)) {
+          throw new BadRequestException("Avis admin invalide. Doit être 'Favorable' ou 'Défavorable'");
+        }
+        
+        // Si Terminé + Favorable, créer une procédure automatiquement
+        if (updateDto.avisAdmin === ADMIN_OPINION.FAVORABLE) {
+          setTimeout(async () => {
+            await this.createProcedureIfEligible(rdv);
+          }, 0);
+        }
+      }
+    } else if (updateDto.status && user.role !== UserRole.ADMIN) {
+      // Utilisateur normal ne peut que annuler un rendez-vous confirmé
+      if (updateDto.status !== RENDEZVOUS_STATUS.CANCELLED) {
+        throw new ForbiddenException("Seuls les administrateurs peuvent changer le statut");
+      }
+      
+      if (rdv.status !== RENDEZVOUS_STATUS.CONFIRMED) {
+        throw new BadRequestException("Vous ne pouvez annuler que les rendez-vous confirmés");
       }
     }
 
@@ -473,8 +518,13 @@ export class RendezvousService {
       throw new NotFoundException("Rendez-vous non trouvé après mise à jour");
     }
 
-    const updatedMaskedEmail = this.maskEmail(updated.email);
-    this.logger.log(`Rendez-vous mis à jour: ${id} pour ${updatedMaskedEmail}`);
+    this.logger.log(`Rendez-vous mis à jour: ${id}`);
+    
+    // Notification
+    if (updateDto.status) {
+      await this.sendNotification(updated, "status");
+    }
+    
     return updated;
   }
 
@@ -484,11 +534,10 @@ export class RendezvousService {
     avisAdmin?: string,
     user?: any,
   ): Promise<Rendezvous> {
-    const maskedEmail = user ? this.maskEmail(user.email) : 'utilisateur inconnu';
-    this.logger.log(`Tentative de changement de statut: ${status} pour le rendez-vous: ${id} par ${maskedEmail}`);
+    this.logger.log(`Tentative de changement de statut: ${status} pour le rendez-vous: ${id} par ${user?.email}`);
 
     if (!user || user.role !== UserRole.ADMIN) {
-      this.logger.warn(`Tentative non autorisée de changement de statut par ${maskedEmail}`);
+      this.logger.warn(`Tentative non autorisée de changement de statut par ${user?.email}`);
       throw new ForbiddenException("Accès réservé aux administrateurs");
     }
 
@@ -505,6 +554,13 @@ export class RendezvousService {
       );
     }
 
+    // Pour "Terminé", vérifier que avisAdmin est Favorable ou Défavorable
+    if (status === RENDEZVOUS_STATUS.COMPLETED && avisAdmin) {
+      if (!Object.values(ADMIN_OPINION).includes(avisAdmin as AdminOpinion)) {
+        throw new BadRequestException("Avis admin invalide. Doit être 'Favorable' ou 'Défavorable'");
+      }
+    }
+
     const update: any = { status };
     if (avisAdmin !== undefined) {
       update.avisAdmin = avisAdmin;
@@ -519,14 +575,13 @@ export class RendezvousService {
       throw new NotFoundException("Rendez-vous non trouvé");
     }
 
-    const updatedMaskedEmail = this.maskEmail(updated.email);
-    this.logger.log(`Statut mis à jour: ${status} pour le rendez-vous: ${id} (${updatedMaskedEmail})`);
+    this.logger.log(`Statut mis à jour: ${status} pour le rendez-vous: ${id}`);
 
     // Notification
     await this.sendNotification(updated, "status");
 
-    // Création automatique de procédure si conditions remplies
-    if (avisAdmin === ADMIN_OPINION.FAVORABLE && status === RENDEZVOUS_STATUS.COMPLETED) {
+    // Création automatique de procédure si Terminé + Favorable
+    if (status === RENDEZVOUS_STATUS.COMPLETED && avisAdmin === ADMIN_OPINION.FAVORABLE) {
       await this.createProcedureIfEligible(updated);
     }
 
@@ -534,8 +589,7 @@ export class RendezvousService {
   }
 
   async removeWithPolicy(id: string, user: any): Promise<Rendezvous> {
-    const maskedEmail = this.maskEmail(user.email);
-    this.logger.log(`Tentative d'annulation du rendez-vous: ${id} par ${maskedEmail}`);
+    this.logger.log(`Tentative d'annulation du rendez-vous: ${id} par ${user.email}`);
 
     const rdv = await this.rendezvousModel.findById(id);
     if (!rdv) {
@@ -545,16 +599,28 @@ export class RendezvousService {
 
     const isAdmin = user.role === UserRole.ADMIN;
 
-    // Vérifier les permissions avec email normalisé
-    if (!isAdmin && this.normalizeEmail(rdv.email) !== this.normalizeEmail(user.email)) {
-      this.logger.warn(`Tentative d'annulation non autorisée du rendez-vous: ${id} par ${maskedEmail}`);
-      this.logger.debug(`Email rdv: ${rdv.email}, Email user: ${user.email}`);
-      throw new ForbiddenException(
-        "Vous ne pouvez supprimer que vos propres rendez-vous",
+    // Vérifier les permissions avec userId - utiliser id directement
+    if (!isAdmin) {
+      const rdvUserId = rdv.userId?.toString();
+      
+      // Utiliser user.id directement
+      if (rdvUserId !== user.id) {
+        this.logger.warn(`Tentative d'annulation non autorisée du rendez-vous: ${id}`);
+        throw new ForbiddenException(
+          "Vous ne pouvez supprimer que vos propres rendez-vous",
+        );
+      }
+    }
+
+    // Utilisateur normal ne peut annuler que les rendez-vous CONFIRMÉS
+    if (!isAdmin && rdv.status !== RENDEZVOUS_STATUS.CONFIRMED) {
+      this.logger.warn(`Tentative d'annulation d'un rendez-vous non confirmé: ${id} (statut: ${rdv.status})`);
+      throw new BadRequestException(
+        "Vous ne pouvez annuler que les rendez-vous confirmés",
       );
     }
 
-    // Restriction horaire pour les utilisateurs (cohérent avec le schema)
+    // Restriction horaire pour les utilisateurs
     if (!isAdmin) {
       const rdvDateTime = new Date(`${rdv.date}T${rdv.time}:00`);
       const now = new Date();
@@ -562,7 +628,7 @@ export class RendezvousService {
       const twoHoursMs = CANCELLATION_THRESHOLD_HOURS * 60 * 60 * 1000;
 
       if (diffMs <= twoHoursMs) {
-        this.logger.warn(`Tentative d'annulation tardive du rendez-vous: ${id} par ${maskedEmail}`);
+        this.logger.warn(`Tentative d'annulation tardive du rendez-vous: ${id}`);
         throw new BadRequestException(
           "Vous ne pouvez plus annuler votre rendez-vous à moins de 2 heures de l'heure prévue",
         );
@@ -589,8 +655,7 @@ export class RendezvousService {
       throw new NotFoundException("Rendez-vous non trouvé après annulation");
     }
 
-    const updatedMaskedEmail = this.maskEmail(updated.email);
-    this.logger.log(`Rendez-vous annulé (soft delete): ${id} pour ${updatedMaskedEmail}`);
+    this.logger.log(`Rendez-vous annulé: ${id}`);
 
     // Notification d'annulation
     await this.sendNotification(updated, "status");
@@ -599,8 +664,7 @@ export class RendezvousService {
   }
 
   async confirmByUser(id: string, user: any): Promise<Rendezvous> {
-    const maskedEmail = this.maskEmail(user.email);
-    this.logger.log(`Tentative de confirmation du rendez-vous: ${id} par ${maskedEmail}`);
+    this.logger.log(`Tentative de confirmation du rendez-vous: ${id} par ${user.email}`);
 
     const rdv = await this.rendezvousModel.findById(id);
     if (!rdv) {
@@ -608,19 +672,18 @@ export class RendezvousService {
       throw new NotFoundException("Rendez-vous non trouvé");
     }
 
-    // Vérifier les permissions avec email normalisé
-    if (this.normalizeEmail(rdv.email) !== this.normalizeEmail(user.email)) {
-      this.logger.warn(`Tentative de confirmation non autorisée du rendez-vous: ${id} par ${maskedEmail}`);
-      this.logger.debug(`Email rdv: ${rdv.email}, Email user: ${user.email}`);
+    // Seul l'admin peut confirmer/changer le statut
+    if (user.role !== UserRole.ADMIN) {
+      this.logger.warn(`Tentative de confirmation par non-admin: ${id}`);
       throw new ForbiddenException(
-        "Vous ne pouvez confirmer que vos propres rendez-vous",
+        "La confirmation des rendez-vous est réservée aux administrateurs",
       );
     }
 
     if (rdv.status !== RENDEZVOUS_STATUS.PENDING) {
       this.logger.warn(`Tentative de confirmation d'un rendez-vous non en attente: ${id} (statut: ${rdv.status})`);
       throw new BadRequestException(
-        "Seuls les rendez-vous en attente peuvent être confirmés",
+        "Seuls les rendez-vous en attente peuvent être confirmés par l'admin",
       );
     }
 
@@ -645,8 +708,7 @@ export class RendezvousService {
       throw new NotFoundException("Rendez-vous non trouvé après confirmation");
     }
 
-    const updatedMaskedEmail = this.maskEmail(updated.email);
-    this.logger.log(`Rendez-vous confirmé: ${id} pour ${updatedMaskedEmail}`);
+    this.logger.log(`Rendez-vous confirmé par admin: ${id}`);
     await this.sendNotification(updated, "status");
 
     return updated;
@@ -716,14 +778,6 @@ export class RendezvousService {
 
   // ==================== PRIVATE METHODS ====================
 
-  private normalizeEmail(email: string): string {
-    if (!email || typeof email !== 'string') {
-      this.logger.warn(`Email invalide fourni pour normalisation: ${typeof email} - ${email}`);
-      return '';
-    }
-    return email.toLowerCase().trim();
-  }
-
   private processAndValidateRendezvousData(
     createDto: CreateRendezvousDto | UpdateRendezvousDto,
   ): any {
@@ -731,10 +785,10 @@ export class RendezvousService {
 
     // Normaliser l'email
     if (processed.email) {
-      processed.email = this.normalizeEmail(processed.email);
+      processed.email = processed.email.toLowerCase().trim();
     }
 
-    // Validation des champs requis (cohérent avec le schema)
+    // Validation des champs requis
     if (processed.destination) processed.destination = processed.destination.trim();
     if (processed.destinationAutre) processed.destinationAutre = processed.destinationAutre.trim();
     if (processed.filiere) processed.filiere = processed.filiere.trim();
@@ -861,8 +915,7 @@ export class RendezvousService {
           await this.notificationService.sendReminder(rendezvous);
           break;
       }
-      const maskedEmail = this.maskEmail(rendezvous.email);
-      this.logger.log(`Notification ${type} envoyée pour le rendez-vous: ${rendezvous._id} (${maskedEmail})`);
+      this.logger.log(`Notification ${type} envoyée pour le rendez-vous: ${rendezvous._id}`);
     } catch (error) {
       this.logger.error(`Erreur notification ${type} pour ${rendezvous._id}: ${error.message}`);
     }
@@ -871,8 +924,7 @@ export class RendezvousService {
   private async createProcedureIfEligible(
     rendezvous: Rendezvous,
   ): Promise<void> {
-    const maskedEmail = this.maskEmail(rendezvous.email);
-    this.logger.log(`Vérification éligibilité procédure pour le rendez-vous: ${rendezvous._id} (${maskedEmail})`);
+    this.logger.log(`Vérification éligibilité procédure pour le rendez-vous: ${rendezvous._id}`);
 
     const existingProcedure = await this.procedureService.findByEmail(
       rendezvous.email,
@@ -884,44 +936,14 @@ export class RendezvousService {
           rendezVousId: rendezvous._id.toString(),
         };
         await this.procedureService.createFromRendezvous(createDto);
-        this.logger.log(`Procédure créée pour le rendez-vous: ${rendezvous._id} (${maskedEmail})`);
+        this.logger.log(`Procédure créée pour le rendez-vous: ${rendezvous._id}`);
         await this.sendNotification(rendezvous, "status");
       } catch (error) {
         this.logger.error(`Erreur création procédure pour ${rendezvous._id}: ${error.message}`);
       }
     } else {
-      this.logger.log(`Procédure déjà existante pour ${maskedEmail}`);
+      this.logger.log(`Procédure déjà existante pour ${rendezvous.email}`);
     }
-  }
-
-  // ==================== SECURITY METHODS ====================
-
-  private maskEmail(email: string): string {
-    if (!email || typeof email !== 'string') {
-      this.logger.warn(`Email invalide fourni: ${typeof email} - ${email}`);
-      return 'email_non_disponible';
-    }
-    
-    const [localPart, domain] = email.split('@');
-    if (!localPart || !domain) {
-      this.logger.warn(`Format email invalide: ${email}`);
-      return 'format_email_invalide';
-    }
-    
-    // Masquage cohérent
-    const maskedLocal = localPart.length <= 2 
-      ? localPart.charAt(0) + '*'
-      : localPart.charAt(0) + '***' + localPart.charAt(localPart.length - 1);
-    
-    return `${maskedLocal}@${domain}`;
-  }
-
-  private maskSearchTerm(search: string): string {
-    if (!search) return 'aucune';
-    if (search.includes('@')) {
-      return this.maskEmail(search);
-    }
-    return `recherche_${search.length}_caracteres`;
   }
 
   // ==================== CRON JOBS ====================
@@ -959,6 +981,7 @@ export class RendezvousService {
 
   @Cron("0 * * * *")
   async autoCancelPendingRendezvous(): Promise<void> {
+    // Annuler les "En attente" après 5h
     const fiveHoursAgo = new Date();
     fiveHoursAgo.setHours(fiveHoursAgo.getHours() - AUTO_CANCEL_PENDING_HOURS);
 
@@ -971,7 +994,7 @@ export class RendezvousService {
     );
 
     if (result.modifiedCount > 0) {
-      this.logger.log(`${result.modifiedCount} rendez-vous automatiquement annulés (délai de 5h dépassé)`);
+      this.logger.log(`${result.modifiedCount} rendez-vous en attente automatiquement annulés (délai de 5h dépassé)`);
     }
   }
 }

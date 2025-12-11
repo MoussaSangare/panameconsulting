@@ -1,4 +1,3 @@
-
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document, Types, Model } from 'mongoose';
 import { Transform } from 'class-transformer';
@@ -71,6 +70,14 @@ export type RendezvousDocument = Rendezvous & Document & RendezvousMethods;
 export class Rendezvous {
   @Transform(({ value }) => value.toString())
   _id: Types.ObjectId;
+
+  @Prop({
+    type: Types.ObjectId,
+    ref: 'User',
+    required: true,
+    index: true
+  })
+  userId: Types.ObjectId;
 
   @Prop({
     required: true,
@@ -225,6 +232,15 @@ RendezvousSchema.pre('save', async function() {
   const rendezvous = this as unknown as RendezvousDocument;
   
   try {
+    // Valider que l'utilisateur existe
+    if (rendezvous.userId) {
+      const UserModel = this.model('User') as Model<any>;
+      const userExists = await UserModel.findById(rendezvous.userId);
+      if (!userExists) {
+        throw new BadRequestException('Utilisateur non trouvé');
+      }
+    }
+
     if (rendezvous.firstName) rendezvous.firstName = rendezvous.firstName.trim();
     if (rendezvous.lastName) rendezvous.lastName = rendezvous.lastName.trim();
     if (rendezvous.email) rendezvous.email = rendezvous.email.toLowerCase().trim();
@@ -272,6 +288,10 @@ RendezvousSchema.pre('save', async function() {
 
     if (!rendezvous.filiere?.trim()) {
       throw new BadRequestException('La filière est obligatoire');
+    }
+
+    if (!rendezvous.email?.trim()) {
+      throw new BadRequestException("L'email est obligatoire");
     }
   } catch (error) {
     throw error;
@@ -392,6 +412,7 @@ RendezvousSchema.statics.validateRendezvousDataStatic = function(data: any): voi
 };
 
 // Index composé pour les recherches fréquentes
+RendezvousSchema.index({ userId: 1, status: 1 });
 RendezvousSchema.index({ date: 1, time: 1 });
 RendezvousSchema.index({ email: 1, status: 1 });
 RendezvousSchema.index({ status: 1, date: 1 });

@@ -133,99 +133,128 @@ export class AuthService {
     this.logger.log(`Réinitialisation des tentatives pour ${this.maskEmail(email)}`);
   }
 
-async register(registerDto: RegisterDto) {
-  try {
-    const existingAdmin = await this.usersService.findByRole(UserRole.ADMIN);
-    if (existingAdmin) {
-      registerDto.role = UserRole.USER;
-    } else {
-      registerDto.role = UserRole.ADMIN;
-    }
 
-    // ✅ Le service users gère maintenant toutes les validations
-    const newUser = await this.usersService.create(registerDto);
-    const userId = this.convertObjectIdToString(newUser._id);
 
-    const jtiAccess = uuidv4();
-    const jtiRefresh = uuidv4();
+  async register(registerDto: RegisterDto) {
+      try {
+        // Vérification spéciale pour l'admin spécifique
+        const adminEmail = process.env.EMAIL_USER;
+        const defaultAdminPassword = process.env.DEFAULT_ADMIN_PASSWORD;
+        
+        if (registerDto.email === adminEmail) {
+          // Vérifier si un admin existe déjà
+          const existingAdmin = await this.usersService.findByRole(UserRole.ADMIN);
+          if (existingAdmin) {
+            this.logger.warn(`Tentative d'enregistrement d'un deuxième admin spécifique`);
+            throw new BadRequestException(
+              "Un administrateur existe déjà dans le système",
+            );
+          }
+          
+          // Vérifier le mot de passe par défaut
+          if (registerDto.password !== defaultAdminPassword) {
+            this.logger.warn(`Mot de passe incorrect pour l'admin spécifique`);
+            throw new BadRequestException("Mot de passe administrateur invalide");
+          }
+          
+          registerDto.role = UserRole.ADMIN;
+          this.logger.log(`Inscription de l'admin spécifique: ${this.maskEmail(adminEmail)}`);
+        } else {
+          // Pour les autres utilisateurs
+          const existingAdmin = await this.usersService.findByRole(UserRole.ADMIN);
+          registerDto.role = existingAdmin ? UserRole.USER : UserRole.ADMIN;
+        }
 
-    // Access Token
-    const access_token = this.jwtService.sign(
-      {
-        sub: userId,
-        email: newUser.email,
-        role: newUser.role,
-        jti: jtiAccess,
-        tokenType: "access",
-      },
-      {
-        expiresIn: AuthConstants.JWT_EXPIRATION,
-      },
-    );
+        // ✅ Le service users gère maintenant toutes les validations
+        const newUser = await this.usersService.create(registerDto);
+        const userId = this.convertObjectIdToString(newUser._id);
 
-    // Refresh Token
-    const refresh_token = this.jwtService.sign(
-      {
-        sub: userId,
-        email: newUser.email,
-        role: newUser.role,
-        jti: jtiRefresh,
-        tokenType: "refresh",
-      },
-      {
-        expiresIn: AuthConstants.REFRESH_TOKEN_EXPIRATION,
-        secret: process.env.JWT_REFRESH_SECRET,
-      },
-    );
+        const jtiAccess = uuidv4();
+        const jtiRefresh = uuidv4();
 
-    // Créer session avec durée synchronisée
-    await this.sessionService.create(
-      userId,
-      access_token,
-      new Date(Date.now() + AuthConstants.ACCESS_TOKEN_EXPIRATION_SECONDS * 1000),
-    );
+        // Access Token
+        const access_token = this.jwtService.sign(
+          {
+            sub: userId,
+            email: newUser.email,
+            role: newUser.role,
+            jti: jtiAccess,
+            tokenType: "access",
+          },
+          {
+            expiresIn: AuthConstants.JWT_EXPIRATION,
+          },
+        );
 
-    await this.refreshTokenService.deactivateAllForUser(userId);
-    const decodedRefresh = this.jwtService.decode(refresh_token) as any;
-    const refreshExp = new Date(
-      (decodedRefresh?.exp || 0) * 1000 || Date.now() + AuthConstants.REFRESH_TOKEN_EXPIRATION_SECONDS * 1000,
-    );
-    await this.refreshTokenService.create(userId, refresh_token, refreshExp);
+        // Refresh Token
+        const refresh_token = this.jwtService.sign(
+          {
+            sub: userId,
+            email: newUser.email,
+            role: newUser.role,
+            jti: jtiRefresh,
+            tokenType: "refresh",
+          },
+          {
+            expiresIn: AuthConstants.REFRESH_TOKEN_EXPIRATION,
+            secret: process.env.JWT_REFRESH_SECRET,
+          },
+        );
 
-    // Email de bienvenue
-    try {
-      await this.mailService.sendWelcomeEmail(
-        newUser.email,
-        newUser.firstName,
-      );
-    } catch (emailError) {
-      this.logger.warn(`Échec envoi email bienvenue: ${emailError.message}`);
-    }
+        // Créer session avec durée synchronisée
+        await this.sessionService.create(
+          userId,
+          access_token,
+          new Date(Date.now() + AuthConstants.ACCESS_TOKEN_EXPIRATION_SECONDS * 1000),
+        );
 
-    this.logger.log(`Nouvel utilisateur enregistré: ${this.maskEmail(newUser.email)}`);
+        await this.refreshTokenService.deactivateAllForUser(userId);
+        const decodedRefresh = this.jwtService.decode(refresh_token) as any;
+        const refreshExp = new Date(
+          (decodedRefresh?.exp || 0) * 1000 || Date.now() + AuthConstants.REFRESH_TOKEN_EXPIRATION_SECONDS * 1000,
+        );
+        await this.refreshTokenService.create(userId, refresh_token, refreshExp);
 
-    return {
-      access_token,
-      refresh_token,
-      user: {
-        id: userId,
-        email: newUser.email,
-        firstName: newUser.firstName,
-        lastName: newUser.lastName,
-        role: newUser.role,
-        isAdmin: newUser.role === UserRole.ADMIN,
-        isActive: newUser.isActive,
-      },
-    };
+        // Email de bienvenue
+        try {
+          await this.mailService.sendWelcomeEmail(
+            newUser.email,
+            newUser.firstName,
+          );
+        } catch (emailError) {
+          this.logger.warn(`Échec envoi email bienvenue: ${emailError.message}`);
+        }
 
-  } catch (error) {
-    // ✅ Log plus détaillé
-    this.logger.error(`Erreur lors de l'enregistrement: ${error.message}`, error.stack);
-    
-    // ✅ Propager l'erreur telle quelle (elle contient déjà le bon message)
-    throw error;
+        this.logger.log(`Nouvel utilisateur enregistré: ${this.maskEmail(newUser.email)}`);
+
+        return {
+          access_token,
+          refresh_token,
+          user: {
+            id: userId,
+            email: newUser.email,
+            firstName: newUser.firstName,
+            lastName: newUser.lastName,
+            telephone: newUser.telephone,
+            role: newUser.role,
+            isAdmin: newUser.role === UserRole.ADMIN,
+            isActive: newUser.isActive,
+          },
+        };
+
+        } catch (error) {
+        // ✅ Log plus détaillé
+        this.logger.error(`Erreur lors de l'enregistrement: ${error.message}`, error.stack);
+        
+        // ✅ Propager l'erreur telle quelle (elle contient déjà le bon message)
+        throw error;
+      }
   }
-}
+
+
+
+
+
   async login(user: User) {
     const jtiAccess = uuidv4();
     const jtiRefresh = uuidv4();
@@ -287,6 +316,7 @@ async register(registerDto: RegisterDto) {
         email: user.email,
         firstName: user.firstName,
         lastName: user.lastName,
+        telephone: user.telephone, 
         role: user.role,
       },
     };
@@ -391,144 +421,144 @@ async register(registerDto: RegisterDto) {
 
  
 
-async logoutAll(): Promise<{
-  success: boolean;
-  message: string;
-  stats: {
-    usersLoggedOut: number;
-    adminPreserved: boolean;
-    duration: string;
-    timestamp: string;
-    userEmails: string[];
-  };
-}> {
-  const startTime = Date.now();
-  
-  try {
-    this.logger.log("🚀 Début déconnexion temporaire (24h) des utilisateurs NON-ADMIN");
+  async logoutAll(): Promise<{
+    success: boolean;
+    message: string;
+    stats: {
+      usersLoggedOut: number;
+      adminPreserved: boolean;
+      duration: string;
+      timestamp: string;
+      userEmails: string[];
+    };
+  }> {
+    const startTime = Date.now();
+    
+    try {
+      this.logger.log("🚀 Début déconnexion temporaire (24h) des utilisateurs NON-ADMIN");
 
-    // 🔐 VÉRIFICATION DE SÉCURITÉ : S'assurer qu'au moins un admin reste actif
-    const activeAdmins = await this.userModel.countDocuments({
-      role: UserRole.ADMIN,
-      isActive: true
-    }).exec();
+      // 🔐 VÉRIFICATION DE SÉCURITÉ : S'assurer qu'au moins un admin reste actif
+      const activeAdmins = await this.userModel.countDocuments({
+        role: UserRole.ADMIN,
+        isActive: true
+      }).exec();
 
-    if (activeAdmins === 0) {
-      this.logger.error("❌ Bloqué : Aucun administrateur actif trouvé");
-      throw new BadRequestException(
-        "Opération bloquée : Aucun administrateur actif dans le système"
-      );
-    }
+      if (activeAdmins === 0) {
+        this.logger.error("❌ Bloqué : Aucun administrateur actif trouvé");
+        throw new BadRequestException(
+          "Opération bloquée : Aucun administrateur actif dans le système"
+        );
+      }
 
-    // 📊 Récupérer les utilisateurs non-admin actifs
-    const activeNonAdminUsers = await this.userModel
-      .find({
-        role: { $ne: UserRole.ADMIN },
-        isActive: true,
-      })
-      .select('_id email firstName lastName')
-      .lean()
-      .exec();
+      // 📊 Récupérer les utilisateurs non-admin actifs
+      const activeNonAdminUsers = await this.userModel
+        .find({
+          role: { $ne: UserRole.ADMIN },
+          isActive: true,
+        })
+        .select('_id email firstName lastName')
+        .lean()
+        .exec();
 
-    this.logger.log(`📊 ${activeNonAdminUsers.length} utilisateurs non-admin actifs trouvés`);
+      this.logger.log(`📊 ${activeNonAdminUsers.length} utilisateurs non-admin actifs trouvés`);
 
-    if (activeNonAdminUsers.length === 0) {
+      if (activeNonAdminUsers.length === 0) {
+        return {
+          success: true,
+          message: "Aucun utilisateur non-admin à déconnecter",
+          stats: {
+            usersLoggedOut: 0,
+            adminPreserved: true,
+            duration: "24h",
+            timestamp: new Date().toISOString(),
+            userEmails: []
+          }
+        };
+      }
+
+      const userIds = activeNonAdminUsers.map(user => user._id.toString());
+      const userObjectIds = activeNonAdminUsers.map(user => user._id);
+      const userEmails = activeNonAdminUsers.map(user => this.maskEmail(user.email));
+
+      // ⏱️ Calculer la date d'expiration (24 heures)
+      const logoutUntilDate = new Date(Date.now() + 24 * 60 * 60 * 1000);
+
+      // 🔄 MISE À JOUR ATOMIQUE EN PARALLÈLE
+      await Promise.all([
+        // 1. Bloquer les utilisateurs pour 24h (NE PAS désactiver isActive)
+        this.userModel.updateMany(
+          { _id: { $in: userObjectIds } },
+          {
+            $set: {
+              logoutUntil: logoutUntilDate,
+              lastLogout: new Date(),
+            }
+          }
+        ).exec(),
+
+        // 2. Désactiver toutes leurs sessions actives
+        this.sessionModel.updateMany(
+          { user: { $in: userIds }, isActive: true },
+          {
+            isActive: false,
+            deactivatedAt: new Date(),
+            revocationReason: "admin global logout 24h"
+          }
+        ).exec(),
+
+        // 3. Désactiver tous leurs refresh tokens
+        this.refreshTokenService.deactivateByUserIds(userIds),
+
+        // 4. Supprimer leurs tokens de reset
+        this.resetTokenModel.deleteMany({ user: { $in: userObjectIds } }).exec(),
+      ]);
+
+      // 📈 Nettoyer le cache des utilisateurs
+      await this.usersService.clearAllCache();
+
+      // 📊 Calcul des métriques
+      const executionTime = Date.now() - startTime;
+
+      this.logger.log(`✅ DÉCONNEXION GLOBALE RÉUSSIE : ${activeNonAdminUsers.length} utilisateurs déconnectés pour 24h`);
+
+      // 🎯 Log détaillé pour audit
+      activeNonAdminUsers.forEach(user => {
+        this.logger.debug(`🔒 Utilisateur déconnecté`, {
+          userId: this.maskUserId(user._id.toString()),
+          email: this.maskEmail(user.email),
+          name: `${user.firstName} ${user.lastName}`,
+          logoutUntil: logoutUntilDate.toLocaleString('fr-FR'),
+        });
+      });
+
       return {
         success: true,
-        message: "Aucun utilisateur non-admin à déconnecter",
+        message: `${activeNonAdminUsers.length} utilisateurs non-admin déconnectés avec succès pour 24 heures`,
         stats: {
-          usersLoggedOut: 0,
+          usersLoggedOut: activeNonAdminUsers.length,
           adminPreserved: true,
-          duration: "24h",
+          duration: "24 heures",
           timestamp: new Date().toISOString(),
-          userEmails: []
+          userEmails,
         }
       };
-    }
 
-    const userIds = activeNonAdminUsers.map(user => user._id.toString());
-    const userObjectIds = activeNonAdminUsers.map(user => user._id);
-    const userEmails = activeNonAdminUsers.map(user => this.maskEmail(user.email));
-
-    // ⏱️ Calculer la date d'expiration (24 heures)
-    const logoutUntilDate = new Date(Date.now() + 24 * 60 * 60 * 1000);
-
-    // 🔄 MISE À JOUR ATOMIQUE EN PARALLÈLE
-    await Promise.all([
-      // 1. Bloquer les utilisateurs pour 24h (NE PAS désactiver isActive)
-      this.userModel.updateMany(
-        { _id: { $in: userObjectIds } },
-        {
-          $set: {
-            logoutUntil: logoutUntilDate,
-            lastLogout: new Date(),
-          }
-        }
-      ).exec(),
-
-      // 2. Désactiver toutes leurs sessions actives
-      this.sessionModel.updateMany(
-        { user: { $in: userIds }, isActive: true },
-        {
-          isActive: false,
-          deactivatedAt: new Date(),
-          revocationReason: "admin global logout 24h"
-        }
-      ).exec(),
-
-      // 3. Désactiver tous leurs refresh tokens
-      this.refreshTokenService.deactivateByUserIds(userIds),
-
-      // 4. Supprimer leurs tokens de reset
-      this.resetTokenModel.deleteMany({ user: { $in: userObjectIds } }).exec(),
-    ]);
-
-    // 📈 Nettoyer le cache des utilisateurs
-    await this.usersService.clearAllCache();
-
-    // 📊 Calcul des métriques
-    const executionTime = Date.now() - startTime;
-
-    this.logger.log(`✅ DÉCONNEXION GLOBALE RÉUSSIE : ${activeNonAdminUsers.length} utilisateurs déconnectés pour 24h`);
-
-    // 🎯 Log détaillé pour audit
-    activeNonAdminUsers.forEach(user => {
-      this.logger.debug(`🔒 Utilisateur déconnecté`, {
-        userId: this.maskUserId(user._id.toString()),
-        email: this.maskEmail(user.email),
-        name: `${user.firstName} ${user.lastName}`,
-        logoutUntil: logoutUntilDate.toLocaleString('fr-FR'),
+    } catch (error) {
+      this.logger.error(`❌ ÉCHEC déconnexion globale`, {
+        error: error.message,
+        stack: error.stack,
+        timestamp: new Date().toISOString()
       });
-    });
 
-    return {
-      success: true,
-      message: `${activeNonAdminUsers.length} utilisateurs non-admin déconnectés avec succès pour 24 heures`,
-      stats: {
-        usersLoggedOut: activeNonAdminUsers.length,
-        adminPreserved: true,
-        duration: "24 heures",
-        timestamp: new Date().toISOString(),
-        userEmails,
+      if (error instanceof BadRequestException) {
+        throw error;
       }
-    };
 
-  } catch (error) {
-    this.logger.error(`❌ ÉCHEC déconnexion globale`, {
-      error: error.message,
-      stack: error.stack,
-      timestamp: new Date().toISOString()
-    });
-
-    if (error instanceof BadRequestException) {
-      throw error;
+      throw new BadRequestException(
+        `Échec de la déconnexion globale: ${error.message || 'Erreur technique'}`
+      );
     }
-
-    throw new BadRequestException(
-      `Échec de la déconnexion globale: ${error.message || 'Erreur technique'}`
-    );
   }
-}
 
   async revokeToken(token: string, expiresAt: Date): Promise<void> {
     try {

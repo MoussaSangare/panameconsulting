@@ -28,6 +28,8 @@ const productionOrigins = [
   "https://panameconsulting.netlify.app",
   "https://panbameconsulting.vercel.app",
   "https://vercel.live",
+  "http://localhost:5713",
+  "http://localhost:5173", // ← AJOUTÉ ICI
 ];
 
 // Fonction pour vérifier si une origine correspond à un pattern avec wildcard
@@ -249,6 +251,7 @@ async function bootstrap() {
     // 🌐 CONFIGURATION CORS POUR PRODUCTION EXCLUSIVE
     logger.log(`Configuration CORS pour environnement: PRODUCTION EXCLUSIVE`);
     logger.log(`Parsing middleware: ✅ JSON, URL-encoded, Cookies activés`);
+    logger.log(`Origines autorisées: ${productionOrigins.length} origines`);
 
     // ✅ CONFIGURATION CORS STRICTE
     app.enableCors({
@@ -264,6 +267,9 @@ async function bootstrap() {
         const isAllowed = isOriginAllowed(origin, productionOrigins);
 
         if (isAllowed) {
+          if (process.env.NODE_ENV !== 'production') {
+            logger.debug(`✅ Origine autorisée: ${origin}`);
+          }
           callback(null, true);
         } else {
           logger.warn(`❌ Origine non autorisée par CORS: ${origin}`);
@@ -381,7 +387,7 @@ async function bootstrap() {
     app.use(
       rateLimit({
         windowMs: 15 * 60 * 1000,
-        max: 100,
+        max: 600,
         message: {
           status: 429,
           message: "Trop de requêtes, veuillez réessayer plus tard.",
@@ -389,7 +395,7 @@ async function bootstrap() {
         standardHeaders: true,
         legacyHeaders: false,
         skipSuccessfulRequests: false,
-        keyGenerator: (req) => {
+        keyGenerator: (req: { ip: any; headers: { [x: string]: any; }; }) => {
           return req.ip || req.headers['x-forwarded-for'] || 'unknown';
         }
       }),
@@ -410,6 +416,14 @@ async function bootstrap() {
     logger.log(`📝 Parsing middleware: ✅ Activé`);
     logger.log(`🍪 Cookie parser: ✅ Activé`);
     logger.log(`========================================`);
+    
+    // ✅ LISTE DES ORIGINES AUTORISÉES (pour information)
+    if (process.env.NODE_ENV !== 'production') {
+      logger.log(`🌍 Origines CORS autorisées:`);
+      productionOrigins.forEach(origin => {
+        logger.log(`   • ${origin}`);
+      });
+    }
 
     // ✅ DÉMARRAGE DU SERVEUR
     await app.listen(port, host);
@@ -417,6 +431,7 @@ async function bootstrap() {
     logger.log(`✅ Serveur démarré sur http://${host}:${port}`);
     logger.log(`✅ Health check: http://${host}:${port}/health`);
     logger.log(`✅ Parsing middleware: JSON, URL-encoded, Cookies activés`);
+    logger.log(`✅ Origine localhost:5173 autorisée`);
     
     // ✅ INFORMATION DE MONITORING
     const memoryUsage = process.memoryUsage();

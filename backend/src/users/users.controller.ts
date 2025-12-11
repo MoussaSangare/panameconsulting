@@ -20,18 +20,7 @@ import { Roles } from "../shared/decorators/roles.decorator";
 import { JwtAuthGuard } from "../shared/guards/jwt-auth.guard";
 import { RolesGuard } from "../shared/guards/roles.guard";
 import { UsersService } from "./users.service";
-
-interface RequestWithUser extends Request {
-  user: {
-    sub: string; // ✅ Standardisé
-    email: string;
-    role: string;
-    telephone?: string;
-    userId?: string;
-  };
-}
-
-
+import { AuthenticatedRequest } from "../shared/interfaces/authenticated-user.interface";
 
 @Controller("users")
 export class UsersController {
@@ -40,14 +29,14 @@ export class UsersController {
   constructor(private readonly usersService: UsersService) {}
   
   // === ENDPOINTS ADMIN ===
-  @Post()
+ @Post()
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.ADMIN)
   async create(@Body() createUserDto: RegisterDto) {
     const requestId = this.generateRequestId();
     this.logger.log(`[${requestId}] Création d'utilisateur par admin - Email: ${this.maskEmail(createUserDto.email)}`);
 
-    // CORRECTION : Vérifier correctement l'existence d'un admin
+    // Empêcher la création d'autres admins via l'API
     if (createUserDto.role === UserRole.ADMIN) {
       const existingAdmin = await this.usersService.findByRole(UserRole.ADMIN);
       if (existingAdmin) {
@@ -56,6 +45,15 @@ export class UsersController {
           "Il ne peut y avoir qu'un seul administrateur",
         );
       }
+    }
+
+    // Empêcher la création d'un utilisateur avec l'email admin spécifique
+    const adminEmail = process.env.EMAIL_USER;
+    if (createUserDto.email === adminEmail) {
+      this.logger.warn(`[${requestId}] Tentative d'utilisation de l'email admin réservé`);
+      throw new BadRequestException(
+        "Cet email est réservé à l'administrateur principal",
+      );
     }
 
     try {
@@ -136,23 +134,23 @@ export class UsersController {
     }
   }
 
- @Get("maintenance-status")
-@UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(UserRole.ADMIN)
-async getMaintenanceStatus() {
-  const requestId = this.generateRequestId();
-  this.logger.log(`[${requestId}] Statut maintenance demandé`);
-  
-  // ✅ Récupérer le statut complet
-  const status = await this.usersService.getMaintenanceStatus();
-  
-  // ✅ Retourner un objet conforme
-  return {
-    isActive: status.isActive,
-    enabledAt: status.enabledAt,
-    message: status.message,
-  };
-}
+  @Get("maintenance-status")
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  async getMaintenanceStatus() {
+    const requestId = this.generateRequestId();
+    this.logger.log(`[${requestId}] Statut maintenance demandé`);
+    
+    // ✅ Récupérer le statut complet
+    const status = await this.usersService.getMaintenanceStatus();
+    
+    // ✅ Retourner un objet conforme
+    return {
+      isActive: status.isActive,
+      enabledAt: status.enabledAt,
+      message: status.message,
+    };
+  }
 
   @Post("maintenance-mode")
   @UseGuards(JwtAuthGuard, RolesGuard)
@@ -176,20 +174,20 @@ async getMaintenanceStatus() {
     const requestId = this.generateRequestId();
     this.logger.log(`[${requestId}] Vérification accès utilisateur - ID: ${userId}`);
     
-    const hasAccess = await this.usersService.checkUserAccess(userId);
-    this.logger.log(`[${requestId}] Accès utilisateur ${userId}: ${hasAccess}`);
-    return { hasAccess };
+    const accessCheck = await this.usersService.checkUserAccess(userId);
+    this.logger.log(`[${requestId}] Accès utilisateur ${userId}: ${accessCheck.canAccess}`);
+    return accessCheck;
   }
 
   // === ENDPOINTS PUBLIC (Pour l'utilisateur connecté) ===
   @Patch("profile/me")
   @UseGuards(JwtAuthGuard)
   async updateProfile(
-    @Request() req: RequestWithUser,
+    @Request() req: AuthenticatedRequest,
     @Body() updateUserDto: UpdateUserDto,
   ) {
     const requestId = this.generateRequestId();
-    const userId = req.user.userId;
+    const userId = req.user.id; // ← Utiliser id directement
     
     this.logger.log(`[${requestId}] Mise à jour profil - Utilisateur: ${this.maskUserId(userId)}`);
 
@@ -275,29 +273,29 @@ async getMaintenanceStatus() {
   }
 
   @Patch(":id/admin-reset-password")
-@UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(UserRole.ADMIN)
-async adminResetPassword(
-  @Param("id") userId: string,
-  @Body() body: { newPassword: string; confirmNewPassword: string },
-) {
-  const requestId = this.generateRequestId();
-  this.logger.log(`[${requestId}] Réinitialisation mot de passe admin - Utilisateur: ${userId}`);
-  
-  // Validation
-  if (body.newPassword !== body.confirmNewPassword) {
-    throw new BadRequestException("Les mots de passe ne correspondent pas");
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  async adminResetPassword(
+    @Param("id") userId: string,
+    @Body() body: { newPassword: string; confirmNewPassword: string },
+  ) {
+    const requestId = this.generateRequestId();
+    this.logger.log(`[${requestId}] Réinitialisation mot de passe admin - Utilisateur: ${userId}`);
+    
+    // Validation
+    if (body.newPassword !== body.confirmNewPassword) {
+      throw new BadRequestException("Les mots de passe ne correspondent pas");
+    }
+    
+    if (body.newPassword.length < 8) {
+      throw new BadRequestException("Le mot de passe doit contenir au moins 8 caractères");
+    }
+    
+    await this.usersService.resetPassword(userId, body.newPassword);
+    
+    this.logger.log(`[${requestId}] Mot de passe réinitialisé par admin - Utilisateur: ${userId}`);
+    return { message: "Mot de passe réinitialisé avec succès" };
   }
-  
-  if (body.newPassword.length < 8) {
-    throw new BadRequestException("Le mot de passe doit contenir au moins 8 caractères");
-  }
-  
-  await this.usersService.resetPassword(userId, body.newPassword);
-  
-  this.logger.log(`[${requestId}] Mot de passe réinitialisé par admin - Utilisateur: ${userId}`);
-  return { message: "Mot de passe réinitialisé avec succès" };
-}
 
   @Patch(":id")
   @UseGuards(JwtAuthGuard, RolesGuard)
@@ -330,9 +328,9 @@ async adminResetPassword(
 
   @Get("profile/me")
   @UseGuards(JwtAuthGuard)
-  async getMyProfile(@Request() req: RequestWithUser) {
+  async getMyProfile(@Request() req: AuthenticatedRequest) {
     const requestId = this.generateRequestId();
-    const userId = req.user.sub || req.user.userId;
+    const userId = req.user.id; // ← Utiliser id directement
     
     if (!userId) {
       this.logger.warn(`[${requestId}] ID utilisateur manquant dans la requête`);

@@ -10,6 +10,6 @@ import { User, UserSchema } from "../schemas/user.schema";
   ],
   controllers: [UsersController],
   providers: [UsersService],
-  exports: [UsersService], // Cette ligne doit être présente
+  exports: [UsersService,MongooseModule], // Cette ligne doit être présente
 })
 export class UsersModule {}

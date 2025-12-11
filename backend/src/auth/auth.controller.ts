@@ -62,7 +62,7 @@ export class AuthController {
     if (!req.user) {
       return res.status(401).json({
         message: "Email ou mot de passe incorrect",
-        code: "INVALID_CREDENTIALS",
+        code: "INVALID CREDENTIALS",
         timestamp: new Date().toISOString()
       });
     }
@@ -81,18 +81,19 @@ export class AuthController {
       maxAge: AuthConstants.ACCESS_TOKEN_EXPIRATION_SECONDS * 1000, // 15 minutes
     });
 
-    return res.json({
-      access_token: result.access_token,
-      user: {
-        id: result.user.id,
-        email: result.user.email,
-        firstName: result.user.firstName,
-        lastName: result.user.lastName,
-        role: result.user.role,
-        isAdmin: result.user.role === UserRole.ADMIN,
-      },
-      message: "Connexion réussie",
-    });
+   return res.json({
+    access_token: result.access_token,
+    user: {
+      id: result.user.id, // ← ID MongoDB de l'utilisateur
+      email: result.user.email,
+      firstName: result.user.firstName,
+      lastName: result.user.lastName,
+      telephone: result.user.telephone,
+      role: result.user.role,
+      isAdmin: result.user.role === UserRole.ADMIN,
+    },
+    message: "Connexion réussie",
+  });
   }
 
   @Post("refresh")
@@ -189,19 +190,20 @@ export class AuthController {
         maxAge: AuthConstants.ACCESS_TOKEN_EXPIRATION_SECONDS * 1000, // 15 minutes
       });
 
-      return res.status(201).json({
-        access_token: result.access_token,
-        user: {
-          id: result.user.id,
-          email: result.user.email,
-          firstName: result.user.firstName,
-          lastName: result.user.lastName,
-          role: result.user.role,
-          isAdmin: result.user.role === UserRole.ADMIN,
-          isActive: result.user.isActive,
-        },
-        message: "Inscription réussie",
-      });
+     return res.status(201).json({
+      access_token: result.access_token,
+      user: {
+        id: result.user.id, // ← ID MongoDB de l'utilisateur
+        email: result.user.email,
+        firstName: result.user.firstName,
+        lastName: result.user.lastName,
+        telephone: result.user.telephone,
+        role: result.user.role,
+        isAdmin: result.user.role === UserRole.ADMIN,
+        isActive: result.user.isActive,
+      },
+      message: "Inscription réussie",
+    });
 
     } catch (error: any) {
       if (error instanceof BadRequestException) {
@@ -218,7 +220,8 @@ export class AuthController {
   @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: "Déconnexion" })
   async logout(@Request() req: any, @Res() res: Response) {
-    const userId = req.user?.sub;
+    // Utiliser id directement
+    const userId = req.user?.id;
     const token = req.headers.authorization?.split(" ")[1] || 
                   req.cookies?.access_token || "";
 
@@ -265,7 +268,8 @@ export class AuthController {
   @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: "Récupérer le profil utilisateur" })
   async getProfile(@Request() req: any) {
-    const userId = req.user?.sub;
+    // Utiliser id directement
+    const userId = req.user?.id;
 
     if (!userId) {
       throw new BadRequestException("ID utilisateur manquant dans le token");
@@ -275,7 +279,7 @@ export class AuthController {
       const user = await this.authService.getProfile(userId);
 
       return {
-        id: user._id,
+        id: user._id, // ← ID MongoDB
         email: user.email,
         firstName: user.firstName,
         lastName: user.lastName,
@@ -301,7 +305,8 @@ export class AuthController {
       confirmNewPassword: string;
     },
   ) {
-    const userId = req.user?.sub;
+    // Utiliser id directement
+    const userId = req.user?.id;
 
     if (!body.currentPassword || body.currentPassword.trim() === '') {
       throw new BadRequestException("Le mot de passe actuel est requis");

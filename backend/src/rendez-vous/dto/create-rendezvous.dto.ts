@@ -7,6 +7,7 @@ import {
   MaxLength,
   ValidateIf,
   IsEnum,
+  IsMongoId,
 } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
@@ -25,6 +26,14 @@ const EDUCATION_LEVELS = [
 ] as const;
 
 export class CreateRendezvousDto {
+  @ApiProperty({ 
+    example: '507f1f77bcf86cd799439011',
+    description: 'ID MongoDB de l\'utilisateur' 
+  })
+  @IsNotEmpty({ message: "L'ID utilisateur est obligatoire" })
+  @IsMongoId({ message: "L'ID utilisateur doit être un ID MongoDB valide" })
+  userId: string;
+
   @ApiProperty({ example: 'Jean', description: 'Prénom du client' })
   @IsNotEmpty({ message: 'Le prénom est obligatoire' })
   @IsString({ message: 'Le prénom doit être une chaîne de caractères' })

@@ -1,6 +1,6 @@
 import { PartialType } from '@nestjs/mapped-types';
 import { CreateRendezvousDto } from './create-rendezvous.dto';
-import { IsOptional, IsEnum, ValidateIf, IsNotEmpty } from 'class-validator';
+import { IsOptional, IsEnum, ValidateIf, IsNotEmpty, IsMongoId } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
 // Constantes pour la cohérence
@@ -17,6 +17,15 @@ const ADMIN_OPINION = {
 } as const;
 
 export class UpdateRendezvousDto extends PartialType(CreateRendezvousDto) {
+  @ApiProperty({
+    required: false,
+    example: '507f1f77bcf86cd799439011',
+    description: 'ID MongoDB de l\'utilisateur'
+  })
+  @IsOptional()
+  @IsMongoId({ message: "L'ID utilisateur doit être un ID MongoDB valide" })
+  userId?: string;
+
   @ApiProperty({
     enum: Object.values(RENDEZVOUS_STATUS),
     example: 'Confirmé',

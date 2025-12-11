@@ -33,49 +33,50 @@ export class MailService implements OnModuleInit {
     await this.initializeTransporter();
   }
 
-  private async initializeTransporter(): Promise<void> {
-    const config = this.getEmailConfig();
-    
-    if (!this.isConfigValid(config)) {
-      this.logger.warn('Configuration email incomplète - service email désactivé');
-      this.isServiceAvailable = false;
-      return;
-    }
-
-    try {
-      this.transporter = nodemailer.createTransport({
-        host: config.host,
-        port: config.port,
-        secure: config.secure,
-        auth: {
-          user: config.user,
-          pass: config.pass,
-        },
-        tls: {
-          rejectUnauthorized: this.isProduction(),
-          ciphers: this.isProduction() ? 'TLSv1.2' : 'SSLv3'
-        },
-        connectionTimeout: 30000,
-        greetingTimeout: 15000,
-        socketTimeout: 30000,
-        debug: !this.isProduction(),
-        logger: !this.isProduction(),
-      });
-
-      await this.testConnection();
-      this.isServiceAvailable = true;
-      this.logger.log('Service email initialisé avec succès');
-      
-    } catch (error) {
-      this.logger.error(`Erreur initialisation service email: ${error.message}`, error.stack);
-      this.isServiceAvailable = false;
-    }
+ private async initializeTransporter(): Promise<void> {
+  const config = this.getEmailConfig();
+  
+  if (!this.isConfigValid(config)) {
+    this.logger.warn('Configuration email incomplète - service email désactivé');
+    this.isServiceAvailable = false;
+    return;
   }
+
+  try {
+    const secure = config.port === 465 || config.secure;
+    
+    this.transporter = nodemailer.createTransport({
+      host: config.host,
+      port: config.port,
+      secure: secure,
+      auth: {
+        user: config.user,
+        pass: config.pass,
+      },
+      tls: {
+        rejectUnauthorized: true,
+      },
+      connectionTimeout: 30000,
+      greetingTimeout: 15000,
+      socketTimeout: 60000,
+      debug: !this.isProduction(),
+      logger: !this.isProduction(),
+    });
+
+    await this.testConnection();
+    this.isServiceAvailable = true;
+    this.logger.log('Service email initialisé avec succès');
+    
+  } catch (error) {
+    this.logger.error(`Erreur initialisation service email: ${error.message}`, error.stack);
+    this.isServiceAvailable = false;
+  }
+}
 
   private getEmailConfig(): Partial<EmailConfig> {
     return {
       host: this.configService.get('EMAIL_HOST'),
-      port: parseInt(this.configService.get('EMAIL_PORT') || '587'),
+      port: parseInt(this.configService.get('EMAIL_PORT') || '465'),
       secure: this.configService.get('EMAIL_SECURE') === 'true',
       user: this.configService.get('EMAIL_USER'),
       pass: this.configService.get('EMAIL_PASS'),

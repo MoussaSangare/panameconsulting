@@ -38,6 +38,9 @@ export class RegisterDto {
   @ApiProperty({ example: "+33123456789", description: "Téléphone" })
   @IsString()
   @IsNotEmpty({ message: "Le téléphone est requis" })
+  @Matches(/^(\+\d+|\d+)$/, {
+    message: "Format de téléphone invalide. Utilisez +33... ou 0... sans espaces",
+  })
   telephone: string;
 
   @ApiProperty({

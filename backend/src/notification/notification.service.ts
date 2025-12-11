@@ -27,44 +27,43 @@ export class NotificationService implements OnModuleInit {
     await this.initializeTransporter();
   }
 
-  private async initializeTransporter(): Promise<void> {
-    const emailUser = this.configService.get("EMAIL_USER");
-    
-    if (!this.configService.get("EMAIL_HOST") || !emailUser || !this.configService.get("EMAIL_PASS")) {
-      this.logger.warn('Configuration email incomplète - notifications désactivées');
-      this.emailServiceAvailable = false;
-      return;
-    }
-
-    try {
-      this.fromEmail = `"${this.appName}" <${emailUser}>`;
-      
-      this.transporter = nodemailer.createTransport({
-        host: this.configService.get("EMAIL_HOST"),
-        port: parseInt(this.configService.get("EMAIL_PORT") || '465'),
-        secure: this.configService.get("EMAIL_SECURE") === "true",
-        auth: {
-          user: emailUser,
-          pass: this.configService.get("EMAIL_PASS"),
-        },
-        tls: {
-          rejectUnauthorized: this.configService.get('NODE_ENV') === 'production',
-          ciphers: 'SSLv3'
-        },
-        connectionTimeout: 30000,
-        greetingTimeout: 15000,
-        socketTimeout: 30000,
-      });
-
-      await this.testConnection();
-      this.emailServiceAvailable = true;
-      this.logger.log('Service notification email initialisé avec succès');
-      
-    } catch (error) {
-      this.logger.error(`Erreur initialisation service notification: ${error.message}`, error.stack);
-      this.emailServiceAvailable = false;
-    }
+ private async initializeTransporter(): Promise<void> {
+  const emailUser = this.configService.get("EMAIL_USER");
+  
+  if (!this.configService.get("EMAIL_HOST") || !emailUser || !this.configService.get("EMAIL_PASS")) {
+    this.logger.warn('Configuration email incomplète - notifications désactivées');
+    this.emailServiceAvailable = false;
+    return;
   }
+
+  try {
+    this.fromEmail = `"${this.appName}" <${emailUser}>`;
+    
+    const port = parseInt(this.configService.get("EMAIL_PORT") || '465');
+    const secure = port === 465 || this.configService.get("EMAIL_SECURE") === "true";
+    
+    this.transporter = nodemailer.createTransport({
+      host: this.configService.get("EMAIL_HOST"),
+      port: port,
+      secure: secure,
+      auth: {
+        user: emailUser,
+        pass: this.configService.get("EMAIL_PASS"),
+      },
+      connectionTimeout: 30000,
+      greetingTimeout: 15000,
+      socketTimeout: 60000, // Augmentez le timeout
+    });
+
+    await this.testConnection();
+    this.emailServiceAvailable = true;
+    this.logger.log('Service notification email initialisé avec succès');
+    
+  } catch (error) {
+    this.logger.error(`Erreur initialisation service notification: ${error.message}`, error.stack);
+    this.emailServiceAvailable = false;
+  }
+}
 
   private async testConnection(): Promise<void> {
     if (!this.transporter) {
