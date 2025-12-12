@@ -33,7 +33,7 @@ export class MailService implements OnModuleInit {
     await this.initializeTransporter();
   }
 
- private async initializeTransporter(): Promise<void> {
+private async initializeTransporter(): Promise<void> {
   const config = this.getEmailConfig();
   
   if (!this.isConfigValid(config)) {
@@ -43,18 +43,23 @@ export class MailService implements OnModuleInit {
   }
 
   try {
-    const secure = config.port === 465 || config.secure;
+    // Configuration exclusive pour port 587 avec STARTTLS
+    const secure = false; // Toujours false pour port 587
+    const useTls = config.port === 587; // STARTTLS pour le port 587
     
     this.transporter = nodemailer.createTransport({
       host: config.host,
       port: config.port,
-      secure: secure,
+      secure: secure, // false pour port 587
+      requireTLS: useTls, // true pour port 587
+      ignoreTLS: !useTls, // false pour port 587
       auth: {
         user: config.user,
         pass: config.pass,
       },
       tls: {
         rejectUnauthorized: true,
+        ciphers: 'SSLv3'
       },
       connectionTimeout: 30000,
       greetingTimeout: 15000,
@@ -76,8 +81,8 @@ export class MailService implements OnModuleInit {
   private getEmailConfig(): Partial<EmailConfig> {
     return {
       host: this.configService.get('EMAIL_HOST'),
-      port: parseInt(this.configService.get('EMAIL_PORT') || '465'),
-      secure: this.configService.get('EMAIL_SECURE') === 'true',
+      port: parseInt(this.configService.get('EMAIL_PORT')),
+      secure: this.configService.get('EMAIL_SECURE'),
       user: this.configService.get('EMAIL_USER'),
       pass: this.configService.get('EMAIL_PASS'),
     };

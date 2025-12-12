@@ -58,9 +58,9 @@ export class RendezvousService {
   private initializeHolidays(): void {
     try {
       this.holidays = new Holidays('ML');
-      this.logger.log('Initialisation de la bibliothèque date-holidays pour le Mali');
+      this.logger.log('Bibliothèque date-holidays initialisée pour le Mali');
     } catch (error) {
-      this.logger.error(`Erreur d'initialisation de date-holidays: ${error.message}`);
+      this.logger.error('Erreur d\'initialisation de date-holidays');
       this.holidays = null;
     }
   }
@@ -109,7 +109,7 @@ export class RendezvousService {
       return allHolidays;
 
     } catch (error) {
-      this.logger.error(`Erreur lors de la récupération des jours fériés pour ${year}: ${error.message}`);
+      this.logger.error(`Erreur lors de la récupération des jours fériés pour ${year}`);
       
       const fallbackHolidays = [
         `${year}-01-01`,
@@ -129,7 +129,7 @@ export class RendezvousService {
       const holidays = this.getHolidaysForYear(year);
       return holidays.includes(dateStr);
     } catch (error) {
-      this.logger.error(`Erreur lors de la vérification du jour férié ${dateStr}: ${error.message}`);
+      this.logger.error('Erreur lors de la vérification du jour férié');
       return false;
     }
   }
@@ -137,8 +137,7 @@ export class RendezvousService {
   // ==================== CORE METHODS ====================
 
   async create(createDto: CreateRendezvousDto): Promise<Rendezvous> {
-    this.logger.log(`Création rendez-vous pour l'utilisateur ID: ${createDto.userId}`);
-    this.logger.debug(`Données DTO reçues: ${JSON.stringify(createDto, null, 2)}`);
+    this.logger.log('Création d\'un nouveau rendez-vous');
 
     // Valider que l'userId est un ObjectId valide
     if (!Types.ObjectId.isValid(createDto.userId)) {
@@ -148,7 +147,7 @@ export class RendezvousService {
     // Vérifier que l'utilisateur existe
     const user = await this.userModel.findById(createDto.userId).exec();
     if (!user) {
-      this.logger.warn(`Utilisateur non trouvé pour l'ID: ${createDto.userId}`);
+      this.logger.warn('Utilisateur non trouvé');
       throw new BadRequestException("Utilisateur non trouvé");
     }
 
@@ -157,7 +156,7 @@ export class RendezvousService {
     const normalizedUserEmail = user.email.toLowerCase().trim();
     
     if (normalizedDtoEmail !== normalizedUserEmail) {
-      this.logger.warn(`Email mismatch: DTO=${normalizedDtoEmail}, User=${normalizedUserEmail}`);
+      this.logger.warn('Email ne correspond pas à l\'utilisateur');
       throw new BadRequestException("L'email ne correspond pas à l'utilisateur");
     }
 
@@ -167,25 +166,24 @@ export class RendezvousService {
       status: RENDEZVOUS_STATUS.CONFIRMED,
     });
 
-    this.logger.log(`Nombre de rendez-vous confirmés pour l'utilisateur ${createDto.userId}: ${confirmedCount}`);
+    this.logger.log(`Nombre de rendez-vous confirmés: ${confirmedCount}`);
 
     if (confirmedCount >= 1) {
-      this.logger.warn(`Tentative de création d'un deuxième rendez-vous pour l'utilisateur: ${createDto.userId}`);
+      this.logger.warn('Tentative de création d\'un deuxième rendez-vous');
       throw new BadRequestException("Vous avez déjà un rendez-vous confirmé");
     }
 
     // Traitement des champs "Autre" et validation
     const processedData = this.processAndValidateRendezvousData(createDto);
-    this.logger.debug(`Données traitées: ${JSON.stringify(processedData, null, 2)}`);
 
     // Validation spécifique pour les champs "Autre"
     if (processedData.destination === 'Autre' && (!processedData.destinationAutre || processedData.destinationAutre.trim() === '')) {
-      this.logger.warn(`Destination "Autre" sans précision pour ${createDto.userId}`);
+      this.logger.warn('Destination "Autre" sans précision');
       throw new BadRequestException('La destination "Autre" nécessite une précision');
     }
     
     if (processedData.filiere === 'Autre' && (!processedData.filiereAutre || processedData.filiereAutre.trim() === '')) {
-      this.logger.warn(`Filière "Autre" sans précision pour ${createDto.userId}`);
+      this.logger.warn('Filière "Autre" sans précision');
       throw new BadRequestException('La filière "Autre" nécessite une précision');
     }
 
@@ -196,7 +194,7 @@ export class RendezvousService {
     );
     
     if (!isAvailable) {
-      this.logger.warn(`Créneau non disponible: ${processedData.date} ${processedData.time} pour ${createDto.userId}`);
+      this.logger.warn('Créneau non disponible');
       throw new BadRequestException("Ce créneau horaire n'est pas disponible");
     }
 
@@ -207,7 +205,7 @@ export class RendezvousService {
     });
 
     if (dayCount >= MAX_SLOTS_PER_DAY) {
-      this.logger.warn(`Date complète: ${processedData.date} pour ${createDto.userId}`);
+      this.logger.warn('Date complète');
       throw new BadRequestException(
         "Tous les créneaux sont complets pour cette date",
       );
@@ -242,13 +240,11 @@ export class RendezvousService {
       rendezvousData.filiere = processedData.filiere;
     }
 
-    this.logger.debug(`Données prêtes pour enregistrement: ${JSON.stringify(rendezvousData, null, 2)}`);
-
     // Créer le rendez-vous
     const created = new this.rendezvousModel(rendezvousData);
     const saved = await created.save();
     
-    this.logger.log(`Rendez-vous créé avec ID: ${saved._id} pour l'utilisateur ${createDto.userId} (Statut: Confirmé)`);
+    this.logger.log(`Rendez-vous créé avec ID: ${saved._id}`);
 
     // Notification
     await this.sendNotification(saved, "confirmation");
@@ -284,9 +280,6 @@ export class RendezvousService {
       ];
     }
 
-    this.logger.debug(`Filtres admin findAll: ${JSON.stringify(filters)}`);
-    this.logger.debug(`Page: ${page}, Limit: ${limit}, Skip: ${skip}`);
-
     const [data, total] = await Promise.all([
       this.rendezvousModel
         .find(filters)
@@ -298,7 +291,7 @@ export class RendezvousService {
       this.rendezvousModel.countDocuments(filters),
     ]);
 
-    this.logger.debug(`Nombre de rendez-vous trouvés par admin: ${total}`);
+    this.logger.debug(`Nombre de rendez-vous trouvés: ${total}`);
     
     return {
       data,
@@ -322,8 +315,7 @@ export class RendezvousService {
     totalPages: number;
   }> {
     
-    this.logger.log(`SERVICE - Recherche rendez-vous pour userId: "${userId}"`);
-    this.logger.log(`SERVICE - Paramètres: page=${page}, limit=${limit}, status=${status || 'tous'}`);
+    this.logger.log('Recherche rendez-vous par utilisateur');
     
     // Valider que l'userId est un ObjectId valide
     if (!Types.ObjectId.isValid(userId)) {
@@ -339,11 +331,7 @@ export class RendezvousService {
     // Filtrer par statut SEULEMENT si spécifié
     if (status) {
       filters.status = status;
-    } else {
-      this.logger.log(`SERVICE - Pas de filtre de statut, retour de TOUS les rendez-vous`);
     }
-
-    this.logger.log(`SERVICE - Filtres MongoDB: ${JSON.stringify(filters)}`);
 
     const [data, total] = await Promise.all([
       this.rendezvousModel
@@ -356,10 +344,10 @@ export class RendezvousService {
       this.rendezvousModel.countDocuments(filters).exec(),
     ]);
 
-    this.logger.log(`SERVICE - Résultats: ${data.length} rendez-vous trouvés sur ${total} total`);
+    this.logger.log(`Résultats: ${data.length} rendez-vous trouvés sur ${total} total`);
     
     if (data.length > 0) {
-      this.logger.log(`SERVICE - Statuts des rendez-vous trouvés:`, 
+      this.logger.log(`Statuts des rendez-vous trouvés:`, 
         data.map(rdv => ({ id: rdv._id, status: rdv.status, date: rdv.date })));
     }
 
@@ -382,7 +370,7 @@ export class RendezvousService {
     const rdv = await this.rendezvousModel.findById(id).exec();
     
     if (!rdv) {
-      this.logger.warn(`Rendez-vous non trouvé: ${id}`);
+      this.logger.warn('Rendez-vous non trouvé');
       return null;
     }
     
@@ -391,12 +379,12 @@ export class RendezvousService {
       const rdvUserId = rdv.userId?.toString();
       
       if (rdvUserId !== userId) {
-        this.logger.warn(`Accès non autorisé au rendez-vous: ${id}`);
+        this.logger.warn('Accès non autorisé au rendez-vous');
         return null;
       }
     }
     
-    this.logger.log(`Rendez-vous trouvé: ${id}, statut: ${rdv.status}`);
+    this.logger.log(`Rendez-vous trouvé, statut: ${rdv.status}`);
     return rdv;
   }
 
@@ -405,11 +393,11 @@ export class RendezvousService {
     updateDto: UpdateRendezvousDto,
     user: any,
   ): Promise<Rendezvous> {
-    this.logger.log(`Tentative de mise à jour du rendez-vous: ${id} par ${user.email}`);
+    this.logger.log(`Tentative de mise à jour du rendez-vous: ${id}`);
 
     const rdv = await this.rendezvousModel.findById(id);
     if (!rdv) {
-      this.logger.warn(`Rendez-vous non trouvé pour mise à jour: ${id}`);
+      this.logger.warn('Rendez-vous non trouvé pour mise à jour');
       throw new NotFoundException("Rendez-vous non trouvé");
     }
 
@@ -419,7 +407,7 @@ export class RendezvousService {
       
       // Utiliser user.id directement
       if (rdvUserId !== user.id) {
-        this.logger.warn(`Tentative d'accès non autorisé au rendez-vous: ${id}`);
+        this.logger.warn('Tentative d\'accès non autorisé au rendez-vous');
         throw new ForbiddenException(
           "Vous ne pouvez modifier que vos propres rendez-vous",
         );
@@ -463,7 +451,7 @@ export class RendezvousService {
       if (updateDto.date || updateDto.time) {
         const isAvailable = await this.isSlotAvailable(date, time, id);
         if (!isAvailable) {
-          this.logger.warn(`Créneau non disponible pour mise à jour: ${date} ${time}`);
+          this.logger.warn('Créneau non disponible pour mise à jour');
           throw new BadRequestException(
             "Ce créneau horaire n'est pas disponible",
           );
@@ -514,7 +502,7 @@ export class RendezvousService {
     );
 
     if (!updated) {
-      this.logger.error(`Rendez-vous non trouvé après mise à jour: ${id}`);
+      this.logger.error('Rendez-vous non trouvé après mise à jour');
       throw new NotFoundException("Rendez-vous non trouvé après mise à jour");
     }
 
@@ -534,21 +522,21 @@ export class RendezvousService {
     avisAdmin?: string,
     user?: any,
   ): Promise<Rendezvous> {
-    this.logger.log(`Tentative de changement de statut: ${status} pour le rendez-vous: ${id} par ${user?.email}`);
+    this.logger.log(`Tentative de changement de statut: ${status} pour le rendez-vous: ${id}`);
 
     if (!user || user.role !== UserRole.ADMIN) {
-      this.logger.warn(`Tentative non autorisée de changement de statut par ${user?.email}`);
+      this.logger.warn('Tentative non autorisée de changement de statut');
       throw new ForbiddenException("Accès réservé aux administrateurs");
     }
 
     const allowedStatuses = Object.values(RENDEZVOUS_STATUS);
     if (!allowedStatuses.includes(status as RendezvousStatus)) {
-      this.logger.warn(`Statut invalide: ${status} pour le rendez-vous: ${id}`);
+      this.logger.warn('Statut invalide');
       throw new BadRequestException("Statut invalide");
     }
 
     if (status === RENDEZVOUS_STATUS.COMPLETED && !avisAdmin) {
-      this.logger.warn(`Avis admin manquant pour terminer le rendez-vous: ${id}`);
+      this.logger.warn('Avis admin manquant pour terminer le rendez-vous');
       throw new BadRequestException(
         "L'avis admin est obligatoire pour terminer un rendez-vous",
       );
@@ -571,7 +559,7 @@ export class RendezvousService {
     });
 
     if (!updated) {
-      this.logger.warn(`Rendez-vous non trouvé pour changement de statut: ${id}`);
+      this.logger.warn('Rendez-vous non trouvé pour changement de statut');
       throw new NotFoundException("Rendez-vous non trouvé");
     }
 
@@ -589,11 +577,11 @@ export class RendezvousService {
   }
 
   async removeWithPolicy(id: string, user: any): Promise<Rendezvous> {
-    this.logger.log(`Tentative d'annulation du rendez-vous: ${id} par ${user.email}`);
+    this.logger.log(`Tentative d'annulation du rendez-vous: ${id}`);
 
     const rdv = await this.rendezvousModel.findById(id);
     if (!rdv) {
-      this.logger.warn(`Rendez-vous non trouvé pour annulation: ${id}`);
+      this.logger.warn('Rendez-vous non trouvé pour annulation');
       throw new NotFoundException("Rendez-vous non trouvé");
     }
 
@@ -605,7 +593,7 @@ export class RendezvousService {
       
       // Utiliser user.id directement
       if (rdvUserId !== user.id) {
-        this.logger.warn(`Tentative d'annulation non autorisée du rendez-vous: ${id}`);
+        this.logger.warn('Tentative d\'annulation non autorisée du rendez-vous');
         throw new ForbiddenException(
           "Vous ne pouvez supprimer que vos propres rendez-vous",
         );
@@ -614,7 +602,7 @@ export class RendezvousService {
 
     // Utilisateur normal ne peut annuler que les rendez-vous CONFIRMÉS
     if (!isAdmin && rdv.status !== RENDEZVOUS_STATUS.CONFIRMED) {
-      this.logger.warn(`Tentative d'annulation d'un rendez-vous non confirmé: ${id} (statut: ${rdv.status})`);
+      this.logger.warn(`Tentative d'annulation d'un rendez-vous non confirmé (statut: ${rdv.status})`);
       throw new BadRequestException(
         "Vous ne pouvez annuler que les rendez-vous confirmés",
       );
@@ -628,7 +616,7 @@ export class RendezvousService {
       const twoHoursMs = CANCELLATION_THRESHOLD_HOURS * 60 * 60 * 1000;
 
       if (diffMs <= twoHoursMs) {
-        this.logger.warn(`Tentative d'annulation tardive du rendez-vous: ${id}`);
+        this.logger.warn('Tentative d\'annulation tardive du rendez-vous');
         throw new BadRequestException(
           "Vous ne pouvez plus annuler votre rendez-vous à moins de 2 heures de l'heure prévue",
         );
@@ -651,7 +639,7 @@ export class RendezvousService {
     );
 
     if (!updated) {
-      this.logger.error(`Rendez-vous non trouvé après annulation: ${id}`);
+      this.logger.error('Rendez-vous non trouvé après annulation');
       throw new NotFoundException("Rendez-vous non trouvé après annulation");
     }
 
@@ -664,24 +652,24 @@ export class RendezvousService {
   }
 
   async confirmByUser(id: string, user: any): Promise<Rendezvous> {
-    this.logger.log(`Tentative de confirmation du rendez-vous: ${id} par ${user.email}`);
+    this.logger.log(`Tentative de confirmation du rendez-vous: ${id}`);
 
     const rdv = await this.rendezvousModel.findById(id);
     if (!rdv) {
-      this.logger.warn(`Rendez-vous non trouvé pour confirmation: ${id}`);
+      this.logger.warn('Rendez-vous non trouvé pour confirmation');
       throw new NotFoundException("Rendez-vous non trouvé");
     }
 
     // Seul l'admin peut confirmer/changer le statut
     if (user.role !== UserRole.ADMIN) {
-      this.logger.warn(`Tentative de confirmation par non-admin: ${id}`);
+      this.logger.warn('Tentative de confirmation par non-admin');
       throw new ForbiddenException(
         "La confirmation des rendez-vous est réservée aux administrateurs",
       );
     }
 
     if (rdv.status !== RENDEZVOUS_STATUS.PENDING) {
-      this.logger.warn(`Tentative de confirmation d'un rendez-vous non en attente: ${id} (statut: ${rdv.status})`);
+      this.logger.warn(`Tentative de confirmation d'un rendez-vous non en attente (statut: ${rdv.status})`);
       throw new BadRequestException(
         "Seuls les rendez-vous en attente peuvent être confirmés par l'admin",
       );
@@ -691,7 +679,7 @@ export class RendezvousService {
     const now = new Date();
     const rdvDateTime = new Date(`${rdv.date}T${rdv.time}`);
     if (rdvDateTime < now) {
-      this.logger.warn(`Tentative de confirmation d'un rendez-vous passé: ${id}`);
+      this.logger.warn('Tentative de confirmation d\'un rendez-vous passé');
       throw new BadRequestException(
         "Impossible de confirmer un rendez-vous passé",
       );
@@ -704,7 +692,7 @@ export class RendezvousService {
     );
 
     if (!updated) {
-      this.logger.error(`Rendez-vous non trouvé après confirmation: ${id}`);
+      this.logger.error('Rendez-vous non trouvé après confirmation');
       throw new NotFoundException("Rendez-vous non trouvé après confirmation");
     }
 
@@ -720,7 +708,7 @@ export class RendezvousService {
     this.logger.log(`Recherche des créneaux disponibles pour: ${date}`);
 
     if (this.isWeekend(date) || this.isHoliday(date)) {
-      this.logger.log(`Aucun créneau disponible (weekend/jour férié): ${date}`);
+      this.logger.log('Aucun créneau disponible (weekend/jour férié)');
       return [];
     }
 
@@ -749,7 +737,7 @@ export class RendezvousService {
   }
 
   async getAvailableDates(): Promise<string[]> {
-    this.logger.log(`Recherche des dates disponibles`);
+    this.logger.log('Recherche des dates disponibles');
     const availableDates: string[] = [];
     const today = new Date();
 
@@ -803,14 +791,14 @@ export class RendezvousService {
 
   private validateDateConstraints(dateStr: string): void {
     if (this.isWeekend(dateStr)) {
-      this.logger.warn(`Tentative de réservation un weekend: ${dateStr}`);
+      this.logger.warn('Tentative de réservation un weekend');
       throw new BadRequestException(
         "Les réservations sont fermées le week-end",
       );
     }
 
     if (this.isHoliday(dateStr)) {
-      this.logger.warn(`Tentative de réservation un jour férié: ${dateStr}`);
+      this.logger.warn('Tentative de réservation un jour férié');
       throw new BadRequestException(
         "Les réservations sont fermées les jours fériés",
       );
@@ -822,7 +810,7 @@ export class RendezvousService {
     selectedDate.setHours(0, 0, 0, 0);
 
     if (selectedDate < today) {
-      this.logger.warn(`Tentative de réservation d'une date passée: ${dateStr}`);
+      this.logger.warn('Tentative de réservation d\'une date passée');
       throw new BadRequestException(
         "Vous ne pouvez pas réserver une date passée",
       );
@@ -837,7 +825,7 @@ export class RendezvousService {
       timeInHours < WORKING_HOURS.start ||
       timeInHours > WORKING_HOURS.end
     ) {
-      this.logger.warn(`Créneau horaire invalide: ${time}`);
+      this.logger.warn('Créneau horaire invalide');
       throw new BadRequestException(
         "Les horaires disponibles sont entre 9h00 et 16h30",
       );
@@ -845,7 +833,7 @@ export class RendezvousService {
 
     const totalMinutes = (hours - 9) * 60 + minutes;
     if (totalMinutes % 30 !== 0) {
-      this.logger.warn(`Créneau non conforme: ${time}`);
+      this.logger.warn('Créneau non conforme');
       throw new BadRequestException(
         "Les créneaux doivent être espacés de 30 minutes (9h00, 9h30, 10h00, etc.)",
       );
@@ -917,7 +905,7 @@ export class RendezvousService {
       }
       this.logger.log(`Notification ${type} envoyée pour le rendez-vous: ${rendezvous._id}`);
     } catch (error) {
-      this.logger.error(`Erreur notification ${type} pour ${rendezvous._id}: ${error.message}`);
+      this.logger.error(`Erreur notification ${type}`);
     }
   }
 
@@ -939,10 +927,10 @@ export class RendezvousService {
         this.logger.log(`Procédure créée pour le rendez-vous: ${rendezvous._id}`);
         await this.sendNotification(rendezvous, "status");
       } catch (error) {
-        this.logger.error(`Erreur création procédure pour ${rendezvous._id}: ${error.message}`);
+        this.logger.error('Erreur création procédure');
       }
     } else {
-      this.logger.log(`Procédure déjà existante pour ${rendezvous.email}`);
+      this.logger.log('Procédure déjà existante');
     }
   }
 

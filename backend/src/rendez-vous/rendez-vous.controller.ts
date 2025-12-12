@@ -82,7 +82,7 @@ export class RendezvousController {
     @Body() createDto: CreateRendezvousDto,
     @Req() req: AuthenticatedRequest
   ) {
-    this.logger.log(`Création rendez-vous par utilisateur ID: ${req.user?.id}`);
+    this.logger.log('Création rendez-vous par utilisateur');
     
     // Pour les utilisateurs normaux, forcer le userId à être le leur
     if (req.user?.role !== UserRole.ADMIN) {
@@ -94,11 +94,10 @@ export class RendezvousController {
 
     try {
       const result = await this.rendezvousService.create(createDto);
-      this.logger.log(`Rendez-vous créé avec succès: ${result._id}`);
+      this.logger.log('Rendez-vous créé avec succès');
       return result;
     } catch (error) {
-      this.logger.error(`Erreur création rendez-vous: ${error.message}`);
-      this.logger.error(`Stack: ${error.stack}`);
+      this.logger.error('Erreur création rendez-vous');
       throw error;
     }
   }
@@ -199,7 +198,7 @@ export class RendezvousController {
       throw new BadRequestException(`Statut invalide. Valeurs autorisées: ${Object.values(RENDEZVOUS_STATUS).join(', ')}`);
     }
 
-    this.logger.log(`Liste rendez-vous admin par utilisateur email: ${req.user?.email} - Page: ${page}, Limit: ${limit}`);
+    this.logger.log('Liste rendez-vous admin');
     
     return this.rendezvousService.findAll(page, limit, status, date, search);
   }
@@ -270,7 +269,7 @@ export class RendezvousController {
     // Récupérer l'ID de l'utilisateur depuis le token JWT
     const userId = req.user?.id;
     
-    this.logger.log(`CONTROLLER - Recherche rendez-vous pour userId: "${userId}"`);
+    this.logger.log('Recherche rendez-vous pour utilisateur');
     
     if (!userId) {
       throw new BadRequestException('ID utilisateur non trouvé dans le token');
@@ -318,7 +317,7 @@ export class RendezvousController {
       throw new BadRequestException('Format de date invalide (YYYY-MM-DD requis)');
     }
 
-    this.logger.log(`Recherche créneaux disponibles pour: ${date}`);
+    this.logger.log('Recherche créneaux disponibles');
     return this.rendezvousService.getAvailableSlots(date);
   }
 
@@ -370,7 +369,7 @@ export class RendezvousController {
     }
 
     const userId = req.user?.role === UserRole.ADMIN ? undefined : req.user?.id;
-    this.logger.log(`Recherche rendez-vous ID: ${id} par utilisateur ID: ${userId}`);
+    this.logger.log('Recherche rendez-vous par ID');
 
     const rendezvous = await this.rendezvousService.findOne(id, userId);
     
@@ -427,7 +426,7 @@ export class RendezvousController {
       throw new BadRequestException('ID du rendez-vous requis');
     }
 
-    this.logger.log(`Modification rendez-vous ${id} par utilisateur ID: ${req.user?.id}`);
+    this.logger.log('Modification rendez-vous');
     
     return this.rendezvousService.update(id, updateDto, req.user);
   }
@@ -478,7 +477,7 @@ export class RendezvousController {
       throw new BadRequestException(`Statut invalide. Valeurs autorisées: ${Object.values(RENDEZVOUS_STATUS).join(', ')}`);
     }
 
-    this.logger.log(`Changement statut ${status} pour rendez-vous ${id} par admin ID: ${req.user?.id}`);
+    this.logger.log('Changement statut rendez-vous');
     
     return this.rendezvousService.updateStatus(id, status, avisAdmin, req.user);
   }
@@ -517,7 +516,7 @@ export class RendezvousController {
       throw new BadRequestException('ID du rendez-vous requis');
     }
 
-    this.logger.log(`Suppression rendez-vous ${id} par utilisateur ID: ${req.user?.id}`);
+    this.logger.log('Suppression rendez-vous');
     
     return this.rendezvousService.removeWithPolicy(id, req.user);
   }
@@ -554,7 +553,7 @@ export class RendezvousController {
       throw new BadRequestException('ID du rendez-vous requis');
     }
 
-    this.logger.log(`Confirmation rendez-vous ${id} par admin ID: ${req.user?.id}`);
+    this.logger.log('Confirmation rendez-vous');
     
     return this.rendezvousService.confirmByUser(id, req.user);
   }

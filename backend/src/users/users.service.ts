@@ -24,27 +24,26 @@ export class UsersService {
   constructor(@InjectModel(User.name) private userModel: Model<User>) {}
 
   private normalizeTelephone(input?: string): string | undefined {
-  if (!input) return undefined;
+    if (!input) return undefined;
 
-  const trimmed = input.trim();
-  if (trimmed === "") return undefined;
+    const trimmed = input.trim();
+    if (trimmed === "") return "";
 
-  // ✅ CORRECTION : Garder le + s'il est au début, garder tous les chiffres
-  // Supprimer tous les espaces
-  const cleaned = trimmed.replace(/\s/g, '');
-  
-  // Extraire le + s'il est au début, puis tous les chiffres
-  const hasPlusPrefix = cleaned.startsWith('+');
-  const digitsOnly = cleaned.replace(/\D/g, ''); // Garde uniquement les chiffres
-  
-  // Validation : au moins 8 chiffres (comme demandé)
-  if (digitsOnly.length < 8) {
-    return undefined;
+    // Supprimer tous les espaces
+    const cleaned = trimmed.replace(/\s/g, '');
+    
+    // Extraire le + s'il est au début, puis tous les chiffres
+    const hasPlusPrefix = cleaned.startsWith('+');
+    const digitsOnly = cleaned.replace(/\D/g, ''); // Garde uniquement les chiffres
+    
+    // Validation : au moins 8 chiffres (comme demandé)
+    if (digitsOnly.length < 8) {
+      return undefined;
+    }
+
+    // ✅ RETOURNER avec + si présent au départ
+    return hasPlusPrefix ? `+${digitsOnly}` : digitsOnly;
   }
-
-  // ✅ RETOURNER avec + si présent au départ
-  return hasPlusPrefix ? `+${digitsOnly}` : digitsOnly;
-}
 
   private getCacheKey(method: string, identifier: string): string {
     return `${method}:${identifier}`;
@@ -86,30 +85,6 @@ export class UsersService {
     }
   }
 
-  // ✅ Méthodes de masquage unifiées et cohérentes
-  private maskEmail(email: string): string {
-    if (!email) return '***@***';
-    const [localPart, domain] = email.split('@');
-    if (!localPart || !domain) return '***@***';
-    
-    const maskedLocal = localPart.length <= 2 
-      ? localPart.charAt(0) + '*'
-      : localPart.charAt(0) + '***' + localPart.charAt(localPart.length - 1);
-    
-    return `${maskedLocal}@${domain}`;
-  }
-
-  private maskUserId(userId: string): string {
-    if (!userId) return 'user_***';
-    return userId.length <= 8 ? userId : userId.substring(0, 4) + '***' + userId.substring(userId.length - 4);
-  }
-
-  private maskPhoneNumber(phone: string): string {
-    if (!phone) return '***';
-    if (phone.length <= 4) return phone;
-    return `${phone.substring(0, 2)}***${phone.substring(phone.length - 2)}`;
-  }
-  
   async exists(userId: string): Promise<boolean> {
     const cacheKey = this.getCacheKey("exists", userId);
     const cached = this.getCache(cacheKey);
@@ -159,7 +134,7 @@ export class UsersService {
 
   async findOne(id: string): Promise<User | null> {
     if (!Types.ObjectId.isValid(id)) {
-      this.logger.warn(`Tentative de recherche avec ID invalide: ${this.maskUserId(id)}`);
+      this.logger.warn('Tentative de recherche avec ID invalide');
       return null;
     }
 
@@ -190,7 +165,7 @@ export class UsersService {
   async findById(id: string): Promise<User> {
     const user = await this.findOne(id);
     if (!user) {
-      this.logger.warn(`Utilisateur non trouvé: ${this.maskUserId(id)}`);
+      this.logger.warn('Utilisateur non trouvé');
       throw new NotFoundException("Utilisateur non trouvé");
     }
     return user;
@@ -233,7 +208,7 @@ export class UsersService {
         reason: "Mode maintenance activé",
         user: {
           id: user._id.toString(),
-          email: this.maskEmail(user.email), // ✅ MASQUÉ
+          email: user.email,
           firstName: user.firstName,
           lastName: user.lastName,
           role: user.role,
@@ -253,13 +228,14 @@ export class UsersService {
         reason: "Compte désactivé",
         user: {
           id: user._id.toString(),
-          email: this.maskEmail(user.email), // ✅ MASQUÉ
+          email: user.email,
           firstName: user.firstName,
           lastName: user.lastName,
-          telephone: this.maskPhoneNumber(user.telephone), // ✅ MASQUÉ
+          telephone: user.telephone,
           role: user.role,
           isActive: user.isActive,
-          isAdmin: user.role === UserRole.ADMIN as any,        }
+          isAdmin: user.role === UserRole.ADMIN as any,
+        }
       };
       this.setCache(cacheKey, result);
       return result;
@@ -275,7 +251,7 @@ export class UsersService {
         reason: `Déconnecté temporairement (reste ${remainingHours}h)`,
         user: {
           id: user._id.toString(),
-          email: this.maskEmail(user.email), // ✅ MASQUÉ
+          email: user.email,
           firstName: user.firstName,
           lastName: user.lastName,
           role: user.role,
@@ -298,7 +274,7 @@ export class UsersService {
       canAccess: true,
       user: {
         id: user._id.toString(),
-        email: this.maskEmail(user.email), // ✅ MASQUÉ dans les logs
+        email: user.email,
         firstName: user.firstName,
         lastName: user.lastName,
         role: user.role,
@@ -341,167 +317,164 @@ export class UsersService {
     this.clearUserCache();
   }
 
- async create(createUserDto: RegisterDto): Promise<User> {
-  const maskedEmail = this.maskEmail(createUserDto.email);
-  this.logger.log(`Début création utilisateur: ${maskedEmail}`);
+  async create(createUserDto: RegisterDto): Promise<User> {
+    this.logger.log('Début création utilisateur');
 
-  try {
-    // Vérifier l'email
-    const existingUserWithEmail = await this.findByEmail(createUserDto.email);
-    if (existingUserWithEmail) {
-      this.logger.warn(`Email déjà utilisé: ${maskedEmail}`);
-      throw new BadRequestException("Cet email est déjà utilisé");
-    }
-
-    // Vérification spéciale pour l'admin spécifique
-    const adminEmail = process.env.EMAIL_USER;
-    const defaultAdminPassword = process.env.DEFAULT_ADMIN_PASSWORD;
-    const isAdminCreation = createUserDto.email === adminEmail;
-
-    if (isAdminCreation) {
-      // Vérifier si un admin existe déjà
-      const existingAdmin = await this.findByRole(UserRole.ADMIN);
-      if (existingAdmin) {
-        this.logger.warn(`Tentative de création d'un deuxième admin spécifique: ${maskedEmail}`);
-        throw new BadRequestException("Un administrateur existe déjà dans le système");
-      }
-      
-      // Vérifier que le mot de passe correspond au mot de passe par défaut
-      if (createUserDto.password !== defaultAdminPassword) {
-        this.logger.warn(`Mot de passe incorrect pour l'admin spécifique: ${maskedEmail}`);
-        throw new BadRequestException("Mot de passe administrateur invalide");
-      }
-    }
-
-    // Normaliser et valider le téléphone
-    const normalizedTelephone = this.normalizeTelephone(createUserDto.telephone);
-    
-    if (!normalizedTelephone) {
-      this.logger.warn(`Téléphone invalide pour: ${maskedEmail}`);
-      throw new BadRequestException("Le numéro de téléphone est invalide");
-    }
-
-    // Vérifier si le téléphone existe déjà
-    const existingUserWithPhone = await this.userModel
-      .findOne({ telephone: normalizedTelephone })
-      .select('_id email')
-      .exec();
-
-    if (existingUserWithPhone) {
-      const existingMaskedEmail = this.maskEmail(existingUserWithPhone.email || '');
-      this.logger.warn(`Téléphone déjà utilisé: ${this.maskPhoneNumber(normalizedTelephone)} par ${existingMaskedEmail}`);
-      throw new BadRequestException("Ce numéro de téléphone est déjà utilisé");
-    }
-
-    // Vérifier que le mot de passe est valide
-    if (!createUserDto.password || createUserDto.password.trim().length < 8) {
-      this.logger.warn(`Mot de passe invalide pour: ${maskedEmail}`);
-      throw new BadRequestException("Le mot de passe doit contenir au moins 8 caractères");
-    }
-
-    // Hacher le mot de passe
-    let hashedPassword: string;
     try {
-      hashedPassword = await bcrypt.hash(
-        createUserDto.password,
-        AuthConstants.BCRYPT_SALT_ROUNDS,
-      );
-    } catch (hashError) {
-      this.logger.error(`Erreur de hashage du mot de passe pour ${maskedEmail}`);
-      throw new BadRequestException("Erreur lors de la création du compte");
-    }
-
-    if (!hashedPassword || hashedPassword.trim() === '') {
-      this.logger.error(`Mot de passe hashé vide pour: ${maskedEmail}`);
-      throw new BadRequestException("Erreur lors de la création du compte");
-    }
-
-    // Déterminer le rôle
-    let userRole = UserRole.USER;
-    
-    if (isAdminCreation) {
-      // Pour l'admin spécifique, toujours admin
-      userRole = UserRole.ADMIN;
-      this.logger.log(`Admin spécifique créé: ${maskedEmail}`);
-    } else {
-      // Pour les autres utilisateurs, premier utilisateur = admin
-      const existingAdmin = await this.findByRole(UserRole.ADMIN);
-      if (!existingAdmin) {
-        userRole = UserRole.ADMIN;
-        this.logger.log(`Premier utilisateur créé en tant qu'admin: ${maskedEmail}`);
-      }
-    }
-
-    // Créer l'objet utilisateur
-    const userData = {
-      firstName: createUserDto.firstName.trim(),
-      lastName: createUserDto.lastName.trim(),
-      email: createUserDto.email.toLowerCase().trim(),
-      password: hashedPassword,
-      telephone: normalizedTelephone,
-      role: userRole,
-      isActive: true,
-      createdAt: new Date(),
-      updatedAt: new Date()
-    };
-
-    // Créer et sauvegarder l'utilisateur
-    const user = new this.userModel(userData);
-    const savedUser = await user.save();
-
-    // Vérification post-création
-    const freshUser = await this.userModel.findById(savedUser._id).select('+password').exec();
-    
-    if (!freshUser?.password || freshUser.password.trim() === '') {
-      this.logger.error(`Mot de passe non enregistré pour ${maskedEmail}`);
-      await this.userModel.findByIdAndDelete(savedUser._id);
-      throw new BadRequestException("Erreur lors de la création du compte");
-    }
-
-    // Nettoyer le cache après création
-    this.clearUserCache();
-
-    this.logger.log(`Utilisateur créé avec succès: ${maskedEmail}, ID: ${this.maskUserId(savedUser._id.toString())}`);
-    
-    // Retourner l'utilisateur sans le mot de passe
-    const userWithoutPassword = savedUser.toObject();
-    delete userWithoutPassword.password;
-    
-    return userWithoutPassword as User;
-  } catch (error: any) {
-    if (error?.code === 11000) {
-      const field = Object.keys(error.keyPattern)[0];
-      if (field === "email") {
-        this.logger.warn(`Conflit email: ${maskedEmail}`);
+      // Vérifier l'email
+      const existingUserWithEmail = await this.findByEmail(createUserDto.email);
+      if (existingUserWithEmail) {
+        this.logger.warn('Email déjà utilisé');
         throw new BadRequestException("Cet email est déjà utilisé");
       }
-      if (field === "telephone") {
-        this.logger.warn(`Conflit téléphone pour: ${maskedEmail}`);
+
+      // Vérification spéciale pour l'admin spécifique
+      const adminEmail = process.env.EMAIL_USER;
+      const defaultAdminPassword = process.env.DEFAULT_ADMIN_PASSWORD;
+      const isAdminCreation = createUserDto.email === adminEmail;
+
+      if (isAdminCreation) {
+        // Vérifier si un admin existe déjà
+        const existingAdmin = await this.findByRole(UserRole.ADMIN);
+        if (existingAdmin) {
+          this.logger.warn('Tentative de création d\'un deuxième admin spécifique');
+          throw new BadRequestException("Un administrateur existe déjà dans le système");
+        }
+        
+        // Vérifier que le mot de passe correspond au mot de passe par défaut
+        if (createUserDto.password !== defaultAdminPassword) {
+          this.logger.warn('Mot de passe incorrect pour l\'admin spécifique');
+          throw new BadRequestException("Mot de passe administrateur invalide");
+        }
+      }
+
+      // Normaliser et valider le téléphone
+      const normalizedTelephone = this.normalizeTelephone(createUserDto.telephone);
+      
+      if (!normalizedTelephone) {
+        this.logger.warn('Téléphone invalide');
+        throw new BadRequestException("Le numéro de téléphone est invalide");
+      }
+
+      // Vérifier si le téléphone existe déjà
+      const existingUserWithPhone = await this.userModel
+        .findOne({ telephone: normalizedTelephone })
+        .select('_id email')
+        .exec();
+
+      if (existingUserWithPhone) {
+        this.logger.warn('Téléphone déjà utilisé');
         throw new BadRequestException("Ce numéro de téléphone est déjà utilisé");
       }
-    }
 
-    if (error instanceof BadRequestException) {
-      throw error;
-    }
+      // Vérifier que le mot de passe est valide
+      if (!createUserDto.password || createUserDto.password.trim().length < 8) {
+        this.logger.warn('Mot de passe invalide');
+        throw new BadRequestException("Le mot de passe doit contenir au moins 8 caractères");
+      }
 
-    this.logger.error(`Erreur création utilisateur ${maskedEmail}: ${error.message}`);
-    
-    throw new BadRequestException(
-      error.message.includes("téléphone") 
-        ? "Ce numéro de téléphone est déjà utilisé" 
-        : "Erreur lors de la création du compte"
-    );
+      // Hacher le mot de passe
+      let hashedPassword: string;
+      try {
+        hashedPassword = await bcrypt.hash(
+          createUserDto.password,
+          AuthConstants.BCRYPT_SALT_ROUNDS,
+        );
+      } catch (hashError) {
+        this.logger.error('Erreur de hashage du mot de passe');
+        throw new BadRequestException("Erreur lors de la création du compte");
+      }
+
+      if (!hashedPassword || hashedPassword.trim() === '') {
+        this.logger.error('Mot de passe hashé vide');
+        throw new BadRequestException("Erreur lors de la création du compte");
+      }
+
+      // Déterminer le rôle
+      let userRole = UserRole.USER;
+      
+      if (isAdminCreation) {
+        // Pour l'admin spécifique, toujours admin
+        userRole = UserRole.ADMIN;
+        this.logger.log('Admin spécifique créé');
+      } else {
+        // Pour les autres utilisateurs, premier utilisateur = admin
+        const existingAdmin = await this.findByRole(UserRole.ADMIN);
+        if (!existingAdmin) {
+          userRole = UserRole.ADMIN;
+          this.logger.log('Premier utilisateur créé en tant qu\'admin');
+        }
+      }
+
+      // Créer l'objet utilisateur
+      const userData = {
+        firstName: createUserDto.firstName.trim(),
+        lastName: createUserDto.lastName.trim(),
+        email: createUserDto.email.toLowerCase().trim(),
+        password: hashedPassword,
+        telephone: normalizedTelephone,
+        role: userRole,
+        isActive: true,
+        createdAt: new Date(),
+        updatedAt: new Date()
+      };
+
+      // Créer et sauvegarder l'utilisateur
+      const user = new this.userModel(userData);
+      const savedUser = await user.save();
+
+      // Vérification post-création
+      const freshUser = await this.userModel.findById(savedUser._id).select('+password').exec();
+      
+      if (!freshUser?.password || freshUser.password.trim() === '') {
+        this.logger.error('Mot de passe non enregistré');
+        await this.userModel.findByIdAndDelete(savedUser._id);
+        throw new BadRequestException("Erreur lors de la création du compte");
+      }
+
+      // Nettoyer le cache après création
+      this.clearUserCache();
+
+      this.logger.log('Utilisateur créé avec succès');
+      
+      // Retourner l'utilisateur sans le mot de passe
+      const userWithoutPassword = savedUser.toObject();
+      delete userWithoutPassword.password;
+      
+      return userWithoutPassword as User;
+    } catch (error: any) {
+      if (error?.code === 11000) {
+        const field = Object.keys(error.keyPattern)[0];
+        if (field === "email") {
+          this.logger.warn('Conflit email');
+          throw new BadRequestException("Cet email est déjà utilisé");
+        }
+        if (field === "telephone") {
+          this.logger.warn('Conflit téléphone');
+          throw new BadRequestException("Ce numéro de téléphone est déjà utilisé");
+        }
+      }
+
+      if (error instanceof BadRequestException) {
+        throw error;
+      }
+
+      this.logger.error('Erreur création utilisateur');
+      
+      throw new BadRequestException(
+        error.message.includes("téléphone") 
+          ? "Ce numéro de téléphone est déjà utilisé" 
+          : "Erreur lors de la création du compte"
+      );
+    }
   }
-}
 
   // ✏️ Méthodes de mise à jour
   async update(id: string, updateUserDto: UpdateUserDto): Promise<User> {
-    const maskedId = this.maskUserId(id);
-    this.logger.log(`Début mise à jour utilisateur: ${maskedId}`);
+    this.logger.log('Début mise à jour utilisateur');
 
     if (!id || !Types.ObjectId.isValid(id)) {
-      this.logger.warn(`ID utilisateur invalide: ${id}`);
+      this.logger.warn('ID utilisateur invalide');
       throw new BadRequestException("ID utilisateur invalide");
     }
 
@@ -521,15 +494,15 @@ export class UsersService {
         .exec();
 
       if (!updatedUser) {
-        this.logger.error(`Utilisateur non trouvé après mise à jour: ${maskedId}`);
+        this.logger.error('Utilisateur non trouvé après mise à jour');
         throw new NotFoundException("Utilisateur non trouvé après mise à jour");
       }
 
       this.clearUserCache(id);
-      this.logger.log(`Utilisateur mis à jour avec succès: ${maskedId}`);
+      this.logger.log('Utilisateur mis à jour avec succès');
       return updatedUser;
     } catch (error: any) {
-      this.handleUpdateError(error, maskedId);
+      this.handleUpdateError(error);
     }
   }
 
@@ -587,7 +560,7 @@ export class UsersService {
       .select("_id")
       .exec();
     if (!existingUser) {
-      this.logger.warn(`Utilisateur non trouvé: ${this.maskUserId(userId)}`);
+      this.logger.warn('Utilisateur non trouvé');
       throw new NotFoundException("Utilisateur non trouvé");
     }
   }
@@ -602,7 +575,7 @@ export class UsersService {
       if (updateData.email === adminEmail) {
         const existingUser = await this.userModel.findById(userId);
         if (existingUser?.email !== adminEmail) {
-          this.logger.warn(`Tentative d'utilisation de l'email admin réservé: ${this.maskEmail(updateData.email)}`);
+          this.logger.warn('Tentative d\'utilisation de l\'email admin réservé');
           throw new BadRequestException("Cet email est réservé à l'administrateur principal");
         }
       }
@@ -617,7 +590,7 @@ export class UsersService {
           .exec();
 
         if (existingUserWithEmail) {
-          this.logger.warn(`Conflit email: ${this.maskEmail(updateData.email)} déjà utilisé`);
+          this.logger.warn('Conflit email déjà utilisé');
           throw new BadRequestException("Cet email est déjà utilisé");
         }
       }
@@ -632,21 +605,21 @@ export class UsersService {
           .exec();
 
         if (existingUserWithPhone) {
-          this.logger.warn(`Conflit téléphone: ${this.maskPhoneNumber(updateData.telephone)} déjà utilisé`);
+          this.logger.warn('Conflit téléphone déjà utilisé');
           throw new BadRequestException("Ce numéro de téléphone est déjà utilisé");
         }
       }
     }
 
-  private handleUpdateError(error: any, userId: string): never {
+  private handleUpdateError(error: any): never {
     if (error?.code === 11000) {
       const fields = Object.keys(error.keyPattern || {});
       if (fields.includes("email")) {
-        this.logger.warn(`Erreur duplication email pour: ${userId}`);
+        this.logger.warn('Erreur duplication email');
         throw new BadRequestException("Cet email est déjà utilisé");
       }
       if (fields.includes("telephone")) {
-        this.logger.warn(`Erreur duplication téléphone pour: ${userId}`);
+        this.logger.warn('Erreur duplication téléphone');
         throw new BadRequestException("Ce numéro de téléphone est déjà utilisé");
       }
       throw new BadRequestException("Conflit de données");
@@ -656,12 +629,12 @@ export class UsersService {
       const messages = Object.values(error.errors).map(
         (err: any) => err.message,
       );
-      this.logger.warn(`Erreur validation pour ${userId}: ${messages.join(', ')}`);
+      this.logger.warn(`Erreur validation: ${messages.join(', ')}`);
       throw new BadRequestException(messages.join(", "));
     }
 
     if (error.name === "CastError") {
-      this.logger.warn(`ID utilisateur invalide: ${userId}`);
+      this.logger.warn('ID utilisateur invalide');
       throw new BadRequestException("ID utilisateur invalide");
     }
 
@@ -672,7 +645,7 @@ export class UsersService {
       throw error;
     }
 
-    this.logger.error(`Erreur inattendue pour ${userId}: ${error.message}`);
+    this.logger.error('Erreur inattendue lors de la mise à jour');
     throw new BadRequestException("Erreur lors de la mise à jour du profil");
   }
 
@@ -680,20 +653,19 @@ export class UsersService {
     userId: string,
     updatePasswordDto: UpdatePasswordDto,
   ): Promise<void> {
-    const maskedId = this.maskUserId(userId);
-    this.logger.log(`Début changement mot de passe: ${maskedId}`);
+    this.logger.log('Début changement mot de passe');
 
     const user = await this.userModel.findById(userId).select('+password').exec();
     if (!user) {
-      this.logger.warn(`Utilisateur non trouvé pour changement mot de passe: ${maskedId}`);
+      this.logger.warn('Utilisateur non trouvé pour changement mot de passe');
       throw new NotFoundException("Utilisateur non trouvé");
     }
 
     if (!user.password || user.password.trim() === '') {
-      this.logger.error(`L'utilisateur ${maskedId} n'a pas de mot de passe hashé enregistré`);
+      this.logger.error('L\'utilisateur n\'a pas de mot de passe hashé enregistré');
       
       if (user.role === UserRole.ADMIN) {
-        this.logger.log(`Admin ${maskedId} crée un nouveau mot de passe`);
+        this.logger.log('Admin crée un nouveau mot de passe');
         
         user.password = await bcrypt.hash(
           updatePasswordDto.newPassword,
@@ -702,7 +674,7 @@ export class UsersService {
         
         await user.save();
         this.clearUserCache(userId);
-        this.logger.log(`Mot de passe créé avec succès pour admin: ${maskedId}`);
+        this.logger.log('Mot de passe créé avec succès pour admin');
         return;
       }
       
@@ -710,7 +682,7 @@ export class UsersService {
     }
 
     if (!updatePasswordDto.currentPassword || updatePasswordDto.currentPassword.trim() === '') {
-      this.logger.warn(`Mot de passe actuel non fourni: ${maskedId}`);
+      this.logger.warn('Mot de passe actuel non fourni');
       throw new BadRequestException("Le mot de passe actuel est requis");
     }
 
@@ -724,7 +696,7 @@ export class UsersService {
       
       isMatch = await bcrypt.compare(cleanCurrentPassword, user.password);
     } catch (error) {
-      this.logger.error(`Erreur bcrypt.compare pour ${maskedId}`);
+      this.logger.error('Erreur lors de la validation du mot de passe');
       
       if (error.message.includes('data and hash arguments required')) {
         throw new BadRequestException(
@@ -736,7 +708,7 @@ export class UsersService {
     }
 
     if (!isMatch) {
-      this.logger.warn(`Mot de passe actuel incorrect: ${maskedId}`);
+      this.logger.warn('Mot de passe actuel incorrect');
       throw new UnauthorizedException("Mot de passe actuel incorrect");
     }
 
@@ -746,7 +718,7 @@ export class UsersService {
     );
     
     if (isSamePassword) {
-      this.logger.warn(`Nouveau mot de passe identique à l'ancien: ${maskedId}`);
+      this.logger.warn('Nouveau mot de passe identique à l\'ancien');
       throw new BadRequestException("Le nouveau mot de passe doit être différent de l'actuel");
     }
 
@@ -758,16 +730,15 @@ export class UsersService {
     await user.save();
     this.clearUserCache(userId);
     
-    this.logger.log(`Mot de passe changé avec succès: ${maskedId}`);
+    this.logger.log('Mot de passe changé avec succès');
   }
 
   async resetPassword(userId: string, newPassword: string): Promise<void> {
-    const maskedId = this.maskUserId(userId);
-    this.logger.log(`Réinitialisation mot de passe: ${maskedId}`);
+    this.logger.log('Réinitialisation mot de passe');
 
     const user = await this.userModel.findById(userId);
     if (!user) {
-      this.logger.warn(`Utilisateur non trouvé pour réinitialisation: ${maskedId}`);
+      this.logger.warn('Utilisateur non trouvé pour réinitialisation');
       throw new NotFoundException("Utilisateur non trouvé");
     }
 
@@ -779,34 +750,32 @@ export class UsersService {
     await user.save();
     this.clearUserCache(userId);
     
-    this.logger.log(`Mot de passe réinitialisé: ${maskedId}`);
+    this.logger.log('Mot de passe réinitialisé');
   }
 
   // 🗑️ Méthodes de suppression
   async delete(id: string): Promise<void> {
-    const maskedId = this.maskUserId(id);
-    this.logger.log(`Début suppression utilisateur: ${maskedId}`);
+    this.logger.log('Début suppression utilisateur');
 
     // Vérifier si c'est l'admin principal
     const user = await this.userModel.findById(id).select('email role').exec();
     if (user?.email === process.env.EMAIL_USER && user?.role === UserRole.ADMIN) {
-      this.logger.warn(`Tentative de suppression de l'admin principal: ${maskedId}`);
+      this.logger.warn('Tentative de suppression de l\'admin principal');
       throw new BadRequestException("Impossible de supprimer l'administrateur principal");
     }
 
     const result = await this.userModel.findByIdAndDelete(id).exec();
     if (!result) {
-      this.logger.warn(`Utilisateur non trouvé pour suppression: ${maskedId}`);
+      this.logger.warn('Utilisateur non trouvé pour suppression');
       throw new NotFoundException("Utilisateur non trouvé");
     }
     
     this.clearUserCache(id);
-    this.logger.log(`Utilisateur supprimé: ${maskedId}`);
+    this.logger.log('Utilisateur supprimé');
   }
 
   async toggleStatus(id: string): Promise<User> {
-    const maskedId = this.maskUserId(id);
-    this.logger.log(`Changement statut utilisateur: ${maskedId}`);
+    this.logger.log('Changement statut utilisateur');
 
     const user = await this.findById(id);
     const updatedUser = await this.userModel
@@ -815,12 +784,12 @@ export class UsersService {
       .exec();
 
     if (!updatedUser) {
-      this.logger.error(`Utilisateur non trouvé après changement statut: ${maskedId}`);
+      this.logger.error('Utilisateur non trouvé après changement statut');
       throw new NotFoundException("Utilisateur non trouvé");
     }
 
     this.clearUserCache(id);
-    this.logger.log(`Statut utilisateur modifié: ${maskedId}, Actif: ${updatedUser.isActive}`);
+    this.logger.log(`Statut utilisateur modifié - Actif: ${updatedUser.isActive}`);
     return updatedUser;
   }
 

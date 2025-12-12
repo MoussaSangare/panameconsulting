@@ -27,7 +27,7 @@ export class NotificationService implements OnModuleInit {
     await this.initializeTransporter();
   }
 
- private async initializeTransporter(): Promise<void> {
+private async initializeTransporter(): Promise<void> {
   const emailUser = this.configService.get("EMAIL_USER");
   
   if (!this.configService.get("EMAIL_HOST") || !emailUser || !this.configService.get("EMAIL_PASS")) {
@@ -39,20 +39,27 @@ export class NotificationService implements OnModuleInit {
   try {
     this.fromEmail = `"${this.appName}" <${emailUser}>`;
     
-    const port = parseInt(this.configService.get("EMAIL_PORT") || '465');
-    const secure = port === 465 || this.configService.get("EMAIL_SECURE") === "true";
+    const port = parseInt(this.configService.get("EMAIL_PORT"));
+    const secure = false; // Toujours false pour port 587
+    const useTls = port === 587; // STARTTLS pour le port 587
     
     this.transporter = nodemailer.createTransport({
       host: this.configService.get("EMAIL_HOST"),
       port: port,
-      secure: secure,
+      secure: secure, // false pour port 587
+      requireTLS: useTls, // true pour port 587
+      ignoreTLS: !useTls, // false pour port 587
       auth: {
         user: emailUser,
         pass: this.configService.get("EMAIL_PASS"),
       },
+      tls: {
+        rejectUnauthorized: true,
+        ciphers: 'SSLv3'
+      },
       connectionTimeout: 30000,
       greetingTimeout: 15000,
-      socketTimeout: 60000, // Augmentez le timeout
+      socketTimeout: 60000,
     });
 
     await this.testConnection();
