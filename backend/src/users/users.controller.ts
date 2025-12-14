@@ -308,124 +308,127 @@ export class UsersController {
   }
 
   @Patch("profile/me")
-  @UseGuards(JwtAuthGuard)
-  @ApiOperation({ summary: "Mettre à jour son propre profil" })
-  @ApiResponse({ status: 200, description: "Profil mis à jour" })
-  @ApiResponse({ status: 400, description: "Données invalides" })
-  @ApiResponse({ status: 401, description: "Non autorisé" })
-  @ApiBearerAuth()
-  async updateProfile(
-    @Request() req: AuthenticatedRequest,
-    @Body() updateUserDto: UpdateUserDto,
-  ) {
-    const userId = req.user.id;
-    
-    // ✅ CORRIGÉ : ID masqué
-    const maskedId = this.maskUserId(userId);
-    this.logger.log(`Mise à jour profil utilisateur: ${maskedId}`);
+@UseGuards(JwtAuthGuard)
+@ApiOperation({ summary: "Mettre à jour son propre profil" })
+@ApiResponse({ status: 200, description: "Profil mis à jour" })
+@ApiResponse({ status: 400, description: "Données invalides" })
+@ApiResponse({ status: 401, description: "Non autorisé" })
+@ApiBearerAuth()
+async updateProfile(
+  @Request() req: AuthenticatedRequest,
+  @Body() updateUserDto: UpdateUserDto,
+) {
+  const userId = req.user.id;
+  
+  const maskedId = this.maskUserId(userId);
+  this.logger.log(`Mise à jour profil utilisateur: ${maskedId}`);
 
-    // Validation améliorée - MISE À JOUR INDÉPENDANTE email/téléphone
-    if (
-      updateUserDto.email === undefined &&
-      updateUserDto.telephone === undefined
-    ) {
-      this.logger.warn('Aucun champ fourni pour mise à jour');
-      throw new BadRequestException(
-        "Au moins un champ (email ou téléphone) doit être fourni",
-      );
+  // ✅ CORRECTION : Utiliser la méthode de validation du DTO si elle existe
+  // ou vérifier manuellement
+  const hasUpdateData = updateUserDto.email !== undefined || 
+                       updateUserDto.telephone !== undefined ||
+                       updateUserDto.role !== undefined;
+
+  if (!hasUpdateData) {
+    this.logger.warn('Aucun champ fourni pour mise à jour');
+    throw new BadRequestException(
+      "Au moins un champ (email, téléphone ou rôle) doit être fourni",
+    );
+  }
+
+  // Validation de l'email si fourni
+  if (updateUserDto.email !== undefined) {
+    if (updateUserDto.email.trim() === "") {
+      this.logger.warn('Email vide fourni');
+      throw new BadRequestException("L'email ne peut pas être vide");
     }
-
-    // Validation de l'email si fourni
-    if (updateUserDto.email !== undefined) {
-      if (updateUserDto.email.trim() === "") {
-        this.logger.warn('Email vide fourni');
-        throw new BadRequestException("L'email ne peut pas être vide");
-      }
-      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-      if (!emailRegex.test(updateUserDto.email)) {
-        this.logger.warn('Format email invalide');
-        throw new BadRequestException("Format d'email invalide");
-      }
-    }
-
-    // 🔥 VALIDATION TÉLÉPHONE - MISE À JOUR INDÉPENDANTE
-    if (updateUserDto.telephone !== undefined) {
-      const trimmedPhone = updateUserDto.telephone.trim();
-      
-      // Si téléphone n'est pas vide, vérifier la longueur minimum
-      if (trimmedPhone !== "" && trimmedPhone.length < 5) {
-        this.logger.warn('Téléphone trop court');
-        throw new BadRequestException(
-          "Le téléphone doit contenir au moins 5 caractères",
-        );
-      }
-    }
-
-    const allowedUpdate: any = {};
-
-    // Email - seulement si fourni et non vide
-    if (
-      updateUserDto.email !== undefined &&
-      updateUserDto.email.trim() !== ""
-    ) {
-      allowedUpdate.email = updateUserDto.email.trim().toLowerCase();
-      
-      // ✅ CORRIGÉ : Email masqué dans le log
-      const maskedEmail = this.maskEmail(allowedUpdate.email);
-      this.logger.log(`Email à mettre à jour: ${maskedEmail}`);
-    }
-
-    // Téléphone - accepter chaîne vide pour suppression
-    if (updateUserDto.telephone !== undefined) {
-      allowedUpdate.telephone = updateUserDto.telephone.trim();
-      
-      // ✅ CORRIGÉ : Téléphone masqué
-      const maskedPhone = allowedUpdate.telephone 
-        ? `${allowedUpdate.telephone.substring(0, 4)}***${allowedUpdate.telephone.substring(allowedUpdate.telephone.length - 2)}`
-        : '(vide pour suppression)';
-      
-      this.logger.log(`Téléphone à mettre à jour: ${maskedPhone}`);
-    }
-
-    if (Object.keys(allowedUpdate).length === 0) {
-      this.logger.warn('Aucune donnée valide après validation');
-      throw new BadRequestException("Aucune donnée valide à mettre à jour");
-    }
-
-    // ✅ CORRIGÉ : Log sécurisé sans données sensibles
-    this.logger.log(`Données validées pour mise à jour - Champs: ${Object.keys(allowedUpdate).join(', ')}`);
-
-    try {
-      const updatedUser = await this.usersService.update(
-        userId,
-        allowedUpdate,
-      );
-
-      this.logger.log('Profil mis à jour avec succès');
-
-      return {
-        id: updatedUser._id?.toString(),
-        email: updatedUser.email,
-        firstName: updatedUser.firstName,
-        lastName: updatedUser.lastName,
-        role: updatedUser.role,
-        telephone: updatedUser.telephone,
-        isActive: updatedUser.isActive,
-        isAdmin: updatedUser.role === UserRole.ADMIN,
-        logoutUntil: updatedUser.logoutUntil,
-        lastLogin: updatedUser.lastLogin,
-        loginCount: updatedUser.loginCount,
-        lastLogout: updatedUser.lastLogout,
-        logoutCount: updatedUser.logoutCount,
-        createdAt: updatedUser.createdAt,
-        updatedAt: updatedUser.updatedAt,
-      };
-    } catch (error) {
-      // ✅ CORRIGÉ : Log sécurisé
-      this.logger.error('Erreur mise à jour profil', error.stack);
-      throw error;
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(updateUserDto.email)) {
+      this.logger.warn('Format email invalide');
+      throw new BadRequestException("Format d'email invalide");
     }
   }
+
+  // Validation du téléphone si fourni
+  if (updateUserDto.telephone !== undefined) {
+    const trimmedPhone = updateUserDto.telephone.trim();
+    
+    // Si téléphone n'est pas vide, vérifier la longueur minimum
+    if (trimmedPhone !== "" && trimmedPhone.length < 5) {
+      this.logger.warn('Téléphone trop court');
+      throw new BadRequestException(
+        "Le téléphone doit contenir au moins 5 caractères",
+      );
+    }
+  }
+
+  const allowedUpdate: any = {};
+
+  // Email - seulement si fourni et non vide
+  if (
+    updateUserDto.email !== undefined &&
+    updateUserDto.email.trim() !== ""
+  ) {
+    allowedUpdate.email = updateUserDto.email.trim().toLowerCase();
+    
+    const maskedEmail = this.maskEmail(allowedUpdate.email);
+    this.logger.log(`Email à mettre à jour: ${maskedEmail}`);
+  }
+
+  // Téléphone - accepter chaîne vide pour suppression
+  if (updateUserDto.telephone !== undefined) {
+    allowedUpdate.telephone = updateUserDto.telephone.trim();
+    
+    const maskedPhone = allowedUpdate.telephone 
+      ? `${allowedUpdate.telephone.substring(0, 4)}***${allowedUpdate.telephone.substring(allowedUpdate.telephone.length - 2)}`
+      : '(vide pour suppression)';
+    
+    this.logger.log(`Téléphone à mettre à jour: ${maskedPhone}`);
+  }
+
+  // Rôle - seulement si fourni (et valide via IsEnum)
+  if (updateUserDto.role !== undefined) {
+    allowedUpdate.role = updateUserDto.role;
+    this.logger.log(`Rôle à mettre à jour: ${updateUserDto.role}`);
+  }
+
+  if (Object.keys(allowedUpdate).length === 0) {
+    this.logger.warn('Aucune donnée valide après validation');
+    throw new BadRequestException("Aucune donnée valide à mettre à jour");
+  }
+
+  this.logger.log(`Données validées pour mise à jour - Champs: ${Object.keys(allowedUpdate).join(', ')}`);
+
+  try {
+    const updatedUser = await this.usersService.update(
+      userId,
+      allowedUpdate,
+    );
+
+    this.logger.log('Profil mis à jour avec succès');
+
+    return {
+      id: updatedUser._id?.toString(),
+      email: updatedUser.email,
+      firstName: updatedUser.firstName,
+      lastName: updatedUser.lastName,
+      role: updatedUser.role,
+      telephone: updatedUser.telephone,
+      isActive: updatedUser.isActive,
+      isAdmin: updatedUser.role === UserRole.ADMIN,
+      logoutUntil: updatedUser.logoutUntil,
+      lastLogin: updatedUser.lastLogin,
+      loginCount: updatedUser.loginCount,
+      lastLogout: updatedUser.lastLogout,
+      logoutCount: updatedUser.logoutCount,
+      createdAt: updatedUser.createdAt,
+      updatedAt: updatedUser.updatedAt,
+    };
+  } catch (error) {
+    this.logger.error('Erreur mise à jour profil', error.stack);
+    throw error;
+  }
+}
 
   @Patch(":id/admin-reset-password")
   @UseGuards(JwtAuthGuard, RolesGuard)

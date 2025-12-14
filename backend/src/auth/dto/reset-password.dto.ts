@@ -29,5 +29,5 @@ export class ResetPasswordDto {
   @IsString()
   @MinLength(8)
   @Match("newPassword", { message: "Les mots de passe ne correspondent pas" })
-  confirmPassword: string;
+  confirmPassword: string; // Note: 'confirmPassword' pas 'confirmNewPassword'
 }
