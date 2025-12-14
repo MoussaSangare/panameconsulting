@@ -18,10 +18,35 @@ import { AuthConstants } from "../auth/auth.constants";
 export class UsersService {
   private readonly logger = new Logger(UsersService.name);
   private readonly cache = new Map<string, { data: any; timestamp: number }>();
-  private readonly CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+  private readonly CACHE_TTL = 5 * 60 * 1000;
   private readonly MAX_CACHE_SIZE = 1000;
 
   constructor(@InjectModel(User.name) private userModel: Model<User>) {}
+
+  // ✅ AJOUTER LES MÉTHODES DE MASQUAGE
+  private maskEmail(email: string): string {
+    if (!email) return '***@***';
+    const [name, domain] = email.split('@');
+    if (!name || !domain) return '***@***';
+    
+    const maskedName = name.length <= 2 
+      ? name.charAt(0) + '*'
+      : name.charAt(0) + '***' + (name.length > 1 ? name.charAt(name.length - 1) : '');
+    
+    return `${maskedName}@${domain}`;
+  }
+
+  private maskUserId(userId: string): string {
+    if (!userId) return 'user_***';
+    if (userId.length <= 8) return userId;
+    return `${userId.substring(0, 4)}***${userId.substring(userId.length - 4)}`;
+  }
+
+  private maskTelephone(telephone: string): string {
+    if (!telephone) return '***';
+    if (telephone.length <= 6) return '***';
+    return `${telephone.substring(0, 4)}***${telephone.substring(telephone.length - 2)}`;
+  }
 
   private normalizeTelephone(input?: string): string | undefined {
     if (!input) return undefined;
@@ -29,19 +54,15 @@ export class UsersService {
     const trimmed = input.trim();
     if (trimmed === "") return "";
 
-    // Supprimer tous les espaces
     const cleaned = trimmed.replace(/\s/g, '');
     
-    // Extraire le + s'il est au début, puis tous les chiffres
     const hasPlusPrefix = cleaned.startsWith('+');
-    const digitsOnly = cleaned.replace(/\D/g, ''); // Garde uniquement les chiffres
+    const digitsOnly = cleaned.replace(/\D/g, '');
     
-    // Validation : au moins 8 chiffres (comme demandé)
     if (digitsOnly.length < 8) {
       return undefined;
     }
 
-    // ✅ RETOURNER avec + si présent au départ
     return hasPlusPrefix ? `+${digitsOnly}` : digitsOnly;
   }
 
@@ -102,7 +123,6 @@ export class UsersService {
     return exists;
   }
 
-  // 👤 Méthodes de recherche
   async findByEmail(email: string): Promise<User | null> {
     const normalizedEmail = email.toLowerCase().trim();
     const cacheKey = this.getCacheKey("findByEmail", normalizedEmail);
@@ -171,7 +191,6 @@ export class UsersService {
     return user;
   }
 
-  // 🔧 Méthode pour mettre à jour logoutUntil
   async setLogoutUntil(userId: string, durationHours: number = 24): Promise<void> {
     const logoutUntil = new Date(Date.now() + durationHours * 60 * 60 * 1000);
     await this.userModel.findByIdAndUpdate(userId, { logoutUntil });
@@ -200,7 +219,6 @@ export class UsersService {
       return result;
     }
 
-    // Vérifier le mode maintenance (sauf pour les admins)
     const isMaintenance = await this.isMaintenanceMode();
     if (isMaintenance && user.role !== UserRole.ADMIN) {
       const result = {
@@ -221,7 +239,6 @@ export class UsersService {
       return result;
     }
 
-    // Vérifier si l'utilisateur est actif
     if (user.role !== UserRole.ADMIN && !user.isActive) {
       const result = {
         canAccess: false,
@@ -241,7 +258,6 @@ export class UsersService {
       return result;
     }
 
-    // Vérifier la durée de déconnexion forcée
     if (user.logoutUntil && new Date() < new Date(user.logoutUntil)) {
       const remainingHours = Math.ceil(
         (new Date(user.logoutUntil).getTime() - Date.now()) / (1000 * 60 * 60)
@@ -269,7 +285,6 @@ export class UsersService {
       return result;
     }
 
-    // Accès accordé
     const result = {
       canAccess: true,
       user: {
@@ -312,40 +327,31 @@ export class UsersService {
   }
 
   async setMaintenanceMode(enabled: boolean): Promise<void> {
+    // ✅ CORRIGÉ : Log sécurisé
     this.logger.log(`Changement mode maintenance: ${enabled ? 'ACTIVÉ' : 'DÉSACTIVÉ'}`);
     process.env.MAINTENANCE_MODE = enabled ? "true" : "false";
     this.clearUserCache();
   }
 
   async create(createUserDto: RegisterDto): Promise<User> {
-    this.logger.log('Début création utilisateur');
+    // ✅ CORRIGÉ : Email masqué dans le log
+    const maskedEmail = this.maskEmail(createUserDto.email);
+    this.logger.log(`Début création utilisateur: ${maskedEmail}`);
 
     try {
+      // ✅ EMPÊCHER L'UTILISATION DE L'EMAIL ADMIN
+      const adminEmail = process.env.EMAIL_USER;
+      if (createUserDto.email === adminEmail) {
+        this.logger.warn('Tentative d\'utilisation de l\'email admin réservé');
+        throw new BadRequestException("Cet email est réservé à l'administrateur principal");
+      }
+
       // Vérifier l'email
       const existingUserWithEmail = await this.findByEmail(createUserDto.email);
       if (existingUserWithEmail) {
-        this.logger.warn('Email déjà utilisé');
+        // ✅ CORRIGÉ : Email masqué
+        this.logger.warn(`Email déjà utilisé: ${maskedEmail}`);
         throw new BadRequestException("Cet email est déjà utilisé");
-      }
-
-      // Vérification spéciale pour l'admin spécifique
-      const adminEmail = process.env.EMAIL_USER;
-      const defaultAdminPassword = process.env.DEFAULT_ADMIN_PASSWORD;
-      const isAdminCreation = createUserDto.email === adminEmail;
-
-      if (isAdminCreation) {
-        // Vérifier si un admin existe déjà
-        const existingAdmin = await this.findByRole(UserRole.ADMIN);
-        if (existingAdmin) {
-          this.logger.warn('Tentative de création d\'un deuxième admin spécifique');
-          throw new BadRequestException("Un administrateur existe déjà dans le système");
-        }
-        
-        // Vérifier que le mot de passe correspond au mot de passe par défaut
-        if (createUserDto.password !== defaultAdminPassword) {
-          this.logger.warn('Mot de passe incorrect pour l\'admin spécifique');
-          throw new BadRequestException("Mot de passe administrateur invalide");
-        }
       }
 
       // Normaliser et valider le téléphone
@@ -356,14 +362,15 @@ export class UsersService {
         throw new BadRequestException("Le numéro de téléphone est invalide");
       }
 
-      // Vérifier si le téléphone existe déjà
       const existingUserWithPhone = await this.userModel
         .findOne({ telephone: normalizedTelephone })
         .select('_id email')
         .exec();
 
       if (existingUserWithPhone) {
-        this.logger.warn('Téléphone déjà utilisé');
+        // ✅ CORRIGÉ : Téléphone masqué
+        const maskedPhone = this.maskTelephone(normalizedTelephone);
+        this.logger.warn(`Téléphone déjà utilisé: ${maskedPhone}`);
         throw new BadRequestException("Ce numéro de téléphone est déjà utilisé");
       }
 
@@ -371,6 +378,18 @@ export class UsersService {
       if (!createUserDto.password || createUserDto.password.trim().length < 8) {
         this.logger.warn('Mot de passe invalide');
         throw new BadRequestException("Le mot de passe doit contenir au moins 8 caractères");
+      }
+
+      // ✅ DÉTERMINER LE RÔLE - TOUJOURS USER SAUF SI C'EST LE PREMIER UTILISATEUR
+      let userRole = UserRole.USER;
+      
+      // Vérifier si un admin existe déjà
+      const existingAdmin = await this.findByRole(UserRole.ADMIN);
+      if (!existingAdmin) {
+        // Si c'est le premier utilisateur et ce n'est pas l'email admin
+        userRole = UserRole.ADMIN;
+        // ✅ CORRIGÉ : Log sécurisé
+        this.logger.log('Premier utilisateur créé en tant qu\'admin');
       }
 
       // Hacher le mot de passe
@@ -390,22 +409,6 @@ export class UsersService {
         throw new BadRequestException("Erreur lors de la création du compte");
       }
 
-      // Déterminer le rôle
-      let userRole = UserRole.USER;
-      
-      if (isAdminCreation) {
-        // Pour l'admin spécifique, toujours admin
-        userRole = UserRole.ADMIN;
-        this.logger.log('Admin spécifique créé');
-      } else {
-        // Pour les autres utilisateurs, premier utilisateur = admin
-        const existingAdmin = await this.findByRole(UserRole.ADMIN);
-        if (!existingAdmin) {
-          userRole = UserRole.ADMIN;
-          this.logger.log('Premier utilisateur créé en tant qu\'admin');
-        }
-      }
-
       // Créer l'objet utilisateur
       const userData = {
         firstName: createUserDto.firstName.trim(),
@@ -423,7 +426,6 @@ export class UsersService {
       const user = new this.userModel(userData);
       const savedUser = await user.save();
 
-      // Vérification post-création
       const freshUser = await this.userModel.findById(savedUser._id).select('+password').exec();
       
       if (!freshUser?.password || freshUser.password.trim() === '') {
@@ -435,9 +437,9 @@ export class UsersService {
       // Nettoyer le cache après création
       this.clearUserCache();
 
-      this.logger.log('Utilisateur créé avec succès');
+      // ✅ CORRIGÉ : Log sécurisé
+      this.logger.log(`Utilisateur créé avec succès: ${maskedEmail}`);
       
-      // Retourner l'utilisateur sans le mot de passe
       const userWithoutPassword = savedUser.toObject();
       delete userWithoutPassword.password;
       
@@ -446,7 +448,8 @@ export class UsersService {
       if (error?.code === 11000) {
         const field = Object.keys(error.keyPattern)[0];
         if (field === "email") {
-          this.logger.warn('Conflit email');
+          // ✅ CORRIGÉ : Email masqué
+          this.logger.warn(`Conflit email: ${maskedEmail}`);
           throw new BadRequestException("Cet email est déjà utilisé");
         }
         if (field === "telephone") {
@@ -459,7 +462,8 @@ export class UsersService {
         throw error;
       }
 
-      this.logger.error('Erreur création utilisateur');
+      // ✅ CORRIGÉ : Email masqué dans l'erreur
+      this.logger.error(`Erreur création utilisateur ${maskedEmail}`);
       
       throw new BadRequestException(
         error.message.includes("téléphone") 
@@ -469,9 +473,10 @@ export class UsersService {
     }
   }
 
-  // ✏️ Méthodes de mise à jour
   async update(id: string, updateUserDto: UpdateUserDto): Promise<User> {
-    this.logger.log('Début mise à jour utilisateur');
+    // ✅ CORRIGÉ : ID masqué
+    const maskedId = this.maskUserId(id);
+    this.logger.log(`Début mise à jour utilisateur: ${maskedId}`);
 
     if (!id || !Types.ObjectId.isValid(id)) {
       this.logger.warn('ID utilisateur invalide');
@@ -499,7 +504,11 @@ export class UsersService {
       }
 
       this.clearUserCache(id);
-      this.logger.log('Utilisateur mis à jour avec succès');
+      
+      // ✅ CORRIGÉ : Log sécurisé
+      const maskedEmail = this.maskEmail(updatedUser.email);
+      this.logger.log(`Utilisateur mis à jour avec succès: ${maskedEmail}`);
+      
       return updatedUser;
     } catch (error: any) {
       this.handleUpdateError(error);
@@ -507,7 +516,7 @@ export class UsersService {
   }
 
   private filterAndValidateUpdateData(updateUserDto: UpdateUserDto): any {
-    const allowedFields = ["email", "telephone"];
+    const allowedFields = ["email", "telephone", "role"];
     const filteredUpdate: any = {};
 
     Object.keys(updateUserDto).forEach((key) => {
@@ -524,6 +533,13 @@ export class UsersService {
 
     if (Object.keys(filteredUpdate).length === 0) {
       throw new BadRequestException("Aucune donnée valide à mettre à jour");
+    }
+
+    // ✅ EMPÊCHER LA MODIFICATION DU RÔLE EN ADMIN
+    if (filteredUpdate.role === UserRole.ADMIN) {
+      throw new BadRequestException(
+        "Impossible de créer ou modifier un autre administrateur. Un seul admin est autorisé."
+      );
     }
 
     if (filteredUpdate.email) {
@@ -569,7 +585,6 @@ export class UsersService {
       userId: string,
       updateData: any,
     ): Promise<void> {
-      // Empêcher la modification de l'email admin spécifique
       const adminEmail = process.env.EMAIL_USER;
       
       if (updateData.email === adminEmail) {
@@ -590,7 +605,9 @@ export class UsersService {
           .exec();
 
         if (existingUserWithEmail) {
-          this.logger.warn('Conflit email déjà utilisé');
+          // ✅ CORRIGÉ : Email masqué
+          const maskedEmail = this.maskEmail(updateData.email);
+          this.logger.warn(`Conflit email déjà utilisé: ${maskedEmail}`);
           throw new BadRequestException("Cet email est déjà utilisé");
         }
       }
@@ -605,7 +622,9 @@ export class UsersService {
           .exec();
 
         if (existingUserWithPhone) {
-          this.logger.warn('Conflit téléphone déjà utilisé');
+          // ✅ CORRIGÉ : Téléphone masqué
+          const maskedPhone = this.maskTelephone(updateData.telephone);
+          this.logger.warn(`Conflit téléphone déjà utilisé: ${maskedPhone}`);
           throw new BadRequestException("Ce numéro de téléphone est déjà utilisé");
         }
       }
@@ -653,7 +672,9 @@ export class UsersService {
     userId: string,
     updatePasswordDto: UpdatePasswordDto,
   ): Promise<void> {
-    this.logger.log('Début changement mot de passe');
+    // ✅ CORRIGÉ : ID masqué
+    const maskedId = this.maskUserId(userId);
+    this.logger.log(`Début changement mot de passe: ${maskedId}`);
 
     const user = await this.userModel.findById(userId).select('+password').exec();
     if (!user) {
@@ -665,7 +686,9 @@ export class UsersService {
       this.logger.error('L\'utilisateur n\'a pas de mot de passe hashé enregistré');
       
       if (user.role === UserRole.ADMIN) {
-        this.logger.log('Admin crée un nouveau mot de passe');
+        // ✅ CORRIGÉ : Log sécurisé
+        const maskedEmail = this.maskEmail(user.email);
+        this.logger.log(`Admin crée un nouveau mot de passe: ${maskedEmail}`);
         
         user.password = await bcrypt.hash(
           updatePasswordDto.newPassword,
@@ -730,11 +753,14 @@ export class UsersService {
     await user.save();
     this.clearUserCache(userId);
     
-    this.logger.log('Mot de passe changé avec succès');
+    // ✅ CORRIGÉ : Log sécurisé
+    this.logger.log(`Mot de passe changé avec succès: ${maskedId}`);
   }
 
   async resetPassword(userId: string, newPassword: string): Promise<void> {
-    this.logger.log('Réinitialisation mot de passe');
+    // ✅ CORRIGÉ : ID masqué
+    const maskedId = this.maskUserId(userId);
+    this.logger.log(`Réinitialisation mot de passe: ${maskedId}`);
 
     const user = await this.userModel.findById(userId);
     if (!user) {
@@ -750,12 +776,14 @@ export class UsersService {
     await user.save();
     this.clearUserCache(userId);
     
-    this.logger.log('Mot de passe réinitialisé');
+    // ✅ CORRIGÉ : Log sécurisé
+    this.logger.log(`Mot de passe réinitialisé: ${maskedId}`);
   }
 
-  // 🗑️ Méthodes de suppression
   async delete(id: string): Promise<void> {
-    this.logger.log('Début suppression utilisateur');
+    // ✅ CORRIGÉ : ID masqué
+    const maskedId = this.maskUserId(id);
+    this.logger.log(`Début suppression utilisateur: ${maskedId}`);
 
     // Vérifier si c'est l'admin principal
     const user = await this.userModel.findById(id).select('email role').exec();
@@ -771,13 +799,21 @@ export class UsersService {
     }
     
     this.clearUserCache(id);
-    this.logger.log('Utilisateur supprimé');
+    this.logger.log(`Utilisateur supprimé: ${maskedId}`);
   }
 
   async toggleStatus(id: string): Promise<User> {
-    this.logger.log('Changement statut utilisateur');
+    // ✅ CORRIGÉ : ID masqué
+    const maskedId = this.maskUserId(id);
+    this.logger.log(`Changement statut utilisateur: ${maskedId}`);
 
     const user = await this.findById(id);
+    
+    // ✅ EMPÊCHER LA DÉSACTIVATION DE L'ADMIN PRINCIPAL
+    if (user.email === process.env.EMAIL_USER && user.role === UserRole.ADMIN) {
+      throw new BadRequestException("Impossible de désactiver l'administrateur principal");
+    }
+
     const updatedUser = await this.userModel
       .findByIdAndUpdate(id, { isActive: !user.isActive }, { new: true })
       .select("-password")
@@ -789,11 +825,14 @@ export class UsersService {
     }
 
     this.clearUserCache(id);
-    this.logger.log(`Statut utilisateur modifié - Actif: ${updatedUser.isActive}`);
+    
+    // ✅ CORRIGÉ : Log sécurisé
+    const maskedEmail = this.maskEmail(updatedUser.email);
+    this.logger.log(`Statut utilisateur modifié - Actif: ${updatedUser.isActive} (${maskedEmail})`);
+    
     return updatedUser;
   }
 
-  // 📊 Méthodes de statistiques et monitoring
   async checkDatabaseConnection(): Promise<boolean> {
     try {
       if (!this.userModel.db || !this.userModel.db.db) {
@@ -857,5 +896,41 @@ export class UsersService {
     const cacheSize = this.cache.size;
     this.cache.clear();
     this.logger.log(`Cache utilisateur vidé - ${cacheSize} entrées supprimées`);
+  }
+
+  async createUniqueAdmin(): Promise<void> {
+    try {
+      const adminEmail = process.env.EMAIL_USER;
+      
+      // Vérifier si l'admin existe déjà
+      const existingAdmin = await this.userModel.findOne({ 
+        email: adminEmail,
+        role: UserRole.ADMIN 
+      }).exec();
+
+      if (!existingAdmin) {
+        // ✅ CORRIGÉ : Email masqué dans le log
+        const maskedEmail = this.maskEmail(adminEmail);
+        this.logger.log(`Création de l'administrateur unique: ${maskedEmail}`);
+        
+        // Créer l'admin sans mot de passe (doit utiliser "forgot password")
+        const adminUser = new this.userModel({
+          firstName: 'Damini',
+          lastName: 'Sangaré',
+          email: adminEmail,
+          telephone: '+223 91 83 09 41',
+          role: UserRole.ADMIN,
+          isActive: true,
+          password: '', // Pas de mot de passe par défaut
+        });
+
+        await adminUser.save();
+        this.logger.log('Administrateur unique créé. Utilisez "mot de passe oublié" pour définir un mot de passe.');
+      } else {
+        this.logger.log('Administrateur unique déjà présent dans le système');
+      }
+    } catch (error) {
+      this.logger.error('Erreur lors de la création de l\'administrateur unique:', error);
+    }
   }
 }

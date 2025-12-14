@@ -265,33 +265,32 @@ export class AuthController {
   }
 
   @Get("me")
-  @UseGuards(JwtAuthGuard)
-  @ApiOperation({ summary: "Récupérer le profil utilisateur" })
-  async getProfile(@Request() req: any) {
-    // Utiliser id directement
-    const userId = req.user?.id;
+@UseGuards(JwtAuthGuard)
+@ApiOperation({ summary: "Récupérer le profil utilisateur" })
+async getProfile(@Request() req: any) {
+  const userId = req.user?.id;
 
-    if (!userId) {
-      throw new BadRequestException("ID utilisateur manquant dans le token");
-    }
-
-    try {
-      const user = await this.authService.getProfile(userId);
-
-      return {
-        id: user._id, // ← ID MongoDB
-        email: user.email,
-        firstName: user.firstName,
-        lastName: user.lastName,
-        role: user.role,
-        isAdmin: user.role === UserRole.ADMIN,
-        telephone: user.telephone,
-        isActive: user.isActive,
-      };
-    } catch (error: any) {
-      throw error;
-    }
+  if (!userId) {
+    throw new BadRequestException("ID utilisateur manquant dans le token");
   }
+
+  try {
+    const user = await this.authService.getProfile(userId);
+
+    return {
+      id: user._id?.toString() || userId, // ← Convertir ObjectId en string
+      email: user.email,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      role: user.role,
+      isAdmin: user.role === UserRole.ADMIN,
+      telephone: user.telephone,
+      isActive: user.isActive,
+    };
+  } catch (error: any) {
+    throw error;
+  }
+}
 
   @Post("update-password")
   @UseGuards(JwtAuthGuard)

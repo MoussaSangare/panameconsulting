@@ -60,7 +60,6 @@ export class AuthService {
   }
 
   if (typeof id === "string") {
-    // SOLUTION : Utiliser isValidObjectId de mongoose
     if (isValidObjectId(id)) {
       return id;
     }
@@ -68,7 +67,6 @@ export class AuthService {
   }
 
   const stringId = String(id);
-  // SOLUTION : Utiliser isValidObjectId de mongoose
   if (isValidObjectId(stringId)) {
     return stringId;
   }
@@ -76,7 +74,6 @@ export class AuthService {
   throw new Error(`Impossible de convertir l'ID.`);
 }
 
-  // Gestion des tentatives de connexion
   private getLoginAttempts(email: string): {
     attempts: number;
     lastAttempt: Date;
@@ -104,7 +101,6 @@ export class AuthService {
       Date.now() + AuthConstants.LOGIN_ATTEMPTS_TTL_MINUTES * 60 * 1000,
     );
 
-    // Limiter la taille du cache
     if (this.loginAttempts.size >= this.MAX_CACHE_SIZE) {
       const oldestKey = Array.from(this.loginAttempts.entries())
         .sort((a, b) => a[1].ttl.getTime() - b[1].ttl.getTime())[0]?.[0];
@@ -133,40 +129,22 @@ export class AuthService {
     this.logger.log(`Réinitialisation des tentatives pour ${this.maskEmail(email)}`);
   }
 
-
-
   async register(registerDto: RegisterDto) {
       try {
-        // Vérification spéciale pour l'admin spécifique
+        // ✅ EMPÊCHER L'INSCRIPTION AVEC L'EMAIL ADMIN
         const adminEmail = process.env.EMAIL_USER;
-        const defaultAdminPassword = process.env.DEFAULT_ADMIN_PASSWORD;
-        
         if (registerDto.email === adminEmail) {
-          // Vérifier si un admin existe déjà
-          const existingAdmin = await this.usersService.findByRole(UserRole.ADMIN);
-          if (existingAdmin) {
-            this.logger.warn(`Tentative d'enregistrement d'un deuxième admin spécifique`);
-            throw new BadRequestException(
-              "Un administrateur existe déjà dans le système",
-            );
-          }
-          
-          // Vérifier le mot de passe par défaut
-          if (registerDto.password !== defaultAdminPassword) {
-            this.logger.warn(`Mot de passe incorrect pour l'admin spécifique`);
-            throw new BadRequestException("Mot de passe administrateur invalide");
-          }
-          
-          registerDto.role = UserRole.ADMIN;
-          this.logger.log(`Inscription de l'admin spécifique: ${this.maskEmail(adminEmail)}`);
-        } else {
-          // Pour les autres utilisateurs
-          const existingAdmin = await this.usersService.findByRole(UserRole.ADMIN);
-          registerDto.role = existingAdmin ? UserRole.USER : UserRole.ADMIN;
+          throw new BadRequestException("Cet email est réservé au système");
         }
 
+        // ✅ FORCER LE RÔLE USER POUR TOUTES LES INSCRIPTIONS
+        const userData = {
+          ...registerDto,
+          role: UserRole.USER // ← Toujours USER
+        };
+
         // ✅ Le service users gère maintenant toutes les validations
-        const newUser = await this.usersService.create(registerDto);
+        const newUser = await this.usersService.create(userData);
         const userId = this.convertObjectIdToString(newUser._id);
 
         const jtiAccess = uuidv4();
@@ -243,17 +221,11 @@ export class AuthService {
         };
 
         } catch (error) {
-        // ✅ Log plus détaillé
         this.logger.error(`Erreur lors de l'enregistrement: ${error.message}`, error.stack);
         
-        // ✅ Propager l'erreur telle quelle (elle contient déjà le bon message)
         throw error;
       }
   }
-
-
-
-
 
   async login(user: User) {
     const jtiAccess = uuidv4();
@@ -418,8 +390,6 @@ export class AuthService {
       throw new UnauthorizedException("Refresh token invalide");
     }
   }
-
- 
 
   async logoutAll(): Promise<{
     success: boolean;
@@ -635,6 +605,7 @@ export class AuthService {
       throw error;
     }
   }
+
   async validateUser(email: string, password: string): Promise<User | null> {
   try {
     const attempts = this.getLoginAttempts(email);
@@ -654,7 +625,6 @@ export class AuthService {
       }
     }
 
-    // ✅ LOGS DE DÉBUGAGE AJOUTÉS
     this.logger.debug(`[DEBUG] validateUser appelé pour: ${this.maskEmail(email)}`);
     this.logger.debug(`[DEBUG] Password fourni: ${!!password}, Longueur: ${password?.length || 0}`);
 
@@ -690,8 +660,8 @@ export class AuthService {
         throw new UnauthorizedException(
           AuthConstants.ERROR_MESSAGES.PASSWORD_RESET_REQUIRED,
           {
-            description: "PASSWORD_RESET_REQUIRED",
-            cause: "NO_PASSWORD_IN_DB"
+            description: "PASSWORD RESET REQUIRED",
+            cause: "NO PASSWORD IN DB"
           }
         );
       } else {
@@ -722,7 +692,6 @@ export class AuthService {
         throw new Error('Arguments manquants pour la comparaison');
       }
       
-      // Log partiel pour débogage (ne pas logger le mot de passe complet)
       this.logger.debug(`[DEBUG] Hash bcrypt: ${user.password.substring(0, 10)}...`);
       
       isPasswordValid = await bcrypt.compare(cleanPassword, user.password);
@@ -923,7 +892,6 @@ export class AuthService {
 
       const cleanUserId = userId.trim();
 
-      // CORRECTION 1 : Utiliser isValidObjectId importé de mongoose
       if (isValidObjectId(cleanUserId)) {
         const user = await this.usersService.findById(cleanUserId);
 
@@ -1035,7 +1003,7 @@ export class AuthService {
         { 
           isActive: false, 
           deactivatedAt: new Date(),
-          revocationReason: "admin_cleanup" 
+          revocationReason: "admin cleanup" 
         },
       );
       
@@ -1068,5 +1036,40 @@ export class AuthService {
   private maskToken(token: string): string {
     if (!token || token.length < 10) return '***';
     return `${token.substring(0, 6)}...${token.substring(token.length - 4)}`;
+  }
+
+  // ✅ MÉTHODE POUR CRÉER L'ADMIN UNIQUE AU DÉMARRAGE
+  async createUniqueAdmin(): Promise<void> {
+    try {
+      const adminEmail = process.env.EMAIL_USER;
+      
+      // Vérifier si l'admin existe déjà
+      const existingAdmin = await this.userModel.findOne({ 
+        email: adminEmail,
+        role: UserRole.ADMIN 
+      }).exec();
+
+      if (!existingAdmin) {
+        this.logger.log(`Création de l'administrateur unique avec email: ${adminEmail}`);
+        
+        // Créer l'admin sans mot de passe (doit utiliser "forgot password")
+        const adminUser = new this.userModel({
+          firstName: 'Damini',
+          lastName: 'Sangaré',
+          email: adminEmail,
+          telephone: '+223 91 83 09 41',
+          role: UserRole.ADMIN,
+          isActive: true,
+          password: '', // ❌ PAS DE MOT DE PASSE PAR DÉFAUT
+        });
+
+        await adminUser.save();
+        this.logger.log('✅ Administrateur unique créé. Utilisez "mot de passe oublié" pour définir un mot de passe.');
+      } else {
+        this.logger.log('✅ Administrateur unique déjà présent dans le système');
+      }
+    } catch (error) {
+      this.logger.error('❌ Erreur lors de la création de l\'administrateur unique:', error);
+    }
   }
 }

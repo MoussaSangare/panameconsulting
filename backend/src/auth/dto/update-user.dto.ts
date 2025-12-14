@@ -20,4 +20,5 @@ export class UpdateUserDto {
   @IsString({ message: "Le téléphone doit être une chaîne de caractères" })
   @MinLength(5, { message: "Le téléphone doit contenir au moins 5 caractères" })
   telephone?: string;
+  role: import("c:/Users/DELL/Desktop/PROJETS/panameconsulting/backend/src/enums/user-role.enum").UserRole;
 }

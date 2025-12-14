@@ -24,7 +24,7 @@ export const AuthConstants = {
   LOGIN_ATTEMPTS_TTL_MINUTES: 30, // 30 minutes
   MIN_PASSWORD_LENGTH: 8,
   BCRYPT_SALT_ROUNDS: 12,
-GLOBAL_LOGOUT_DURATION: 24 * 60 * 60 * 1000, // 24h en millisecondes
+  GLOBAL_LOGOUT_DURATION: 24 * 60 * 60 * 1000, // 24h en millisecondes
 
   // Cleanup Intervals - Valeurs 15, 20, 30 minutes
   TOKEN_BLACKLIST_CLEANUP_INTERVAL: 30 * 60 * 1000, // 30 minutes
@@ -39,7 +39,9 @@ GLOBAL_LOGOUT_DURATION: 24 * 60 * 60 * 1000, // 24h en millisecondes
     COMPTE_DESACTIVE: "COMPTE DESACTIVE",
     COMPTE_TEMPORAIREMENT_DECONNECTE: "COMPTE TEMPORAIREMENT DECONNECTE",
     MAINTENANCE_MODE: "MAINTENANCE MODE",
-    PASSWORD_RESET_REQUIRED: "PASSWORD RESET REQUIRED"
+    PASSWORD_RESET_REQUIRED: "PASSWORD RESET REQUIRED",
+    SINGLE_ADMIN_ONLY: "SYSTEME_A_UN_SEUL_ADMIN",
+    ADMIN_EMAIL_RESERVED: "EMAIL_ADMIN_RESERVE"
   } as const,
 
   // Configuration sessions
@@ -60,5 +62,10 @@ GLOBAL_LOGOUT_DURATION: 24 * 60 * 60 * 1000, // 24h en millisecondes
       sameSite: 'none' as const,
       maxAge: 30 * 60 * 1000, // 30 minutes
     }
+  },
+
+  // ✅ Configuration administrateur unique
+  UNIQUE_ADMIN: {
+    EMAIL: process.env.EMAIL_USER || 'panameconsulting906@gmail.com'
   }
 } as const;
