@@ -1,68 +1,47 @@
-import { Injectable, Logger, OnModuleInit } from "@nestjs/common";
-import { ConfigService } from "@nestjs/config";
-import * as nodemailer from "nodemailer";
-import { Rendezvous } from "../schemas/rendezvous.schema";
-import { Procedure, StepStatus, ProcedureStatus } from "../schemas/procedure.schema";
-import { Contact } from "../schemas/contact.schema";
+import { Injectable, Logger } from '@nestjs/common';
+import * as nodemailer from 'nodemailer';
+import { Rendezvous } from '../schemas/rendezvous.schema';
+import { Procedure, ProcedureStatus, StepStatus } from '../schemas/procedure.schema';
+import { ConfigService } from '@nestjs/config';
+import { Contact } from '../schemas/contact.schema';
 
 @Injectable()
-export class NotificationService implements OnModuleInit {
+export class NotificationService {
   private readonly logger = new Logger(NotificationService.name);
   private transporter: nodemailer.Transporter;
-  private emailServiceAvailable: boolean = false;
-  private readonly appName = "Paname Consulting";
+  
+  // Propriétés à initialiser
+  private emailServiceAvailable: boolean;
   private fromEmail: string;
+  private appName: string;
   private frontendUrl: string;
 
-  constructor(private configService: ConfigService) {}
-
-  async onModuleInit() {
-    await this.initializeTransporter();
-  }
-
-  private async initializeTransporter(): Promise<void> {
-    const host = this.configService.get<string>('EMAIL_HOST');
-    const port = parseInt(this.configService.get<string>('EMAIL_PORT') || '587');
-    const user = this.configService.get<string>('EMAIL_USER');
-    const pass = this.configService.get<string>('EMAIL_PASS');
-    this.frontendUrl = this.configService.get<string>('FRONTEND_URL') || 'https://www.panameconsulting.vercel.app';
-
-    if (!host || !user || !pass) {
-      this.logger.error(`Configuration email manquante:
-        EMAIL_HOST: ${host ? '✓' : '✗'}
-        EMAIL_USER: ${user ? '✓' : '✗'}
-        EMAIL_PASS: ${pass ? '✓' : '✗'}
-      `);
-      this.emailServiceAvailable = false;
-      return;
-    }
-
-    try {
-      this.fromEmail = `"${this.appName}" <${user}>`;
-      
+  constructor(private configService: ConfigService) {
+    // Récupération des variables d'environnement
+    const emailUser = this.configService.get('EMAIL_USER');
+    const emailPass = this.configService.get('EMAIL_PASS');
+    const frontendUrl = this.configService.get('FRONTEND_URL');
+    
+    // Vérification de la disponibilité du service email
+    this.emailServiceAvailable = !!(emailUser && emailPass);
+    
+    // Initialisation des propriétés
+    this.fromEmail = `"Paname Consulting" <${emailUser}>`;
+    this.appName = 'Paname Consulting';
+    this.frontendUrl = frontendUrl || 'https://panameconsulting.com';
+    
+    if (this.emailServiceAvailable) {
       this.transporter = nodemailer.createTransport({
-        host: host,
-        port: port,
-        secure: false, // Port 587 utilise STARTTLS
+        service: 'Gmail',
         auth: {
-          user: user,
-          pass: pass,
-        },
-        connectionTimeout: 10000,
-        greetingTimeout: 5000,
-        tls: {
-          rejectUnauthorized: true // Production - validation des certificats
+          user: emailUser,
+          pass: emailPass
         }
       });
-
-      await this.transporter.verify();
       
-      this.emailServiceAvailable = true;
-      this.logger.log(`Service notification initialisé avec succès (${host}:${port})`);
-      
-    } catch (error) {
-      this.logger.error(`Erreur d'initialisation du service email: ${error.message}`);
-      this.emailServiceAvailable = false;
+      this.logger.log('Service email initialisé');
+    } else {
+      this.logger.warn('Service email non disponible - EMAIL_USER ou EMAIL_PASS manquant');
     }
   }
 
@@ -663,10 +642,6 @@ export class NotificationService implements OnModuleInit {
       
       <p>En attendant, n'hésitez pas à consulter notre site web pour découvrir nos services et 
       accompagnements.</p>
-      
-      <p style="text-align: center; margin-top: 25px;">
-        <a href="${this.frontendUrl}" class="button">Visiter notre site web</a>
-      </p>
     `;
 
     return await this.sendEmail(
@@ -688,11 +663,5 @@ export class NotificationService implements OnModuleInit {
     return `${maskedName}@${domain}`;
   }
 
-  getServiceStatus(): { available: boolean; fromEmail: string; frontendUrl: string } {
-    return {
-      available: this.emailServiceAvailable,
-      fromEmail: this.fromEmail || 'Non configuré',
-      frontendUrl: this.frontendUrl
-    };
-  }
+
 }

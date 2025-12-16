@@ -1,75 +1,68 @@
-import { Injectable, Logger, OnModuleInit } from "@nestjs/common";
-import { ConfigService } from "@nestjs/config";
+import { Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import * as nodemailer from 'nodemailer';
 
+// Définition de l'interface avant la classe
 interface EmailTemplate {
   subject: string;
   html: string;
 }
 
 @Injectable()
-export class MailService implements OnModuleInit {
+export class MailService {
   private readonly logger = new Logger(MailService.name);
   private transporter: nodemailer.Transporter;
-  private isServiceAvailable: boolean = false;
-  private readonly appName = "Paname Consulting";
+  private readonly isServiceAvailable: boolean;
   private readonly fromEmail: string;
   private readonly supportEmail: string;
 
   constructor(private readonly configService: ConfigService) {
-    const emailUser = this.configService.get("EMAIL_USER");
-    this.fromEmail = `"${this.appName}" <${emailUser}>`;
+    // Initialisation des propriétés
+    const emailUser = this.configService.get('EMAIL_USER');
+    const emailPass = this.configService.get('EMAIL_PASS');
+    
+    this.isServiceAvailable = !!(emailUser && emailPass);
+    this.fromEmail = `"Paname Consulting" <${emailUser}>`;
     this.supportEmail = emailUser;
+    
+    this.initializeTransporter();
   }
 
-  async onModuleInit() {
-    await this.initializeTransporter();
-  }
-
-  private async initializeTransporter(): Promise<void> {
-    const host = this.configService.get("EMAIL_HOST");
-    const port = parseInt(this.configService.get("EMAIL_PORT"));
-    const user = this.configService.get("EMAIL_USER");
-    const pass = this.configService.get("EMAIL_PASS");
-
-    if (!host || !user || !pass) {
-      this.logger.warn('Configuration email incomplète - service désactivé');
-      this.isServiceAvailable = false;
+  private initializeTransporter() {
+    if (!this.isServiceAvailable) {
+      this.logger.warn('Service email non configuré - transporter non initialisé');
       return;
     }
 
-    try {
-      this.transporter = nodemailer.createTransport({
-        host: host,
-        port: port,
-        secure: false,
-        auth: {
-          user: user,
-          pass: pass,
-        },
-        connectionTimeout: 10000,
-        greetingTimeout: 5000,
-        socketTimeout: 10000,
-      });
-
-      await this.testConnection();
-      this.isServiceAvailable = true;
-      this.logger.log(`Service email initialisé avec succès (${host}:${port})`);
-      
-    } catch (error) {
-      this.logger.error(`Erreur initialisation email: ${error.message}`);
-      this.isServiceAvailable = false;
-    }
+    this.transporter = nodemailer.createTransport({
+      host: this.configService.get('EMAIL_HOST') || 'smtp.gmail.com',
+      port: parseInt(this.configService.get('EMAIL_PORT') || '587'),
+      secure: this.configService.get('EMAIL_SECURE') === 'true',
+      auth: {
+        user: this.configService.get('EMAIL_USER'),
+        pass: this.configService.get('EMAIL_PASS'),
+      },
+      tls: {
+        rejectUnauthorized: this.configService.get('NODE_ENV') === 'production',
+      },
+    });
   }
 
-  private async testConnection(): Promise<void> {
-    try {
-      await this.transporter.verify();
-      this.logger.debug('Connexion SMTP vérifiée avec succès');
-    } catch (error) {
-      this.logger.error(`Échec vérification SMTP: ${error.message}`);
-      throw error;
+  async checkConnection(): Promise<boolean> {
+    if (!this.isServiceAvailable) {
+      this.logger.warn('Email service is not available');
+      return false;
     }
+
+    return this.transporter.verify()
+      .then(() => {
+        this.logger.log('Email service is connected');
+        return true;
+      })
+      .catch((error) => {
+        this.logger.error('Email service is not connected', error);
+        return false;
+      });
   }
 
   async sendEmail(to: string, template: EmailTemplate, context?: Record<string, any>): Promise<boolean> {
@@ -160,6 +153,8 @@ export class MailService implements OnModuleInit {
   }
 
   private getWelcomeTemplate(firstName: string): EmailTemplate {
+    const appUrl = this.configService.get('APP_URL') || this.configService.get('FRONTEND_URL') || '#';
+    
     return {
       subject: 'Bienvenue chez Paname Consulting',
       html: `
@@ -185,7 +180,7 @@ export class MailService implements OnModuleInit {
             <p>Nous sommes impatients de vous accompagner dans votre projet d'études à l'international.</p>
             
             <div style="text-align: center; margin: 30px 0;">
-              <a href="${this.configService.get('APP_URL') || '#'}" 
+              <a href="${appUrl}" 
                  style="display: inline-block; padding: 12px 24px; background: #ffffff; 
                         color: #0ea5e9; text-decoration: none; border-radius: 6px; font-weight: bold;
                         border: 2px solid #0ea5e9;">
