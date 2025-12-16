@@ -1,14 +1,6 @@
 import { Injectable, Logger, OnModuleInit } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
-import * as nodemailer from "nodemailer";
-
-interface EmailConfig {
-  host: string;
-  port: number;
-  secure: boolean;
-  user: string;
-  pass: string;
-}
+import * as nodemailer from 'nodemailer';
 
 interface EmailTemplate {
   subject: string;
@@ -25,120 +17,82 @@ export class MailService implements OnModuleInit {
   private readonly supportEmail: string;
 
   constructor(private readonly configService: ConfigService) {
-    this.fromEmail = `"${this.appName}" <${this.configService.get("EMAIL_USER")}>`;
-    this.supportEmail = this.configService.get("EMAIL_USER") || this.configService.get("EMAIL_USER");
+    const emailUser = this.configService.get("EMAIL_USER");
+    this.fromEmail = `"${this.appName}" <${emailUser}>`;
+    this.supportEmail = emailUser;
   }
 
   async onModuleInit() {
     await this.initializeTransporter();
   }
 
-private async initializeTransporter(): Promise<void> {
-  const config = this.getEmailConfig();
-  
-  if (!this.isConfigValid(config)) {
-    this.logger.warn('Configuration email incomplète - service email désactivé');
-    this.isServiceAvailable = false;
-    return;
-  }
+  private async initializeTransporter(): Promise<void> {
+    const host = this.configService.get("EMAIL_HOST");
+    const port = parseInt(this.configService.get("EMAIL_PORT"));
+    const user = this.configService.get("EMAIL_USER");
+    const pass = this.configService.get("EMAIL_PASS");
 
-  try {
-    // Configuration exclusive pour port 587 avec STARTTLS
-    const secure = false; // Toujours false pour port 587
-    const useTls = config.port === 587; // STARTTLS pour le port 587
-    
-    this.transporter = nodemailer.createTransport({
-      host: config.host,
-      port: config.port,
-      secure: secure, // false pour port 587
-      requireTLS: useTls, // true pour port 587
-      ignoreTLS: !useTls, // false pour port 587
-      auth: {
-        user: config.user,
-        pass: config.pass,
-      },
-      tls: {
-        rejectUnauthorized: true,
-        ciphers: 'SSLv3'
-      },
-      connectionTimeout: 30000,
-      greetingTimeout: 15000,
-      socketTimeout: 60000,
-      debug: !this.isProduction(),
-      logger: !this.isProduction(),
-    });
+    if (!host || !user || !pass) {
+      this.logger.warn('Configuration email incomplète - service désactivé');
+      this.isServiceAvailable = false;
+      return;
+    }
 
-    await this.testConnection();
-    this.isServiceAvailable = true;
-    this.logger.log('Service email initialisé avec succès');
-    
-  } catch (error) {
-    this.logger.error(`Erreur initialisation service email: ${error.message}`, error.stack);
-    this.isServiceAvailable = false;
-  }
-}
+    try {
+      this.transporter = nodemailer.createTransport({
+        host: host,
+        port: port,
+        secure: false,
+        auth: {
+          user: user,
+          pass: pass,
+        },
+        connectionTimeout: 10000,
+        greetingTimeout: 5000,
+        socketTimeout: 10000,
+      });
 
-  private getEmailConfig(): Partial<EmailConfig> {
-    return {
-      host: this.configService.get('EMAIL_HOST'),
-      port: parseInt(this.configService.get('EMAIL_PORT')),
-      secure: this.configService.get('EMAIL_SECURE'),
-      user: this.configService.get('EMAIL_USER'),
-      pass: this.configService.get('EMAIL_PASS'),
-    };
-  }
-
-  private isConfigValid(config: Partial<EmailConfig>): boolean {
-    return !!(config.host && config.user && config.pass);
-  }
-
-  private isProduction(): boolean {
-    return this.configService.get('NODE_ENV') === 'production';
+      await this.testConnection();
+      this.isServiceAvailable = true;
+      this.logger.log(`Service email initialisé avec succès (${host}:${port})`);
+      
+    } catch (error) {
+      this.logger.error(`Erreur initialisation email: ${error.message}`);
+      this.isServiceAvailable = false;
+    }
   }
 
   private async testConnection(): Promise<void> {
-    if (!this.transporter) {
-      throw new Error('Transporter non initialisé');
+    try {
+      await this.transporter.verify();
+      this.logger.debug('Connexion SMTP vérifiée avec succès');
+    } catch (error) {
+      this.logger.error(`Échec vérification SMTP: ${error.message}`);
+      throw error;
     }
-    await this.transporter.verify();
   }
 
   async sendEmail(to: string, template: EmailTemplate, context?: Record<string, any>): Promise<boolean> {
-    const maskedEmail = this.maskEmail(to);
-
-    if (!this.isServiceAvailable || !this.transporter) {
-      this.logger.warn(`Tentative d'envoi à ${maskedEmail} - service email indisponible`);
+    if (!this.isServiceAvailable) {
+      this.logger.warn(`Tentative d'envoi email - service indisponible`);
       return false;
     }
 
     const mailOptions = {
       from: this.fromEmail,
-      to,
+      to: to,
       replyTo: this.supportEmail,
       subject: template.subject,
-      html: this.renderTemplate(template.html, context),
-      headers: {
-        'X-Mailer': 'NestJS MailService',
-        'X-Priority': '3',
-      },
+      html: context ? this.renderTemplate(template.html, context) : template.html,
     };
 
     try {
-      const info = await this.transporter.sendMail(mailOptions);
-      this.logger.debug(`Email envoyé à ${maskedEmail} - Message ID: ${info.messageId}`);
+      await this.transporter.sendMail(mailOptions);
+      this.logger.debug(`Email envoyé à: ${this.maskEmail(to)}`);
       return true;
     } catch (error) {
-      this.handleEmailError(error, maskedEmail);
+      this.logger.error(`Erreur envoi email: ${error.message}`);
       return false;
-    }
-  }
-
-  private handleEmailError(error: any, maskedEmail: string): void {
-    this.logger.error(`Erreur envoi email à ${maskedEmail}: ${error.message}`);
-
-    if (error.code === 'EAUTH' || error.message.includes('Invalid login') || error.message.includes('BadCredentials')) {
-      this.isServiceAvailable = false;
-      this.logger.error('Service email désactivé - erreur d\'authentification SMTP');
     }
   }
 
@@ -281,7 +235,6 @@ private async initializeTransporter(): Promise<void> {
   private maskEmail(email: string): string {
     if (!email?.includes('@')) return '***@***';
     const [name, domain] = email.split('@');
-    if (name.length <= 2) return `***@${domain}`;
     return `${name.substring(0, 2)}***@${domain}`;
   }
 

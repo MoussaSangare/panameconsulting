@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Document, Types, Model } from 'mongoose';
+import { Document, Model, Types } from 'mongoose';
 import { Transform } from 'class-transformer';
 import { BadRequestException } from '@nestjs/common';
 
@@ -8,7 +8,8 @@ export interface RendezvousMethods {
   getEffectiveDestination(): string;
   getEffectiveFiliere(): string;
   isPast(): boolean;
-  canBeCancelled(byAdmin?: boolean): boolean;
+  canBeCancelled(): boolean;
+  isCompleted(): boolean;
   toSafeJSON(): any;
 }
 
@@ -41,12 +42,6 @@ const EDUCATION_LEVELS = [
   'Doctorat'
 ] as const;
 
-const TIME_SLOTS = [
-  '09:00', '09:30', '10:00', '10:30', '11:00', '11:30',
-  '12:00', '12:30', '13:00', '13:30', '14:00', '14:30',
-  '15:00', '15:30', '16:00', '16:30'
-] as const;
-
 export type RendezvousDocument = Rendezvous & Document & RendezvousMethods;
 
 @Schema({
@@ -70,14 +65,6 @@ export type RendezvousDocument = Rendezvous & Document & RendezvousMethods;
 export class Rendezvous {
   @Transform(({ value }) => value.toString())
   _id: Types.ObjectId;
-
-  @Prop({
-    type: Types.ObjectId,
-    ref: 'User',
-    required: true,
-    index: true
-  })
-  userId: Types.ObjectId;
 
   @Prop({
     required: true,
@@ -158,9 +145,8 @@ export class Rendezvous {
   time: string;
 
   @Prop({
-    default: RENDEZVOUS_STATUS.PENDING,
+    default: RENDEZVOUS_STATUS.CONFIRMED,
     enum: Object.values(RENDEZVOUS_STATUS),
-    index: true,
   })
   status: string;
 
@@ -177,7 +163,7 @@ export class Rendezvous {
 
   @Prop({
     required: false,
-    enum: ['admin', 'user'],
+    enum: ['admin', 'system', 'user'],
   })
   cancelledBy?: string;
 
@@ -194,7 +180,7 @@ export class Rendezvous {
   @Prop()
   updatedAt: Date;
 
-  // Virtual pour la date/heure combinée avec gestion timezone
+  // Virtual pour la date/heure combinée
   @Prop({
     virtual: true,
     get: function() {
@@ -207,19 +193,7 @@ export class Rendezvous {
       const dateTime = new Date(dateTimeStr);
       
       return isNaN(dateTime.getTime()) ? null : dateTime;
-    },
-    set: function(value: Date) {
-      if (value && !isNaN(value.getTime())) {
-        const year = value.getUTCFullYear();
-        const month = String(value.getUTCMonth() + 1).padStart(2, '0');
-        const day = String(value.getUTCDate()).padStart(2, '0');
-        const hours = String(value.getUTCHours()).padStart(2, '0');
-        const minutes = String(value.getUTCMinutes()).padStart(2, '0');
-        
-        this.date = `${year}-${month}-${day}`;
-        this.time = `${hours}:${minutes}`;
-      }
-    },
+    }
   })
   dateTime?: Date;
 }
@@ -232,15 +206,7 @@ RendezvousSchema.pre('save', async function() {
   const rendezvous = this as unknown as RendezvousDocument;
   
   try {
-    // Valider que l'utilisateur existe
-    if (rendezvous.userId) {
-      const UserModel = this.model('User') as Model<any>;
-      const userExists = await UserModel.findById(rendezvous.userId);
-      if (!userExists) {
-        throw new BadRequestException('Utilisateur non trouvé');
-      }
-    }
-
+    // Normalisation des champs
     if (rendezvous.firstName) rendezvous.firstName = rendezvous.firstName.trim();
     if (rendezvous.lastName) rendezvous.lastName = rendezvous.lastName.trim();
     if (rendezvous.email) rendezvous.email = rendezvous.email.toLowerCase().trim();
@@ -250,6 +216,7 @@ RendezvousSchema.pre('save', async function() {
     if (rendezvous.filiere) rendezvous.filiere = rendezvous.filiere.trim();
     if (rendezvous.filiereAutre) rendezvous.filiereAutre = rendezvous.filiereAutre.trim();
     
+    // Gestion des champs "Autre"
     if (rendezvous.destination === 'Autre' && rendezvous.destinationAutre) {
       rendezvous.destination = rendezvous.destinationAutre.trim();
       rendezvous.destinationAutre = undefined;
@@ -264,6 +231,7 @@ RendezvousSchema.pre('save', async function() {
       rendezvous.filiereAutre = undefined;
     }
 
+    // Validation des champs "Autre"
     if (rendezvous.destination === 'Autre' && (!rendezvous.destinationAutre || rendezvous.destinationAutre.trim() === '')) {
       throw new BadRequestException('La destination "Autre" nécessite une précision');
     }
@@ -272,6 +240,7 @@ RendezvousSchema.pre('save', async function() {
       throw new BadRequestException('La filière "Autre" nécessite une précision');
     }
 
+    // Validation de la date
     if (rendezvous.date) {
       const date = new Date(rendezvous.date);
       const today = new Date();
@@ -282,6 +251,7 @@ RendezvousSchema.pre('save', async function() {
       }
     }
 
+    // Validation des champs obligatoires
     if (!rendezvous.destination?.trim()) {
       throw new BadRequestException('La destination est obligatoire');
     }
@@ -292,6 +262,10 @@ RendezvousSchema.pre('save', async function() {
 
     if (!rendezvous.email?.trim()) {
       throw new BadRequestException("L'email est obligatoire");
+    }
+
+    if (!rendezvous.telephone?.trim()) {
+      throw new BadRequestException('Le téléphone est obligatoire');
     }
   } catch (error) {
     throw error;
@@ -325,15 +299,16 @@ RendezvousSchema.methods.isPast = function(): boolean {
   return rendezvous.dateTime < now;
 };
 
-RendezvousSchema.methods.canBeCancelled = function(byAdmin: boolean = false): boolean {
+RendezvousSchema.methods.isCompleted = function(): boolean {
+  const rendezvous = this as RendezvousDocument;
+  return rendezvous.status === RENDEZVOUS_STATUS.COMPLETED;
+};
+
+RendezvousSchema.methods.canBeCancelled = function(): boolean {
   const rendezvous = this as RendezvousDocument;
   
-  if (rendezvous.status === RENDEZVOUS_STATUS.CANCELLED || rendezvous.status === RENDEZVOUS_STATUS.COMPLETED) {
+  if (rendezvous.isCompleted() || rendezvous.status === RENDEZVOUS_STATUS.CANCELLED) {
     return false;
-  }
-
-  if (byAdmin) {
-    return true;
   }
 
   if (!rendezvous.dateTime || isNaN(rendezvous.dateTime.getTime())) {
@@ -351,6 +326,7 @@ RendezvousSchema.methods.toSafeJSON = function() {
   const rendezvous = this as RendezvousDocument;
   const obj = rendezvous.toObject();
   
+  // Masquer partiellement l'email
   if (obj.email) {
     const [localPart, domain] = obj.email.split('@');
     if (localPart && domain) {
@@ -364,7 +340,8 @@ RendezvousSchema.methods.toSafeJSON = function() {
   obj.effectiveDestination = rendezvous.getEffectiveDestination();
   obj.effectiveFiliere = rendezvous.getEffectiveFiliere();
   obj.isPast = rendezvous.isPast();
-  obj.canBeCancelledByUser = rendezvous.canBeCancelled(false);
+  obj.isCompleted = rendezvous.isCompleted();
+  obj.canBeCancelled = rendezvous.canBeCancelled();
   
   return obj;
 };
@@ -411,8 +388,24 @@ RendezvousSchema.statics.validateRendezvousDataStatic = function(data: any): voi
   }
 };
 
-// Index composé pour les recherches fréquentes
-RendezvousSchema.index({ userId: 1, status: 1 });
+// ==================== INDEXES ====================
+
+// Index pour les recherches par email
+RendezvousSchema.index({ email: 1 });
+
+// Index pour la date et l'heure
 RendezvousSchema.index({ date: 1, time: 1 });
+
+// Index pour le statut
+RendezvousSchema.index({ status: 1 });
+
+// Index composé pour les recherches combinées
 RendezvousSchema.index({ email: 1, status: 1 });
 RendezvousSchema.index({ status: 1, date: 1 });
+
+// Index unique pour prévenir les doublons sur le même créneau
+RendezvousSchema.index({ date: 1, time: 1, status: 1 }, { 
+  partialFilterExpression: { 
+    status: { $ne: RENDEZVOUS_STATUS.CANCELLED } 
+  } 
+});

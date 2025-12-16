@@ -1,6 +1,6 @@
 import { PartialType } from '@nestjs/mapped-types';
 import { CreateRendezvousDto } from './create-rendezvous.dto';
-import { IsOptional, IsEnum, ValidateIf, IsNotEmpty, IsMongoId } from 'class-validator';
+import { IsOptional, IsEnum, ValidateIf, IsNotEmpty } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
 // Constantes pour la cohérence
@@ -18,17 +18,8 @@ const ADMIN_OPINION = {
 
 export class UpdateRendezvousDto extends PartialType(CreateRendezvousDto) {
   @ApiProperty({
-    required: false,
-    example: '507f1f77bcf86cd799439011',
-    description: 'ID MongoDB de l\'utilisateur'
-  })
-  @IsOptional()
-  @IsMongoId({ message: "L'ID utilisateur doit être un ID MongoDB valide" })
-  userId?: string;
-
-  @ApiProperty({
     enum: Object.values(RENDEZVOUS_STATUS),
-    example: 'Confirmé',
+    example: 'Terminé',
     description: 'Nouveau statut du rendez-vous',
     required: false,
   })
@@ -50,7 +41,7 @@ export class UpdateRendezvousDto extends PartialType(CreateRendezvousDto) {
   })
   avisAdmin?: string;
 
-  // Validation conditionnelle pour les champs "Autre" (cohérent avec create DTO)
+  // Validation conditionnelle pour les champs "Autre"
   @ValidateIf((o) => o.destination === 'Autre')
   @IsNotEmpty({ message: 'La destination personnalisée est obligatoire quand "Autre" est sélectionné' })
   destinationAutre?: string;

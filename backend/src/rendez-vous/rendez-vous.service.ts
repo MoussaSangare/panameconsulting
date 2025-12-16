@@ -15,7 +15,6 @@ import { CreateRendezvousDto } from "./dto/create-rendezvous.dto";
 import { UpdateRendezvousDto } from "./dto/update-rendezvous.dto";
 import { UserRole } from "../schemas/user.schema";
 import { CreateProcedureDto } from "../procedure/dto/create-procedure.dto";
-import { User } from "../schemas/user.schema";
 const Holidays = require('date-holidays');
 
 // Constantes pour la cohérence - avec des types spécifiques
@@ -48,7 +47,6 @@ export class RendezvousService {
 
   constructor(
     @InjectModel(Rendezvous.name) private rendezvousModel: Model<Rendezvous>,
-    @InjectModel(User.name) private userModel: Model<User>,
     private procedureService: ProcedureService,
     private notificationService: NotificationService,
   ) {
@@ -137,41 +135,7 @@ export class RendezvousService {
   // ==================== CORE METHODS ====================
 
   async create(createDto: CreateRendezvousDto): Promise<Rendezvous> {
-    this.logger.log('Création d\'un nouveau rendez-vous');
-
-    // Valider que l'userId est un ObjectId valide
-    if (!Types.ObjectId.isValid(createDto.userId)) {
-      throw new BadRequestException("ID utilisateur invalide");
-    }
-
-    // Vérifier que l'utilisateur existe
-    const user = await this.userModel.findById(createDto.userId).exec();
-    if (!user) {
-      this.logger.warn('Utilisateur non trouvé');
-      throw new BadRequestException("Utilisateur non trouvé");
-    }
-
-    // Vérifier que l'email fourni correspond à l'utilisateur
-    const normalizedDtoEmail = createDto.email.toLowerCase().trim();
-    const normalizedUserEmail = user.email.toLowerCase().trim();
-    
-    if (normalizedDtoEmail !== normalizedUserEmail) {
-      this.logger.warn('Email ne correspond pas à l\'utilisateur');
-      throw new BadRequestException("L'email ne correspond pas à l'utilisateur");
-    }
-
-    // Vérifier s'il y a déjà un rendez-vous confirmé
-    const confirmedCount = await this.rendezvousModel.countDocuments({
-      userId: createDto.userId,
-      status: RENDEZVOUS_STATUS.CONFIRMED,
-    });
-
-    this.logger.log(`Nombre de rendez-vous confirmés: ${confirmedCount}`);
-
-    if (confirmedCount >= 1) {
-      this.logger.warn('Tentative de création d\'un deuxième rendez-vous');
-      throw new BadRequestException("Vous avez déjà un rendez-vous confirmé");
-    }
+    this.logger.log('Création d\'un nouveau rendez-vous sans compte');
 
     // Traitement des champs "Autre" et validation
     const processedData = this.processAndValidateRendezvousData(createDto);
@@ -213,7 +177,6 @@ export class RendezvousService {
 
     // Préparer les données pour l'enregistrement
     const rendezvousData: any = {
-      userId: new Types.ObjectId(createDto.userId),
       firstName: processedData.firstName.trim(),
       lastName: processedData.lastName.trim(),
       email: processedData.email.toLowerCase().trim(),
@@ -221,8 +184,7 @@ export class RendezvousService {
       niveauEtude: processedData.niveauEtude,
       date: processedData.date,
       time: processedData.time,
-      // Par défaut CONFIRMED
-      status: RENDEZVOUS_STATUS.CONFIRMED,
+      status: RENDEZVOUS_STATUS.CONFIRMED, // Par défaut confirmé
     };
 
     // Gestion des champs "Autre" pour la base de données
@@ -277,6 +239,7 @@ export class RendezvousService {
         { destination: { $regex: normalizedSearch, $options: "i" } },
         { firstName: { $regex: normalizedSearch, $options: "i" } },
         { lastName: { $regex: normalizedSearch, $options: "i" } },
+        { telephone: { $regex: normalizedSearch, $options: "i" } },
       ];
     }
 
@@ -286,7 +249,6 @@ export class RendezvousService {
         .skip(skip)
         .limit(limit)
         .sort({ date: 1, time: 1 })
-        .populate('userId', 'firstName lastName email telephone')
         .exec(),
       this.rendezvousModel.countDocuments(filters),
     ]);
@@ -302,8 +264,8 @@ export class RendezvousService {
     };
   }
 
-  async findByUserId(
-    userId: string,
+  async findByEmail(
+    email: string,
     page: number = 1,
     limit: number = 10,
     status?: string,
@@ -315,17 +277,12 @@ export class RendezvousService {
     totalPages: number;
   }> {
     
-    this.logger.log('Recherche rendez-vous par utilisateur');
+    this.logger.log('Recherche rendez-vous par email');
     
-    // Valider que l'userId est un ObjectId valide
-    if (!Types.ObjectId.isValid(userId)) {
-      throw new BadRequestException('ID utilisateur invalide');
-    }
-
-    const objectIdUserId = new Types.ObjectId(userId);
+    const normalizedEmail = email.toLowerCase().trim();
     
     const filters: any = { 
-      userId: objectIdUserId 
+      email: normalizedEmail 
     };
     
     // Filtrer par statut SEULEMENT si spécifié
@@ -360,10 +317,13 @@ export class RendezvousService {
     };
   }
 
-  async findOne(id: string, userId?: string): Promise<Rendezvous | null> {
+  async findOne(id: string): Promise<Rendezvous | null> {
     this.logger.log(`Recherche du rendez-vous avec ID: ${id}`);
     
-    if (!Types.ObjectId.isValid(id)) {
+    const isValid = (id: string) => {
+      return /^[0-9a-fA-F]{24}$/.test(id);
+    };
+    if (!isValid(id)) {
       throw new BadRequestException('ID rendez-vous invalide');
     }
 
@@ -372,16 +332,6 @@ export class RendezvousService {
     if (!rdv) {
       this.logger.warn('Rendez-vous non trouvé');
       return null;
-    }
-    
-    // Vérifier si l'utilisateur est autorisé à voir ce rendez-vous
-    if (userId) {
-      const rdvUserId = rdv.userId?.toString();
-      
-      if (rdvUserId !== userId) {
-        this.logger.warn('Accès non autorisé au rendez-vous');
-        return null;
-      }
     }
     
     this.logger.log(`Rendez-vous trouvé, statut: ${rdv.status}`);
@@ -401,44 +351,16 @@ export class RendezvousService {
       throw new NotFoundException("Rendez-vous non trouvé");
     }
 
-    // Vérifier les permissions avec userId - utiliser id directement
-    if (user.role !== UserRole.ADMIN) {
-      const rdvUserId = rdv.userId?.toString();
-      
-      // Utiliser user.id directement
-      if (rdvUserId !== user.id) {
-        this.logger.warn('Tentative d\'accès non autorisé au rendez-vous');
-        throw new ForbiddenException(
-          "Vous ne pouvez modifier que vos propres rendez-vous",
-        );
-      }
+    // Vérifier si le rendez-vous est terminé
+    if (rdv.status === RENDEZVOUS_STATUS.COMPLETED) {
+      this.logger.warn('Tentative de modification d\'un rendez-vous terminé');
+      throw new ForbiddenException("Impossible de modifier un rendez-vous terminé");
     }
 
-    // Si admin modifie le userId, vérifier que le nouvel utilisateur existe
-    if (updateDto.userId && user.role === UserRole.ADMIN) {
-      if (!Types.ObjectId.isValid(updateDto.userId)) {
-        throw new BadRequestException("ID utilisateur invalide");
-      }
-      const newUser = await this.userModel.findById(updateDto.userId).exec();
-      if (!newUser) {
-        throw new BadRequestException("Nouvel utilisateur non trouvé");
-      }
-      // Mettre à jour l'email pour correspondre au nouvel utilisateur
-      updateDto.email = newUser.email;
-    }
-
-    // Si utilisateur normal, forcer le userId à rester le sien
-    if (user.role !== UserRole.ADMIN && updateDto.userId) {
-      throw new ForbiddenException("Vous ne pouvez pas changer l'utilisateur du rendez-vous");
-    }
-
-    // Si l'email est modifié, vérifier qu'il correspond à l'utilisateur
-    if (updateDto.email) {
-      const userIdToCheck = updateDto.userId || rdv.userId.toString();
-      const userToCheck = await this.userModel.findById(userIdToCheck).exec();
-      if (userToCheck && updateDto.email.toLowerCase().trim() !== userToCheck.email.toLowerCase().trim()) {
-        throw new BadRequestException("L'email doit correspondre à l'utilisateur");
-      }
+    // Seul l'admin peut modifier un rendez-vous
+    if (!user || user.role !== UserRole.ADMIN) {
+      this.logger.warn('Tentative de modification par non-admin');
+      throw new ForbiddenException("Seuls les administrateurs peuvent modifier les rendez-vous");
     }
 
     // Validation des données si nécessaire
@@ -460,8 +382,7 @@ export class RendezvousService {
     }
 
     // Si admin veut changer le statut
-    if (updateDto.status && user.role === UserRole.ADMIN) {
-      // Admin peut mettre en attente, confirmer, annuler ou terminer
+    if (updateDto.status) {
       if (!Object.values(RENDEZVOUS_STATUS).includes(updateDto.status as RendezvousStatus)) {
         throw new BadRequestException("Statut invalide");
       }
@@ -484,15 +405,11 @@ export class RendezvousService {
           }, 0);
         }
       }
-    } else if (updateDto.status && user.role !== UserRole.ADMIN) {
-      // Utilisateur normal ne peut que annuler un rendez-vous confirmé
-      if (updateDto.status !== RENDEZVOUS_STATUS.CANCELLED) {
-        throw new ForbiddenException("Seuls les administrateurs peuvent changer le statut");
-      }
-      
-      if (rdv.status !== RENDEZVOUS_STATUS.CONFIRMED) {
-        throw new BadRequestException("Vous ne pouvez annuler que les rendez-vous confirmés");
-      }
+    }
+
+    // Ne pas permettre de changer l'email dans la mise à jour
+    if (updateDto.email && updateDto.email.toLowerCase().trim() !== rdv.email.toLowerCase().trim()) {
+      throw new BadRequestException("Impossible de modifier l'email d'un rendez-vous");
     }
 
     const updated = await this.rendezvousModel.findByIdAndUpdate(
@@ -527,6 +444,16 @@ export class RendezvousService {
     if (!user || user.role !== UserRole.ADMIN) {
       this.logger.warn('Tentative non autorisée de changement de statut');
       throw new ForbiddenException("Accès réservé aux administrateurs");
+    }
+
+    const rdv = await this.rendezvousModel.findById(id);
+    if (!rdv) {
+      throw new NotFoundException("Rendez-vous non trouvé");
+    }
+
+    // Vérifier si le rendez-vous est terminé
+    if (rdv.status === RENDEZVOUS_STATUS.COMPLETED) {
+      throw new ForbiddenException("Impossible de modifier un rendez-vous terminé");
     }
 
     const allowedStatuses = Object.values(RENDEZVOUS_STATUS);
@@ -576,7 +503,11 @@ export class RendezvousService {
     return updated;
   }
 
-  async removeWithPolicy(id: string, user: any): Promise<Rendezvous> {
+  async cancel(
+    id: string,
+    email?: string,
+    user?: any,
+  ): Promise<Rendezvous> {
     this.logger.log(`Tentative d'annulation du rendez-vous: ${id}`);
 
     const rdv = await this.rendezvousModel.findById(id);
@@ -585,30 +516,30 @@ export class RendezvousService {
       throw new NotFoundException("Rendez-vous non trouvé");
     }
 
-    const isAdmin = user.role === UserRole.ADMIN;
+    const isAdmin = user && user.role === UserRole.ADMIN;
 
-    // Vérifier les permissions avec userId - utiliser id directement
+    // Vérifier les permissions
     if (!isAdmin) {
-      const rdvUserId = rdv.userId?.toString();
+      // Pour les non-admins, vérifier l'email
+      if (!email) {
+        throw new ForbiddenException("Email requis pour annuler un rendez-vous");
+      }
       
-      // Utiliser user.id directement
-      if (rdvUserId !== user.id) {
-        this.logger.warn('Tentative d\'annulation non autorisée du rendez-vous');
+      const normalizedEmail = email.toLowerCase().trim();
+      if (normalizedEmail !== rdv.email.toLowerCase().trim()) {
+        this.logger.warn('Tentative d\'annulation avec email incorrect');
         throw new ForbiddenException(
-          "Vous ne pouvez supprimer que vos propres rendez-vous",
+          "Vous ne pouvez annuler que vos propres rendez-vous",
         );
       }
     }
 
-    // Utilisateur normal ne peut annuler que les rendez-vous CONFIRMÉS
-    if (!isAdmin && rdv.status !== RENDEZVOUS_STATUS.CONFIRMED) {
-      this.logger.warn(`Tentative d'annulation d'un rendez-vous non confirmé (statut: ${rdv.status})`);
-      throw new BadRequestException(
-        "Vous ne pouvez annuler que les rendez-vous confirmés",
-      );
+    // Vérifier que le rendez-vous n'est pas terminé
+    if (rdv.status === RENDEZVOUS_STATUS.COMPLETED) {
+      throw new BadRequestException("Impossible d'annuler un rendez-vous terminé");
     }
 
-    // Restriction horaire pour les utilisateurs
+    // Vérifier la limite horaire (sauf pour admin)
     if (!isAdmin) {
       const rdvDateTime = new Date(`${rdv.date}T${rdv.time}:00`);
       const now = new Date();
@@ -624,17 +555,22 @@ export class RendezvousService {
     }
 
     // SOFT DELETE - Changement de statut en Annulé
+    const updateData: any = {
+      status: RENDEZVOUS_STATUS.CANCELLED,
+      cancelledAt: new Date(),
+    };
+
+    if (isAdmin) {
+      updateData.cancelledBy = 'admin';
+      updateData.cancellationReason = 'Annulé par l\'administrateur';
+    } else {
+      updateData.cancelledBy = 'user';
+      updateData.cancellationReason = 'Annulé par l\'utilisateur';
+    }
+
     const updated = await this.rendezvousModel.findByIdAndUpdate(
       id,
-      {
-        status: RENDEZVOUS_STATUS.CANCELLED,
-        cancelledAt: new Date(),
-        cancelledBy: user.role === UserRole.ADMIN ? "admin" : "user",
-        cancellationReason:
-          user.role === UserRole.ADMIN
-            ? "Annulé par l'administrateur"
-            : "Annulé par l'utilisateur",
-      },
+      updateData,
       { new: true },
     );
 
@@ -646,57 +582,6 @@ export class RendezvousService {
     this.logger.log(`Rendez-vous annulé: ${id}`);
 
     // Notification d'annulation
-    await this.sendNotification(updated, "status");
-
-    return updated;
-  }
-
-  async confirmByUser(id: string, user: any): Promise<Rendezvous> {
-    this.logger.log(`Tentative de confirmation du rendez-vous: ${id}`);
-
-    const rdv = await this.rendezvousModel.findById(id);
-    if (!rdv) {
-      this.logger.warn('Rendez-vous non trouvé pour confirmation');
-      throw new NotFoundException("Rendez-vous non trouvé");
-    }
-
-    // Seul l'admin peut confirmer/changer le statut
-    if (user.role !== UserRole.ADMIN) {
-      this.logger.warn('Tentative de confirmation par non-admin');
-      throw new ForbiddenException(
-        "La confirmation des rendez-vous est réservée aux administrateurs",
-      );
-    }
-
-    if (rdv.status !== RENDEZVOUS_STATUS.PENDING) {
-      this.logger.warn(`Tentative de confirmation d'un rendez-vous non en attente (statut: ${rdv.status})`);
-      throw new BadRequestException(
-        "Seuls les rendez-vous en attente peuvent être confirmés par l'admin",
-      );
-    }
-
-    // Vérifier que le rendez-vous n'est pas passé
-    const now = new Date();
-    const rdvDateTime = new Date(`${rdv.date}T${rdv.time}`);
-    if (rdvDateTime < now) {
-      this.logger.warn('Tentative de confirmation d\'un rendez-vous passé');
-      throw new BadRequestException(
-        "Impossible de confirmer un rendez-vous passé",
-      );
-    }
-
-    const updated = await this.rendezvousModel.findByIdAndUpdate(
-      id,
-      { status: RENDEZVOUS_STATUS.CONFIRMED },
-      { new: true },
-    );
-
-    if (!updated) {
-      this.logger.error('Rendez-vous non trouvé après confirmation');
-      throw new NotFoundException("Rendez-vous non trouvé après confirmation");
-    }
-
-    this.logger.log(`Rendez-vous confirmé par admin: ${id}`);
     await this.sendNotification(updated, "status");
 
     return updated;
@@ -922,6 +807,10 @@ export class RendezvousService {
       try {
         const createDto: CreateProcedureDto = {
           rendezVousId: rendezvous._id.toString(),
+          email: rendezvous.email,
+          firstName: rendezvous.firstName,
+          lastName: rendezvous.lastName,
+          telephone: rendezvous.telephone,
         };
         await this.procedureService.createFromRendezvous(createDto);
         this.logger.log(`Procédure créée pour le rendez-vous: ${rendezvous._id}`);
