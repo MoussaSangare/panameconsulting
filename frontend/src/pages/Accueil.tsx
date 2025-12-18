@@ -97,6 +97,7 @@ function Accueil() {
         </Helmet>
 
         <main className='flex-1'>
+          
           <Hero />
           <About />
           <Valeur />

@@ -13,42 +13,41 @@ const GlobalToastContainer = () => (
     position='top-right'
     autoClose={3000}
     hideProgressBar={false}
-    newestOnTop={true}
-    closeOnClick
-    pauseOnHover
-    draggable
+    newestOnTop={false}
+    closeOnClick={true}
+    rtl={false}
+    pauseOnFocusLoss={false}
+    draggable={true}
+    pauseOnHover={true}
     theme='light'
     limit={1}
-    pauseOnFocusLoss={false}
+    toastClassName='toast-custom'
+    bodyClassName='toast-body'
+    progressClassName='toast-progress'
   />
 );
 
-// Vérification que nous sommes dans un environnement browser
-if (typeof window !== 'undefined') {
-  const rootElement = document.getElementById('root');
+// Vérification robuste du DOM
+const rootElement = document.getElementById('root');
 
-  if (rootElement) {
-    ReactDOM.createRoot(rootElement).render(
-      <React.StrictMode>
-        <HelmetProvider>
-          <BrowserRouter
-            future={{
-              v7_startTransition: true,
-              v7_relativeSplatPath: true,
-            }}
-          >
-            <AuthProvider>
-              <App />
-              <GlobalToastContainer />
-            </AuthProvider>
-          </BrowserRouter>
-        </HelmetProvider>
-      </React.StrictMode>
-    );
-  } else {
-    // Gestion d'erreur silencieuse en développement uniquement
-    if (import.meta.env.DEV) {
-      console.error("Élément 'root' non trouvé dans le DOM");
-    }
-  }
+if (!rootElement) {
+  throw new Error("Élément 'root' non trouvé dans le DOM");
 }
+
+ReactDOM.createRoot(rootElement).render(
+  <React.StrictMode>
+    <HelmetProvider>
+      <BrowserRouter
+        future={{
+          v7_startTransition: true,
+          v7_relativeSplatPath: true,
+        }}
+      >
+        <AuthProvider>
+          <App />
+          <GlobalToastContainer />
+        </AuthProvider>
+      </BrowserRouter>
+    </HelmetProvider>
+  </React.StrictMode>
+);

@@ -34,7 +34,8 @@ import MotdePasseoublie from './pages/MotdePasseoublie';
 // Pages admin (lazy loaded)
 const UsersManagement = lazy(() => import('./pages/admin/UsersManagement'));
 const AdminLayout = lazy(() => import('./AdminLayout'));
-const AdminMessages = lazy(() => import('./pages/admin/AdminMessages'));
+const AdminMessages = lazy(() =>
+  import('./pages/admin/AdminMessages'));
 const AdminProfile = lazy(() => import('./pages/admin/AdminProfile'));
 const AdminProcedure = lazy(() => import('./pages/admin/AdminProcedure'));
 const AdminDestinations = lazy(() => import('./pages/admin/AdminDestinations'));
@@ -88,7 +89,6 @@ function App() {
     }
   }, []);
 
-  // Gestion du scroll en haut lors du changement de route
   useEffect(() => {
     safeScrollToTop();
 
@@ -103,7 +103,6 @@ function App() {
     };
   }, [location.pathname, safeScrollToTop]);
 
-  // Initialisation AOS simplifiée
   useEffect(() => {
     if (typeof globalThis.window === 'undefined' || isAOSInitialized) return;
 
@@ -117,13 +116,9 @@ function App() {
     setIsAOSInitialized(true);
   }, [isAOSInitialized]);
 
-  // Afficher le loader pendant le chargement
   if (isLoading) {
     return <Loader />;
   }
-
-  // Fonction utilitaire pour déterminer si l'utilisateur est admin
-  const isAdminUser = user?.role === 'admin' || user?.isAdmin;
 
   return (
     <ErrorBoundary>
@@ -136,14 +131,22 @@ function App() {
           name='description'
           content="Paname Consulting : expert en accompagnement étudiant à l'étranger, organisation de voyages d'affaires et demandes de visa. Conseil personnalisé pour votre réussite internationale."
         />
-        <link rel='apple-touch-icon' href='/paname-consulting.png' />
-        <link rel='icon' href='/paname-consulting.ico' sizes='any' />
-        <link rel='icon' href='/paname-consulting.svg' type='image/svg+xml' />
+          <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+
+        <meta 
+          name="viewport" 
+          content="width=device-width, initial-scale=1, maximum-scale=5" 
+        />
+        <link rel="icon" href="/paname-consulting.ico" sizes="any" />
+        <link rel="icon" href="/paname-consulting.svg" type="image/svg+xml" />
+        <link rel="apple-touch-icon" href="/paname-consulting.png" />
+        <link rel="manifest" href="/manifest.json" />
+        <meta property="og:url" content="https://panameconsulting.vercel.app" />
+
       </Helmet>
 
       <div key={navigationKey}>
         <Routes>
-          {/* Routes publiques avec Header et Footer */}
           <Route
             path='/'
             element={
@@ -180,7 +183,6 @@ function App() {
             }
           />
 
-          {/* Rendez-vous - layout minimal */}
           <Route
             path='/rendez-vous'
             element={
@@ -207,13 +209,14 @@ function App() {
             }
           />
 
-          {/* Redirections uniformisées pour l'authentification */}
           <Route
             path='/connexion'
             element={
               isAuthenticated ? (
                 <Navigate
-                  to={isAdminUser ? '/gestionnaire/statistiques' : '/'}
+                  to={user?.role === 'admin' || user?.isAdmin === true 
+                    ? '/gestionnaire/statistiques' 
+                    : '/'}
                   replace
                 />
               ) : (
@@ -229,7 +232,9 @@ function App() {
             element={
               isAuthenticated ? (
                 <Navigate
-                  to={isAdminUser ? '/gestionnaire/statistiques' : '/'}
+                  to={user?.role === 'admin' || user?.isAdmin === true 
+                    ? '/gestionnaire/statistiques' 
+                    : '/'}
                   replace
                 />
               ) : (
@@ -245,7 +250,9 @@ function App() {
             element={
               isAuthenticated ? (
                 <Navigate
-                  to={isAdminUser ? '/gestionnaire/statistiques' : '/'}
+                  to={user?.role === 'admin' || user?.isAdmin === true 
+                    ? '/gestionnaire/statistiques' 
+                    : '/'}
                   replace
                 />
               ) : (
@@ -256,7 +263,6 @@ function App() {
             }
           />
 
-          {/* Routes utilisateur connecté - redirection si non authentifié */}
           <Route
             path='/mes-rendez-vous'
             element={
@@ -308,7 +314,6 @@ function App() {
             }
           />
 
-          {/* Administration - redirection si non admin */}
           <Route
             path='/gestionnaire/*'
             element={
@@ -329,31 +334,12 @@ function App() {
             <Route path='rendez-vous' element={<AdminRendezVous />} />
           </Route>
 
-          {/* Redirections pour compatibilité */}
-          <Route
-            path='/user-rendez-vous'
-            element={<Navigate to='/mes-rendez-vous' replace />}
-          />
-          <Route
-            path='/user-profile'
-            element={<Navigate to='/mon-profil' replace />}
-          />
-          <Route
-            path='/user-procedure'
-            element={<Navigate to='/ma-procedure' replace />}
-          />
-
-          {/* Redirection admin vers le dashboard */}
-          <Route
-            path='/admin'
-            element={<Navigate to='/gestionnaire/statistiques' replace />}
-          />
+         
           <Route
             path='/gestionnaire'
             element={<Navigate to='/gestionnaire/statistiques' replace />}
           />
 
-          {/* Route 404 */}
           <Route path='*' element={<NotFound />} />
         </Routes>
       </div>

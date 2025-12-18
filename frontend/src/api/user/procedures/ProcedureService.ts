@@ -1,4 +1,3 @@
-// ProcedureService.ts - VERSION COMPLÈTE SYNCHRONISÉE AVEC BACKEND
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../../../context/AuthContext';
 import { toast } from 'react-toastify';
@@ -77,77 +76,27 @@ export interface CancelProcedureDto {
   reason?: string;
 }
 
-// ==================== SERVICE API ====================
+// ==================== SERVICE API UTILISANT LE CONTEXTE ====================
 class ProcedureApiService {
-  private readonly VITE_API_URL = import.meta.env.VITE_API_URL;
-  private readonly API_TIMEOUT = 15000;
-
   /**
-   * Effectuer une requête API avec token depuis le contexte
+   * Récupérer les procédures de l'utilisateur connecté
+   * Utilise fetchWithAuth du contexte pour gérer automatiquement les tokens
    */
-  private async fetchWithAuth(
-    url: string,
-    options: RequestInit = {},
-    token: string
-  ): Promise<Response> {
-    const controller = new AbortController();
-    const timeoutId = globalThis.setTimeout(
-      () => controller.abort(),
-      this.API_TIMEOUT
-    );
-
+  async fetchUserProcedures(
+    fetchWithAuth: (endpoint: string, options?: RequestInit) => Promise<Response>,
+    page: number = 1,
+    limit: number = 10
+  ): Promise<PaginatedUserProcedures> {
     try {
-      const response = await globalThis.fetch(url, {
-        ...options,
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-          ...options.headers,
-        },
-        credentials: 'include',
-        signal: controller.signal,
-      });
-
-      globalThis.clearTimeout(timeoutId);
-
-      // Gestion des erreurs HTTP
-      if (response.status === 401) {
-        throw new Error('SESSION_EXPIRED');
-      }
+      const response = await fetchWithAuth(
+        `/api/procedures/user?page=${page}&limit=${limit}`
+      );
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
         const errorMessage = errorData.message || `Erreur ${response.status}`;
         throw new Error(errorMessage);
       }
-
-      return response;
-    } catch (error: any) {
-      globalThis.clearTimeout(timeoutId);
-
-      if (error.name === 'AbortError') {
-        throw new Error('Délai de connexion dépassé');
-      }
-
-      // Propagons l'erreur pour que le hook puisse la gérer
-      throw error;
-    }
-  }
-
-  /**
-   * Récupérer les procédures de l'utilisateur connecté
-   */
-  async fetchUserProcedures(
-    token: string,
-    page: number = 1,
-    limit: number = 10
-  ): Promise<PaginatedUserProcedures> {
-    try {
-      const response = await this.fetchWithAuth(
-        `${this.VITE_API_URL}/api/procedures/user?page=${page}&limit=${limit}`,
-        { method: 'GET' },
-        token
-      );
 
       const data = await response.json();
 
@@ -162,7 +111,6 @@ class ProcedureApiService {
 
       return transformedData;
     } catch (error: any) {
-      // Gestion d'erreur silencieuse en développement uniquement
       if (import.meta.env.DEV) {
         globalThis.console.error('Erreur fetchUserProcedures:', error.message);
       }
@@ -180,7 +128,7 @@ class ProcedureApiService {
    * Récupérer les détails d'une procédure spécifique
    */
   async fetchProcedureDetails(
-    token: string,
+    fetchWithAuth: (endpoint: string, options?: RequestInit) => Promise<Response>,
     procedureId: string
   ): Promise<UserProcedure> {
     if (!procedureId) {
@@ -189,16 +137,17 @@ class ProcedureApiService {
     }
 
     try {
-      const response = await this.fetchWithAuth(
-        `${this.VITE_API_URL}/api/procedures/${procedureId}`,
-        { method: 'GET' },
-        token
-      );
+      const response = await fetchWithAuth(`/api/procedures/${procedureId}`);
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        const errorMessage = errorData.message || `Erreur ${response.status}`;
+        throw new Error(errorMessage);
+      }
 
       const data = await response.json();
       return this.transformProcedureData(data);
     } catch (error: any) {
-      // Gestion d'erreur silencieuse en développement uniquement
       if (import.meta.env.DEV) {
         globalThis.console.error(
           'Erreur fetchProcedureDetails:',
@@ -218,7 +167,7 @@ class ProcedureApiService {
    * Annuler une procédure
    */
   async cancelProcedure(
-    token: string,
+    fetchWithAuth: (endpoint: string, options?: RequestInit) => Promise<Response>,
     procedureId: string,
     reason?: string
   ): Promise<UserProcedure> {
@@ -228,21 +177,25 @@ class ProcedureApiService {
     }
 
     try {
-      const response = await this.fetchWithAuth(
-        `${this.VITE_API_URL}/api/procedures/${procedureId}/cancel`,
+      const response = await fetchWithAuth(
+        `/api/procedures/${procedureId}/cancel`,
         {
           method: 'PUT',
           body: JSON.stringify({ reason } as CancelProcedureDto),
-        },
-        token
+        }
       );
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        const errorMessage = errorData.message || `Erreur ${response.status}`;
+        throw new Error(errorMessage);
+      }
 
       const data = await response.json();
 
       toast.success('Procédure annulée avec succès');
       return this.transformProcedureData(data);
     } catch (error: any) {
-      // Gestion d'erreur silencieuse en développement uniquement
       if (import.meta.env.DEV) {
         globalThis.console.error('Erreur cancelProcedure:', error.message);
       }
@@ -319,13 +272,13 @@ class ProcedureApiService {
   }
 }
 
-// ==================== HOOKS PERSONNALISÉS ====================
+// ==================== HOOKS PERSONNALISÉS UTILISANT LE CONTEXTE ====================
 
 /**
  * Hook pour récupérer les procédures de l'utilisateur
  */
 export const useUserProcedures = (page: number = 1, limit: number = 10) => {
-  const { access_token, logout } = useAuth();
+  const { fetchWithAuth, access_token } = useAuth();
   const [procedures, setProcedures] = useState<PaginatedUserProcedures | null>(
     null
   );
@@ -346,7 +299,7 @@ export const useUserProcedures = (page: number = 1, limit: number = 10) => {
     try {
       const apiService = new ProcedureApiService();
       const data = await apiService.fetchUserProcedures(
-        access_token,
+        fetchWithAuth,
         page,
         limit
       );
@@ -355,14 +308,11 @@ export const useUserProcedures = (page: number = 1, limit: number = 10) => {
       const errorMessage = err.message || 'ERREUR_INCONNUE';
       setError(errorMessage);
 
-      // Si c'est une erreur de session, déclencher la déconnexion
-      if (errorMessage === 'SESSION_EXPIRED') {
-        logout();
-      }
+      // Le contexte gère déjà la déconnexion pour SESSION_EXPIRED
     } finally {
       setLoading(false);
     }
-  }, [access_token, page, limit, logout]);
+  }, [fetchWithAuth, access_token, page, limit]);
 
   useEffect(() => {
     fetchProcedures();
@@ -380,7 +330,7 @@ export const useUserProcedures = (page: number = 1, limit: number = 10) => {
  * Hook pour récupérer les détails d'une procédure
  */
 export const useProcedureDetails = (procedureId: string | null) => {
-  const { access_token, logout } = useAuth();
+  const { fetchWithAuth, access_token } = useAuth();
   const [procedure, setProcedure] = useState<UserProcedure | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
@@ -404,21 +354,17 @@ export const useProcedureDetails = (procedureId: string | null) => {
     try {
       const apiService = new ProcedureApiService();
       const data = await apiService.fetchProcedureDetails(
-        access_token,
+        fetchWithAuth,
         procedureId
       );
       setProcedure(data);
     } catch (err: any) {
       const errorMessage = err.message || 'ERREUR_INCONNUE';
       setError(errorMessage);
-
-      if (errorMessage === 'SESSION_EXPIRED') {
-        logout();
-      }
     } finally {
       setLoading(false);
     }
-  }, [procedureId, access_token, logout]);
+  }, [procedureId, fetchWithAuth, access_token]);
 
   useEffect(() => {
     fetchDetails();
@@ -436,7 +382,7 @@ export const useProcedureDetails = (procedureId: string | null) => {
  * Hook pour annuler une procédure
  */
 export const useCancelProcedure = () => {
-  const { access_token, logout } = useAuth();
+  const { fetchWithAuth, access_token } = useAuth();
   const [loading, setLoading] = useState<boolean>(false);
 
   const cancelProcedure = useCallback(
@@ -457,24 +403,19 @@ export const useCancelProcedure = () => {
       try {
         const apiService = new ProcedureApiService();
         const data = await apiService.cancelProcedure(
-          access_token,
+          fetchWithAuth,
           procedureId,
           reason
         );
         return data;
       } catch (err: any) {
         const errorMessage = err.message || 'ERREUR_INCONNUE';
-
-        if (errorMessage === 'SESSION_EXPIRED') {
-          logout();
-        }
-
         throw err;
       } finally {
         setLoading(false);
       }
     },
-    [access_token, logout]
+    [fetchWithAuth, access_token]
   );
 
   return {

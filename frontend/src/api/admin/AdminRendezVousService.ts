@@ -1,40 +1,35 @@
-// AdminRendezVousService.ts
-import { useAuth } from '../../context/AuthContext';
+import { useMemo } from 'react';
+import { toast } from 'react-toastify';
+
+// Types exportés - alignés avec le backend
+export type RendezvousStatus = 'En attente' | 'Confirmé' | 'Terminé' | 'Annulé';
+export type AdminOpinion = 'Favorable' | 'Défavorable';
 
 export interface Rendezvous {
-  _id: string;
+  id: string;
   firstName: string;
   lastName: string;
   email: string;
   telephone: string;
-  date: string;
-  time: string;
-  status: 'En attente' | 'Confirmé' | 'Terminé' | 'Annulé';
   destination: string;
   destinationAutre?: string;
   niveauEtude: string;
   filiere: string;
   filiereAutre?: string;
-  avisAdmin?: 'Favorable' | 'Défavorable';
+  date: string;
+  time: string;
+  status: RendezvousStatus;
+  avisAdmin?: AdminOpinion;
   cancelledAt?: string;
   cancelledBy?: 'admin' | 'user';
   cancellationReason?: string;
   createdAt: string;
   updatedAt: string;
-}
-
-export interface CreateRendezVousData {
-  firstName: string;
-  lastName: string;
-  email: string;
-  telephone: string;
-  date: string;
-  time: string;
-  destination: string;
-  destinationAutre?: string;
-  niveauEtude: string;
-  filiere: string;
-  filiereAutre?: string;
+  dateTime?: Date;
+  effectiveDestination?: string;
+  effectiveFiliere?: string;
+  isPast?: boolean;
+  canBeCancelledByUser?: boolean;
 }
 
 export interface RendezvousListResponse {
@@ -45,20 +40,56 @@ export interface RendezvousListResponse {
   totalPages: number;
 }
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+export interface CreateRendezvousData {
+  firstName: string;
+  lastName: string;
+  email: string;
+  telephone: string;
+  destination: string;
+  destinationAutre?: string;
+  niveauEtude: string;
+  filiere: string;
+  filiereAutre?: string;
+  date: string;
+  time: string;
+}
 
-// ✅ Constantes pour la cohérence avec le backend
-export const RENDEZVOUS_STATUS = {
-  PENDING: 'En attente',
-  CONFIRMED: 'Confirmé',
-  COMPLETED: 'Terminé',
-  CANCELLED: 'Annulé',
-} as const;
+export interface UpdateRendezvousData {
+  firstName?: string;
+  lastName?: string;
+  email?: string;
+  telephone?: string;
+  destination?: string;
+  destinationAutre?: string;
+  niveauEtude?: string;
+  filiere?: string;
+  filiereAutre?: string;
+  date?: string;
+  time?: string;
+  status?: RendezvousStatus;
+  avisAdmin?: AdminOpinion;
+}
 
-export const ADMIN_OPINION = {
-  FAVORABLE: 'Favorable',
-  UNFAVORABLE: 'Défavorable',
-} as const;
+export interface FilterParams {
+  page?: number;
+  limit?: number;
+  status?: RendezvousStatus;
+  date?: string;
+  search?: string;
+}
+
+// Constantes pour la cohérence avec le backend
+const RENDEZVOUS_STATUS = {
+  PENDING: 'En attente' as const,
+  CONFIRMED: 'Confirmé' as const,
+  COMPLETED: 'Terminé' as const,
+  CANCELLED: 'Annulé' as const
+};
+
+const ADMIN_OPINION = {
+  FAVORABLE: 'Favorable' as const,
+  UNFAVORABLE: 'Défavorable' as const
+};
 
 const EDUCATION_LEVELS = [
   'Bac',
@@ -67,609 +98,992 @@ const EDUCATION_LEVELS = [
   'Licence',
   'Master I',
   'Master II',
-  'Doctorat',
+  'Doctorat'
 ] as const;
 
 const TIME_SLOTS = [
-  '09:00',
-  '09:30',
-  '10:00',
-  '10:30',
-  '11:00',
-  '11:30',
-  '12:00',
-  '12:30',
-  '13:00',
-  '13:30',
-  '14:00',
-  '14:30',
-  '15:00',
-  '15:30',
-  '16:00',
-  '16:30',
+  '09:00', '09:30', '10:00', '10:30', '11:00', '11:30',
+  '12:00', '12:30', '13:00', '13:30', '14:00', '14:30',
+  '15:00', '15:30', '16:00', '16:30'
 ] as const;
 
-// ✅ Utilitaire pour créer une requête authentifiée
-const createAuthenticatedFetch = (access_token: string | null) => {
-  return async <T>(url: string, options: RequestInit = {}): Promise<T> => {
-    if (import.meta.env.DEV) {
-      globalThis.console.log(`📡 Requête API: ${API_URL}${url}`);
-    }
+// Interface pour les messages d'erreur
+interface ErrorMessages {
+  // Messages génériques
+  NETWORK_ERROR: string;
+  SERVER_ERROR: string;
+  UNAUTHORIZED: string;
+  FORBIDDEN: string;
+  NOT_FOUND: string;
+  VALIDATION_ERROR: string;
+  RATE_LIMIT: string;
+  
+  // Messages spécifiques au rendez-vous
+  ACCOUNT_REQUIRED: string;
+  EMAIL_MISMATCH: string;
+  ALREADY_CONFIRMED: string;
+  SLOT_UNAVAILABLE: string;
+  DATE_FULL: string;
+  PAST_DATE: string;
+  PAST_SLOT: string;
+  WEEKEND: string;
+  HOLIDAY: string;
+  INVALID_TIME: string;
+  INVALID_TIME_SLOT: string;
+  COMPLETED_NO_EDIT: string;
+  CANCEL_THRESHOLD: string;
+  CANCEL_ONLY_CONFIRMED: string;
+  ADMIN_REQUIRED_STATUS: string;
+  TERMINATE_REQUIRES_AVIS: string;
+  INVALID_AVIS: string;
+  DESTINATION_REQUIRED: string;
+  FILIERE_REQUIRED: string;
+  NO_ACCOUNT_FOUND: string;
+  CANT_UPDATE_OTHERS: string;
+  
+  // Messages de succès
+  CREATE_SUCCESS: string;
+  UPDATE_SUCCESS: string;
+  STATUS_UPDATE_SUCCESS: string;
+  DELETE_SUCCESS: string;
+  CONFIRM_SUCCESS: string;
+  TERMINATE_SUCCESS: string;
+  FETCH_SUCCESS: string;
+}
 
-    if (!access_token) {
-      if (import.meta.env.DEV) {
-        globalThis.console.error('❌ Token non disponible');
-      }
-      throw new Error('Token non disponible. Veuillez vous reconnecter.');
-    }
+// Messages d'erreur alignés avec le backend
+const ERROR_MESSAGES: ErrorMessages = {
+  // Messages génériques
+  NETWORK_ERROR: 'Erreur réseau. Vérifiez votre connexion.',
+  SERVER_ERROR: 'Erreur serveur. Veuillez réessayer.',
+  UNAUTHORIZED: 'Session expirée. Veuillez vous reconnecter.',
+  FORBIDDEN: 'Accès non autorisé.',
+  NOT_FOUND: 'Rendez-vous non trouvé.',
+  VALIDATION_ERROR: 'Données invalides.',
+  RATE_LIMIT: 'Trop de requêtes. Veuillez patienter.',
+  
+  // Messages spécifiques au rendez-vous
+  ACCOUNT_REQUIRED: 'Vous devez avoir un compte pour prendre un rendez-vous. Veuillez vous inscrire d\'abord.',
+  EMAIL_MISMATCH: 'L\'email doit correspondre exactement à votre compte de connexion',
+  ALREADY_CONFIRMED: 'Vous avez déjà un rendez-vous confirmé',
+  SLOT_UNAVAILABLE: 'Ce créneau horaire n\'est pas disponible',
+  DATE_FULL: 'Tous les créneaux sont complets pour cette date',
+  PAST_DATE: 'Vous ne pouvez pas réserver une date passée',
+  PAST_SLOT: 'Vous ne pouvez pas réserver un créneau passé',
+  WEEKEND: 'Les réservations sont fermées le week-end',
+  HOLIDAY: 'Les réservations sont fermées les jours fériés',
+  INVALID_TIME: 'Les horaires disponibles sont entre 9h00 et 16h30',
+  INVALID_TIME_SLOT: 'Les créneaux doivent être espacés de 30 minutes (9h00, 9h30, 10h00, etc.)',
+  COMPLETED_NO_EDIT: 'Impossible de modifier un rendez-vous terminé',
+  CANCEL_THRESHOLD: 'Vous ne pouvez plus annuler votre rendez-vous à moins de 2 heures de l\'heure prévue',
+  CANCEL_ONLY_CONFIRMED: 'Vous ne pouvez annuler que les rendez-vous confirmés',
+  ADMIN_REQUIRED_STATUS: 'Seuls les administrateurs peuvent changer le statut',
+  TERMINATE_REQUIRES_AVIS: 'L\'avis admin est obligatoire pour terminer un rendez-vous',
+  INVALID_AVIS: 'Avis admin invalide. Doit être \'Favorable\' ou \'Défavorable\'',
+  DESTINATION_REQUIRED: 'La destination "Autre" nécessite une précision',
+  FILIERE_REQUIRED: 'La filière "Autre" nécessite une précision',
+  NO_ACCOUNT_FOUND: 'Aucun compte trouvé pour cet email. Veuillez d\'abord créer un compte.',
+  CANT_UPDATE_OTHERS: 'Vous ne pouvez modifier que vos propres rendez-vous',
+  
+  // Messages de succès
+  CREATE_SUCCESS: 'Rendez-vous créé avec succès',
+  UPDATE_SUCCESS: 'Rendez-vous mis à jour',
+  STATUS_UPDATE_SUCCESS: 'Statut mis à jour',
+  DELETE_SUCCESS: 'Rendez-vous annulé',
+  CONFIRM_SUCCESS: 'Rendez-vous confirmé',
+  TERMINATE_SUCCESS: 'Rendez-vous terminé',
+  FETCH_SUCCESS: 'Rendez-vous chargés',
+} as const;
 
-    const headers: HeadersInit = {
-      Authorization: `Bearer ${access_token}`,
-      'Content-Type': 'application/json',
-      ...((options.headers as Record<string, string>) || {}),
-    };
+export class AdminRendezVousService {
+  private fetchWithAuth: (endpoint: string, options?: RequestInit) => Promise<Response>;
+  private baseUrl: string = import.meta.env.VITE_API_URL || '';
+  private lastRequestTime: number = 0;
+  private MIN_REQUEST_INTERVAL = 1000;
+  private requestQueue: Promise<any> = Promise.resolve();
+  private isProcessingQueue: boolean = false;
+  private activeRequests: Set<string> = new Set();
+  private requestTimeout: number = 30000;
 
-    const fullUrl = `${API_URL}${url}`;
+  constructor(fetchWithAuth: (endpoint: string, options?: RequestInit) => Promise<Response>) {
+    this.fetchWithAuth = fetchWithAuth;
+  }
 
+  private buildQueryString(params: FilterParams): string {
+    const searchParams = new URLSearchParams();
+    
+    if (params.page !== undefined) searchParams.append('page', params.page.toString());
+    if (params.limit !== undefined) searchParams.append('limit', params.limit.toString());
+    if (params.status) searchParams.append('status', params.status);
+    if (params.date) searchParams.append('date', params.date);
+    if (params.search) searchParams.append('search', params.search.trim());
+    
+    const queryString = searchParams.toString();
+    return queryString ? `?${queryString}` : '';
+  }
+
+  private async rateLimitedFetch(endpoint: string, options?: RequestInit): Promise<Response> {
+    const requestId = `${endpoint}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    
     try {
-      const response = await globalThis.fetch(fullUrl, {
-        ...options,
-        headers,
-        credentials: 'include',
+      this.activeRequests.add(requestId);
+      
+      const now = Date.now();
+      const timeSinceLastRequest = now - this.lastRequestTime;
+      
+      if (timeSinceLastRequest < this.MIN_REQUEST_INTERVAL) {
+        const waitTime = this.MIN_REQUEST_INTERVAL - timeSinceLastRequest;
+        await new Promise(resolve => setTimeout(resolve, waitTime));
+      }
+      
+      this.lastRequestTime = Date.now();
+      
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), this.requestTimeout);
+      
+      try {
+        const response = await this.fetchWithAuth(endpoint, {
+          ...options,
+          signal: controller.signal,
+        });
+        
+        clearTimeout(timeoutId);
+        return response;
+      } catch (error) {
+        clearTimeout(timeoutId);
+        throw error;
+      }
+      
+    } finally {
+      this.activeRequests.delete(requestId);
+    }
+  }
+
+  private async queueRequest<T>(operation: () => Promise<T>, operationName: string): Promise<T> {
+    return new Promise((resolve, reject) => {
+      this.requestQueue = this.requestQueue
+        .then(async () => {
+          this.isProcessingQueue = true;
+          try {
+            console.log(`⌛ ${operationName} en cours...`);
+            const result = await operation();
+            console.log(`✅ ${operationName} réussi`);
+            resolve(result);
+          } catch (error) {
+            console.error(`❌ ${operationName} échoué:`, error);
+            reject(error);
+          } finally {
+            this.isProcessingQueue = false;
+          }
+        })
+        .catch((error) => {
+          console.error(`❌ Erreur dans la file d'attente pour ${operationName}:`, error);
+          reject(error);
+        });
+    });
+  }
+
+  private async handleResponse<T>(response: Response, operation: string): Promise<T> {
+    if (!response.ok) {
+      let errorMessage = ERROR_MESSAGES.SERVER_ERROR;
+      
+      try {
+        const errorData = await response.json();
+        
+        // Récupération du message d'erreur du backend
+        if (errorData.message) {
+          errorMessage = errorData.message;
+          
+          // Mapping des messages d'erreur spécifiques du backend
+          if (errorMessage.includes('compte pour prendre un rendez-vous')) {
+            errorMessage = ERROR_MESSAGES.ACCOUNT_REQUIRED;
+          } else if (errorMessage.includes('doit correspondre exactement')) {
+            errorMessage = ERROR_MESSAGES.EMAIL_MISMATCH;
+          } else if (errorMessage.includes('déjà un rendez-vous confirmé')) {
+            errorMessage = ERROR_MESSAGES.ALREADY_CONFIRMED;
+          } else if (errorMessage.includes('créneau horaire n\'est pas disponible')) {
+            errorMessage = ERROR_MESSAGES.SLOT_UNAVAILABLE;
+          } else if (errorMessage.includes('Tous les créneaux sont complets')) {
+            errorMessage = ERROR_MESSAGES.DATE_FULL;
+          } else if (errorMessage.includes('date passée') || errorMessage.includes('Date invalide ou passée')) {
+            errorMessage = ERROR_MESSAGES.PAST_DATE;
+          } else if (errorMessage.includes('créneau passé')) {
+            errorMessage = ERROR_MESSAGES.PAST_SLOT;
+          } else if (errorMessage.includes('week-end')) {
+            errorMessage = ERROR_MESSAGES.WEEKEND;
+          } else if (errorMessage.includes('jours fériés')) {
+            errorMessage = ERROR_MESSAGES.HOLIDAY;
+          } else if (errorMessage.includes('horaires disponibles sont entre')) {
+            errorMessage = ERROR_MESSAGES.INVALID_TIME;
+          } else if (errorMessage.includes('créneaux doivent être espacés')) {
+            errorMessage = ERROR_MESSAGES.INVALID_TIME_SLOT;
+          } else if (errorMessage.includes('modifier un rendez-vous terminé')) {
+            errorMessage = ERROR_MESSAGES.COMPLETED_NO_EDIT;
+          } else if (errorMessage.includes('moins de 2 heures')) {
+            errorMessage = ERROR_MESSAGES.CANCEL_THRESHOLD;
+          } else if (errorMessage.includes('annuler que les rendez-vous confirmés')) {
+            errorMessage = ERROR_MESSAGES.CANCEL_ONLY_CONFIRMED;
+          } else if (errorMessage.includes('administrateurs peuvent changer le statut')) {
+            errorMessage = ERROR_MESSAGES.ADMIN_REQUIRED_STATUS;
+          } else if (errorMessage.includes('avis admin est obligatoire')) {
+            errorMessage = ERROR_MESSAGES.TERMINATE_REQUIRES_AVIS;
+          } else if (errorMessage.includes('Avis admin invalide')) {
+            errorMessage = ERROR_MESSAGES.INVALID_AVIS;
+          } else if (errorMessage.includes('nécessite une précision')) {
+            if (errorMessage.includes('destination')) {
+              errorMessage = ERROR_MESSAGES.DESTINATION_REQUIRED;
+            } else if (errorMessage.includes('filière')) {
+              errorMessage = ERROR_MESSAGES.FILIERE_REQUIRED;
+            }
+          } else if (errorMessage.includes('Aucun compte trouvé')) {
+            errorMessage = ERROR_MESSAGES.NO_ACCOUNT_FOUND;
+          } else if (errorMessage.includes('vos propres rendez-vous')) {
+            errorMessage = ERROR_MESSAGES.CANT_UPDATE_OTHERS;
+          }
+        }
+        
+        // Gestion des codes HTTP
+        switch (response.status) {
+          case 400:
+            if (!errorMessage.includes(ERROR_MESSAGES.ACCOUNT_REQUIRED) && 
+                !errorMessage.includes(ERROR_MESSAGES.EMAIL_MISMATCH) &&
+                !errorMessage.includes(ERROR_MESSAGES.ALREADY_CONFIRMED)) {
+              errorMessage = errorData.message || ERROR_MESSAGES.VALIDATION_ERROR;
+            }
+            break;
+          case 401:
+            errorMessage = ERROR_MESSAGES.UNAUTHORIZED;
+            break;
+          case 403:
+            if (!errorMessage.includes(ERROR_MESSAGES.ACCOUNT_REQUIRED) && 
+                !errorMessage.includes(ERROR_MESSAGES.EMAIL_MISMATCH) &&
+                !errorMessage.includes(ERROR_MESSAGES.ALREADY_CONFIRMED)) {
+              errorMessage = ERROR_MESSAGES.FORBIDDEN;
+            }
+            break;
+          case 404:
+            errorMessage = ERROR_MESSAGES.NOT_FOUND;
+            break;
+          case 429:
+            errorMessage = ERROR_MESSAGES.RATE_LIMIT;
+            break;
+        }
+        
+      } catch (parseError) {
+        console.error('Erreur parsing error response:', parseError);
+      }
+      
+      // Afficher le toast d'erreur
+      toast.error(errorMessage, {
+        autoClose: 5000,
+        position: "top-right",
       });
+      
+      throw new Error(errorMessage);
+    }
+    
+    try {
+      const data = await response.json();
+      return data as T;
+    } catch (error) {
+      console.error('Erreur de parsing JSON:', error);
+      toast.error('Erreur lors du traitement de la réponse', {
+        autoClose: 3000,
+      });
+      throw new Error('Erreur lors du traitement de la réponse');
+    }
+  }
 
-      // ✅ Gérer les erreurs HTTP
-      if (response.status === 401) {
-        throw new Error('Session expirée. Veuillez vous reconnecter.');
+  // ==================== MÉTHODES PUBLIQUES ====================
+
+  // Méthode pour récupérer tous les rendez-vous (admin uniquement)
+  async fetchAllRendezvous(
+    page: number = 1, 
+    limit: number = 10, 
+    filters: FilterParams = {}
+  ): Promise<RendezvousListResponse> {
+    return this.queueRequest(async () => {
+      try {
+        const queryParams: FilterParams = { page, limit, ...filters };
+        const queryString = this.buildQueryString(queryParams);
+        const response = await this.rateLimitedFetch(`/api/rendezvous${queryString}`);
+        
+        const data = await this.handleResponse<RendezvousListResponse>(
+          response,
+          'Chargement des rendez-vous'
+        );
+        
+        toast.success(`${data.data.length} rendez-vous chargés`, {
+          autoClose: 2000,
+          position: "top-right",
+        });
+        
+        return data;
+      } catch (error) {
+        if (error instanceof Error) {
+          if (error.name === 'AbortError') {
+            toast.error('La requête a expiré. Veuillez réessayer.', {
+              autoClose: 3000,
+            });
+            throw new Error('Request timeout');
+          }
+        }
+        throw error;
       }
+    }, 'fetchAllRendezvous');
+  }
 
-      if (response.status === 403) {
-        throw new Error('Accès non autorisé. Administrateur requis.');
-      }
+  // Méthode pour créer un rendez-vous (admin ou utilisateur)
+  async createRendezvous(data: CreateRendezvousData, userEmail: string, isAdmin: boolean = false): Promise<Rendezvous> {
+    return this.queueRequest(async () => {
+      try {
+        // Validation frontale des données requises
+        const requiredFields = ['firstName', 'lastName', 'email', 'telephone', 'date', 'time', 'destination', 'filiere', 'niveauEtude'];
+        const missingFields = requiredFields.filter(field => !data[field as keyof CreateRendezvousData]);
+        
+        if (missingFields.length > 0) {
+          toast.error(`Champs manquants: ${missingFields.join(', ')}`, {
+            autoClose: 3000,
+          });
+          throw new Error(`Missing required fields: ${missingFields.join(', ')}`);
+        }
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        let errorMessage = `Erreur ${response.status}: ${response.statusText}`;
+        // Validation spécifique pour les champs "Autre"
+        if (data.destination === 'Autre' && (!data.destinationAutre || data.destinationAutre.trim() === '')) {
+          toast.error(ERROR_MESSAGES.DESTINATION_REQUIRED, {
+            autoClose: 3000,
+          });
+          throw new Error(ERROR_MESSAGES.DESTINATION_REQUIRED);
+        }
+        
+        if (data.filiere === 'Autre' && (!data.filiereAutre || data.filiereAutre.trim() === '')) {
+          toast.error(ERROR_MESSAGES.FILIERE_REQUIRED, {
+            autoClose: 3000,
+          });
+          throw new Error(ERROR_MESSAGES.FILIERE_REQUIRED);
+        }
 
-        try {
-          const errorData = JSON.parse(errorText);
-          errorMessage = errorData.message || errorData.error || errorMessage;
-        } catch {
-          if (errorText) {
-            errorMessage = errorText;
+        // Pour les utilisateurs non-admin, vérifier que l'email correspond
+        if (!isAdmin) {
+          const normalizedDtoEmail = data.email.toLowerCase().trim();
+          const normalizedUserEmail = userEmail.toLowerCase().trim();
+          
+          if (normalizedDtoEmail !== normalizedUserEmail) {
+            toast.error(ERROR_MESSAGES.EMAIL_MISMATCH, {
+              autoClose: 3000,
+            });
+            throw new Error(ERROR_MESSAGES.EMAIL_MISMATCH);
           }
         }
 
-        throw new Error(errorMessage);
-      }
-
-      const responseText = await response.text();
-
-      let data;
-      try {
-        data = JSON.parse(responseText);
-      } catch (parseError) {
-        // Variable 'parseError' est utilisée ici
-        throw new Error(
-          `Réponse invalide du serveur: ${responseText.substring(0, 100)}...`
-        );
-      }
-
-      return data;
-    } catch (error) {
-      if (import.meta.env.DEV) {
-        globalThis.console.error('❌ Erreur fetch:', error);
-      }
-      if (error instanceof Error) {
-        throw error;
-      }
-      throw new Error('Erreur de connexion au serveur');
-    }
-  };
-};
-
-// ✅ Service admin utilisant UNIQUEMENT les endpoints backend existants
-export const createAdminRendezVousService = (access_token: string | null) => {
-  const authenticatedFetch = createAuthenticatedFetch(access_token);
-
-  return {
-    // ==================== ENDPOINTS ADMIN EXCLUSIFS ====================
-
-    /**
-     * 1. LISTER TOUS LES RENDEZ-VOUS (Admin seulement)
-     * GET /api/rendezvous?page=1&limit=10&status=Confirmé&date=2024-12-25&search=Dupont
-     * ✅ ENDPOINT EXISTANT
-     */
-    fetchAllRendezvous: async (
-      page: number = 1,
-      limit: number = 10,
-      filters?: {
-        status?: string;
-        date?: string;
-        search?: string;
-      }
-    ): Promise<RendezvousListResponse> => {
-      if (import.meta.env.DEV) {
-        globalThis.console.log('🔍 fetchAllRendezvous appelé avec:', {
-          page,
-          limit,
-          filters,
+        const response = await this.rateLimitedFetch('/api/rendezvous', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(data),
         });
-      }
 
-      const params = new URLSearchParams();
-      params.append('page', page.toString());
-      params.append('limit', limit.toString());
+        const result = await this.handleResponse<Rendezvous>(
+          response,
+          'Création du rendez-vous'
+        );
 
-      if (filters?.status && filters.status !== 'tous') {
-        params.append('status', filters.status);
-      }
-
-      if (filters?.date) {
-        const dateRegex = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$/;
-        if (!dateRegex.test(filters.date)) {
-          throw new Error('Format de date invalide (YYYY-MM-DD requis)');
-        }
-        params.append('date', filters.date);
-      }
-
-      if (filters?.search) {
-        params.append('search', filters.search.trim());
-      }
-
-      const url = `/api/rendezvous?${params.toString()}`;
-      if (import.meta.env.DEV) {
-        globalThis.console.log('🌐 URL de la requête:', url);
-      }
-
-      try {
-        const result = await authenticatedFetch<RendezvousListResponse>(url);
+        toast.success(ERROR_MESSAGES.CREATE_SUCCESS, {
+          autoClose: 3000,
+          position: "top-right",
+        });
+        
         return result;
       } catch (error) {
-        if (import.meta.env.DEV) {
-          globalThis.console.error('❌ fetchAllRendezvous échoué:', error);
+        throw error;
+      }
+    }, 'createRendezvous');
+  }
+
+  // Méthode pour récupérer les rendez-vous d'un utilisateur spécifique
+  async fetchUserRendezvous(
+    userEmail: string,
+    page: number = 1,
+    limit: number = 10,
+    status?: RendezvousStatus
+  ): Promise<RendezvousListResponse> {
+    return this.queueRequest(async () => {
+      try {
+        const queryParams: FilterParams = { page, limit };
+        if (status) queryParams.status = status;
+        
+        const queryString = this.buildQueryString(queryParams);
+        const response = await this.rateLimitedFetch(`/api/rendezvous/user${queryString}`);
+        
+        const data = await this.handleResponse<RendezvousListResponse>(
+          response,
+          'Chargement des rendez-vous utilisateur'
+        );
+        
+        return data;
+      } catch (error) {
+        throw error;
+      }
+    }, 'fetchUserRendezvous');
+  }
+
+  // Méthode pour récupérer un rendez-vous par ID
+  async getRendezvousById(id: string, userEmail?: string, isAdmin: boolean = false): Promise<Rendezvous> {
+    return this.queueRequest(async () => {
+      if (!id || id.trim() === '' || id === 'undefined') {
+        toast.error('ID rendez-vous invalide', {
+          autoClose: 3000,
+        });
+        throw new Error('Invalid ID');
+      }
+
+      try {
+        const response = await this.rateLimitedFetch(`/api/rendezvous/${id}`);
+        
+        const data = await this.handleResponse<Rendezvous>(
+          response,
+          'Récupération du rendez-vous'
+        );
+        
+        // Vérifier les permissions d'accès
+        if (!isAdmin && userEmail) {
+          const normalizedRdvEmail = data.email.toLowerCase().trim();
+          const normalizedUserEmail = userEmail.toLowerCase().trim();
+          
+          if (normalizedRdvEmail !== normalizedUserEmail) {
+            toast.error(ERROR_MESSAGES.FORBIDDEN, {
+              autoClose: 3000,
+            });
+            throw new Error(ERROR_MESSAGES.FORBIDDEN);
+          }
+        }
+        
+        return data;
+      } catch (error) {
+        throw error;
+      }
+    }, 'getRendezvousById');
+  }
+
+  // Méthode pour mettre à jour un rendez-vous
+  async updateRendezvous(
+    id: string, 
+    data: UpdateRendezvousData, 
+    userEmail: string, 
+    isAdmin: boolean = false
+  ): Promise<Rendezvous> {
+    return this.queueRequest(async () => {
+      if (!id || id.trim() === '' || id === 'undefined') {
+        toast.error('ID rendez-vous invalide', {
+          autoClose: 3000,
+        });
+        throw new Error('Invalid ID');
+      }
+
+      try {
+        // Validation spécifique pour les champs "Autre"
+        if (data.destination === 'Autre' && (!data.destinationAutre || data.destinationAutre.trim() === '')) {
+          toast.error(ERROR_MESSAGES.DESTINATION_REQUIRED, {
+            autoClose: 3000,
+          });
+          throw new Error(ERROR_MESSAGES.DESTINATION_REQUIRED);
+        }
+        
+        if (data.filiere === 'Autre' && (!data.filiereAutre || data.filiereAutre.trim() === '')) {
+          toast.error(ERROR_MESSAGES.FILIERE_REQUIRED, {
+            autoClose: 3000,
+          });
+          throw new Error(ERROR_MESSAGES.FILIERE_REQUIRED);
+        }
+
+        // Si utilisateur normal tente de changer l'email
+        if (!isAdmin && data.email) {
+          const normalizedUpdateEmail = data.email.toLowerCase().trim();
+          const normalizedUserEmail = userEmail.toLowerCase().trim();
+          
+          if (normalizedUpdateEmail !== normalizedUserEmail) {
+            toast.error(ERROR_MESSAGES.EMAIL_MISMATCH, {
+              autoClose: 3000,
+            });
+            throw new Error(ERROR_MESSAGES.EMAIL_MISMATCH);
+          }
+        }
+
+        // Si utilisateur normal tente de changer le statut (sauf annulation)
+        if (!isAdmin && data.status && data.status !== RENDEZVOUS_STATUS.CANCELLED) {
+          toast.error(ERROR_MESSAGES.ADMIN_REQUIRED_STATUS, {
+            autoClose: 3000,
+          });
+          throw new Error(ERROR_MESSAGES.ADMIN_REQUIRED_STATUS);
+        }
+
+        // Pour "Terminé", vérifier avisAdmin obligatoire
+        if (data.status === RENDEZVOUS_STATUS.COMPLETED && !data.avisAdmin) {
+          toast.error(ERROR_MESSAGES.TERMINATE_REQUIRES_AVIS, {
+            autoClose: 3000,
+          });
+          throw new Error(ERROR_MESSAGES.TERMINATE_REQUIRES_AVIS);
+        }
+
+        // Pour "Terminé", avisAdmin doit être Favorable ou Défavorable
+        if (data.status === RENDEZVOUS_STATUS.COMPLETED && data.avisAdmin) {
+          if (data.avisAdmin !== ADMIN_OPINION.FAVORABLE && data.avisAdmin !== ADMIN_OPINION.UNFAVORABLE) {
+            toast.error(ERROR_MESSAGES.INVALID_AVIS, {
+              autoClose: 3000,
+            });
+            throw new Error(ERROR_MESSAGES.INVALID_AVIS);
+          }
+        }
+
+        const response = await this.rateLimitedFetch(`/api/rendezvous/${id}`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(data),
+        });
+
+        const result = await this.handleResponse<Rendezvous>(
+          response,
+          'Mise à jour du rendez-vous'
+        );
+
+        toast.success(ERROR_MESSAGES.UPDATE_SUCCESS, {
+          autoClose: 3000,
+          position: "top-right",
+        });
+        
+        return result;
+      } catch (error) {
+        throw error;
+      }
+    }, 'updateRendezvous');
+  }
+
+  // Méthode pour mettre à jour le statut d'un rendez-vous (admin uniquement)
+  async updateRendezvousStatus(
+    id: string, 
+    status: RendezvousStatus, 
+    avisAdmin?: AdminOpinion, 
+    userEmail?: string
+  ): Promise<Rendezvous> {
+    return this.queueRequest(async () => {
+      if (!id || id.trim() === '' || id === 'undefined') {
+        toast.error('ID rendez-vous invalide', {
+          autoClose: 3000,
+        });
+        throw new Error('Invalid ID');
+      }
+
+      if (status === RENDEZVOUS_STATUS.COMPLETED && !avisAdmin) {
+        toast.error(ERROR_MESSAGES.TERMINATE_REQUIRES_AVIS, {
+          autoClose: 3000,
+        });
+        throw new Error(ERROR_MESSAGES.TERMINATE_REQUIRES_AVIS);
+      }
+
+      try {
+        const body: any = { status };
+        if (avisAdmin !== undefined) {
+          body.avisAdmin = avisAdmin;
+        }
+
+        const response = await this.rateLimitedFetch(`/api/rendezvous/${id}/status`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(body),
+        });
+
+        const result = await this.handleResponse<Rendezvous>(
+          response,
+          'Mise à jour du statut'
+        );
+
+        toast.success(ERROR_MESSAGES.STATUS_UPDATE_SUCCESS, {
+          autoClose: 3000,
+          position: "top-right",
+        });
+        
+        return result;
+      } catch (error) {
+        throw error;
+      }
+    }, 'updateRendezvousStatus');
+  }
+
+  // Méthode pour annuler un rendez-vous (admin ou utilisateur)
+  async cancelRendezvous(
+    id: string, 
+    userEmail: string, 
+    isAdmin: boolean = false, 
+    cancellationReason?: string
+  ): Promise<Rendezvous> {
+    return this.queueRequest(async () => {
+      if (!id || id.trim() === '' || id === 'undefined') {
+        toast.error('ID rendez-vous invalide', {
+          autoClose: 3000,
+        });
+        throw new Error('Invalid ID');
+      }
+
+      try {
+        const response = await this.rateLimitedFetch(`/api/rendezvous/${id}`, {
+          method: 'DELETE',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: cancellationReason ? JSON.stringify({ cancellationReason }) : undefined,
+        });
+
+        const result = await this.handleResponse<Rendezvous>(
+          response,
+          'Annulation du rendez-vous'
+        );
+
+        toast.success(ERROR_MESSAGES.DELETE_SUCCESS, {
+          autoClose: 3000,
+          position: "top-right",
+        });
+        
+        return result;
+      } catch (error) {
+        throw error;
+      }
+    }, 'cancelRendezvous');
+  }
+
+  // Méthode pour confirmer un rendez-vous (admin uniquement)
+  async confirmRendezvous(id: string, userEmail?: string): Promise<Rendezvous> {
+    return this.queueRequest(async () => {
+      if (!id || id.trim() === '' || id === 'undefined') {
+        toast.error('ID rendez-vous invalide', {
+          autoClose: 3000,
+        });
+        throw new Error('Invalid ID');
+      }
+
+      try {
+        const response = await this.rateLimitedFetch(`/api/rendezvous/${id}/confirm`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        });
+
+        const result = await this.handleResponse<Rendezvous>(
+          response,
+          'Confirmation du rendez-vous'
+        );
+
+        toast.success(ERROR_MESSAGES.CONFIRM_SUCCESS, {
+          autoClose: 3000,
+          position: "top-right",
+        });
+        
+        return result;
+      } catch (error) {
+        throw error;
+      }
+    }, 'confirmRendezvous');
+  }
+
+  // Méthode pour récupérer les créneaux disponibles
+  async fetchAvailableSlots(date: string): Promise<string[]> {
+    return this.queueRequest(async () => {
+      if (!date || date.trim() === '') {
+        toast.error('Date requise', {
+          autoClose: 3000,
+        });
+        throw new Error('Missing date');
+      }
+
+      // Validation du format de date
+      const dateRegex = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$/;
+      if (!dateRegex.test(date)) {
+        toast.error('Format de date invalide (YYYY-MM-DD requis)', {
+          autoClose: 3000,
+        });
+        throw new Error('Invalid date format');
+      }
+
+      try {
+        const response = await this.rateLimitedFetch(
+          `/api/rendezvous/available-slots?date=${encodeURIComponent(date)}`
+        );
+
+        const data = await this.handleResponse<string[]>(
+          response,
+          'Chargement des créneaux disponibles'
+        );
+        
+        return data;
+      } catch (error) {
+        if (error instanceof Error && error.message.includes('Date invalide')) {
+          throw error;
         }
         throw error;
       }
-    },
+    }, 'fetchAvailableSlots');
+  }
 
-    /**
-     * 2. METTRE À JOUR LE STATUT (Admin seulement)
-     * PUT /api/rendezvous/:id/status
-     * ✅ ENDPOINT EXISTANT
-     */
-    updateRendezvousStatus: async (
-      id: string,
-      status: string,
-      avisAdmin?: string
-    ): Promise<Rendezvous> => {
-      if (import.meta.env.DEV) {
-        globalThis.console.log('🔄 updateRendezvousStatus appelé:', {
-          id,
-          status,
-          avisAdmin,
-        });
-      }
-
-      if (!id || id.trim() === '') {
-        throw new Error('ID de rendez-vous requis');
-      }
-
-      if (!status || status.trim() === '') {
-        throw new Error('Le statut est requis');
-      }
-
-      if (!Object.values(RENDEZVOUS_STATUS).includes(status as any)) {
-        throw new Error(
-          `Statut invalide. Valeurs autorisées: ${Object.values(RENDEZVOUS_STATUS).join(', ')}`
+  // Méthode pour récupérer les dates disponibles
+  async fetchAvailableDates(): Promise<string[]> {
+    return this.queueRequest(async () => {
+      try {
+        const response = await this.rateLimitedFetch('/api/rendezvous/available-dates');
+        
+        const data = await this.handleResponse<string[]>(
+          response,
+          'Chargement des dates disponibles'
         );
+        
+        return data;
+      } catch (error) {
+        throw error;
       }
+    }, 'fetchAvailableDates');
+  }
 
-      // ✅ Correction: Construire l'URL avec l'ID dans le chemin
-      const url = `/api/rendezvous/${id}/status`;
+  // ==================== MÉTHODES UTILITAIRES ====================
 
-      const bodyData: any = { status };
+  resetRateLimiting(): void {
+    this.lastRequestTime = 0;
+    this.requestQueue = Promise.resolve();
+    this.isProcessingQueue = false;
+    this.activeRequests.clear();
+  }
 
-      if (status === RENDEZVOUS_STATUS.COMPLETED) {
-        if (!avisAdmin || avisAdmin.trim() === '') {
-          throw new Error(
-            "L'avis admin est obligatoire pour terminer un rendez-vous"
-          );
-        }
-        if (!Object.values(ADMIN_OPINION).includes(avisAdmin as any)) {
-          throw new Error(
-            'Avis admin invalide. Valeurs autorisées: Favorable ou Défavorable'
-          );
-        }
-        bodyData.avisAdmin = avisAdmin;
-      }
+  isBusy(): boolean {
+    const isRateLimited = Date.now() - this.lastRequestTime < this.MIN_REQUEST_INTERVAL;
+    return this.isProcessingQueue || isRateLimited || this.activeRequests.size > 0;
+  }
 
-      if (import.meta.env.DEV) {
-        globalThis.console.log('🌐 URL de la requête:', url);
-        globalThis.console.log('📤 Body de la requête:', bodyData);
-      }
+  getEstimatedWaitTime(): number {
+    const now = Date.now();
+    const timeSinceLastRequest = now - this.lastRequestTime;
+    
+    if (timeSinceLastRequest >= this.MIN_REQUEST_INTERVAL) {
+      return 0;
+    }
+    
+    const rateLimitWait = this.MIN_REQUEST_INTERVAL - timeSinceLastRequest;
+    const queueWait = this.activeRequests.size * this.MIN_REQUEST_INTERVAL;
+    
+    return rateLimitWait + queueWait;
+  }
 
-      const result = await authenticatedFetch<Rendezvous>(url, {
-        method: 'PUT',
-        body: JSON.stringify(bodyData),
-      });
+  getActiveRequestCount(): number {
+    return this.activeRequests.size;
+  }
 
-      return result;
-    },
+  cancelAllRequests(): void {
+    this.activeRequests.clear();
+    this.requestQueue = Promise.resolve();
+    this.isProcessingQueue = false;
+  }
 
-    /**
-     * 3. ANNULER SANS RESTRICTION (Admin seulement)
-     * DELETE /api/rendezvous/:id
-     * ✅ ENDPOINT EXISTANT
-     */
-    cancelRendezvousAdmin: async (id: string): Promise<Rendezvous> => {
-      if (import.meta.env.DEV) {
-        globalThis.console.log('🗑️ cancelRendezvousAdmin appelé:', id);
-      }
+  setMinRequestInterval(intervalMs: number): void {
+    if (intervalMs < 500) {
+      this.MIN_REQUEST_INTERVAL = 500;
+    } else {
+      this.MIN_REQUEST_INTERVAL = intervalMs;
+    }
+  }
 
-      if (!id || id.trim() === '') {
-        throw new Error('ID de rendez-vous requis');
-      }
+  setRequestTimeout(timeoutMs: number): void {
+    if (timeoutMs < 1000) {
+      this.requestTimeout = 1000;
+    } else {
+      this.requestTimeout = timeoutMs;
+    }
+  }
 
-      const result = await authenticatedFetch<Rendezvous>(
-        `/api/rendezvous/${id}`,
-        {
-          method: 'DELETE',
-        }
-      );
-
-      return result;
-    },
-
-    // ==================== ENDPOINTS PARTAGÉS (EXISTANTS) ====================
-
-    /**
-     * CRÉER UN RENDEZ-VOUS (identique backend)
-     * POST /api/rendezvous
-     * ✅ ENDPOINT EXISTANT
-     */
-    createRendezvous: async (
-      createData: CreateRendezVousData
-    ): Promise<Rendezvous> => {
-      if (import.meta.env.DEV) {
-        globalThis.console.log('➕ createRendezvous appelé:', createData);
-      }
-
-      // Validation stricte comme backend
-      const errors: string[] = [];
-
-      if (!createData.firstName?.trim())
-        errors.push('Le prénom est obligatoire');
-      if (!createData.lastName?.trim()) errors.push('Le nom est obligatoire');
-      if (!createData.email?.trim()) errors.push("L'email est obligatoire");
-      if (!createData.telephone?.trim())
-        errors.push('Le téléphone est obligatoire');
-      if (!createData.date?.trim()) errors.push('La date est obligatoire');
-      if (!createData.time?.trim()) errors.push("L'heure est obligatoire");
-      if (!createData.destination?.trim())
-        errors.push('La destination est obligatoire');
-      if (!createData.niveauEtude?.trim())
-        errors.push("Le niveau d'étude est obligatoire");
-      if (!createData.filiere?.trim())
-        errors.push('La filière est obligatoire');
-
-      if (errors.length > 0) {
-        throw new Error(errors.join(', '));
-      }
-
-      const emailRegex = /^\S+@\S+\.\S+$/;
-      if (!emailRegex.test(createData.email)) {
-        throw new Error('Format email invalide');
-      }
-
-      const phoneRegex = /^\+?[1-9]\d{1,14}$/;
-      if (!phoneRegex.test(createData.telephone.replace(/\s/g, ''))) {
-        throw new Error('Format téléphone invalide');
-      }
-
+  // Méthode pour valider les données avant envoi (alignée avec le backend)
+  validateRendezvousData(data: Partial<CreateRendezvousData | UpdateRendezvousData>): string[] {
+    const errors: string[] = [];
+    
+    if (data.firstName && data.firstName.trim().length < 2) {
+      errors.push('Le prénom doit contenir au moins 2 caractères');
+    }
+    
+    if (data.lastName && data.lastName.trim().length < 2) {
+      errors.push('Le nom doit contenir au moins 2 caractères');
+    }
+    
+    if (data.email && !/^\S+@\S+\.\S+$/.test(data.email)) {
+      errors.push('Format d\'email invalide');
+    }
+    
+    if (data.telephone && !/^\+?[1-9]\d{1,14}$/.test(data.telephone)) {
+      errors.push('Format de téléphone invalide');
+    }
+    
+    if (data.destination && data.destination.trim() === 'Autre' && !data.destinationAutre) {
+      errors.push('La destination "Autre" nécessite une précision');
+    }
+    
+    if (data.filiere && data.filiere.trim() === 'Autre' && !data.filiereAutre) {
+      errors.push('La filière "Autre" nécessite une précision');
+    }
+    
+    if (data.niveauEtude && !EDUCATION_LEVELS.includes(data.niveauEtude as any)) {
+      errors.push('Niveau d\'étude invalide');
+    }
+    
+    if (data.date) {
       const dateRegex = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$/;
-      if (!dateRegex.test(createData.date)) {
-        throw new Error('Format de date invalide (YYYY-MM-DD requis)');
+      if (!dateRegex.test(data.date)) {
+        errors.push('Format de date invalide (YYYY-MM-DD requis)');
       }
-
+    }
+    
+    if (data.time) {
       const timeRegex = /^(09|1[0-6]):(00|30)$/;
-      if (!timeRegex.test(createData.time)) {
-        throw new Error(
-          'Créneau horaire invalide (09:00-16:30, par pas de 30min)'
-        );
+      if (!timeRegex.test(data.time)) {
+        errors.push('Créneau horaire invalide (09:00-16:30, par pas de 30min)');
       }
-
-      // Préparation des données - STRICTEMENT comme le backend
-      const processedData: any = {
-        firstName: createData.firstName.trim(),
-        lastName: createData.lastName.trim(),
-        email: createData.email.toLowerCase().trim(),
-        telephone: createData.telephone.trim(),
-        date: createData.date,
-        time: createData.time,
-        niveauEtude: createData.niveauEtude,
-      };
-
-      // Gestion des champs "Autre" - STRICTEMENT comme le backend
-      if (createData.destination === 'Autre') {
-        if (
-          !createData.destinationAutre ||
-          createData.destinationAutre.trim() === ''
-        ) {
-          throw new Error('La destination "Autre" nécessite une précision');
-        }
-        processedData.destination = 'Autre';
-        processedData.destinationAutre = createData.destinationAutre.trim();
-      } else {
-        processedData.destination = createData.destination;
+    }
+    
+    // Vérifier si c'est un UpdateRendezvousData (qui contient status et avisAdmin)
+    const isUpdateData = 'status' in data || 'avisAdmin' in data;
+    
+    if (isUpdateData) {
+      // Ces vérifications ne s'appliquent que pour UpdateRendezvousData
+      if (data.status && !Object.values(RENDEZVOUS_STATUS).includes(data.status as RendezvousStatus)) {
+        errors.push('Statut invalide');
       }
-
-      if (createData.filiere === 'Autre') {
-        if (!createData.filiereAutre || createData.filiereAutre.trim() === '') {
-          throw new Error('La filière "Autre" nécessite une précision');
-        }
-        processedData.filiere = 'Autre';
-        processedData.filiereAutre = createData.filiereAutre.trim();
-      } else {
-        processedData.filiere = createData.filiere;
+      
+      if (data.avisAdmin && !Object.values(ADMIN_OPINION).includes(data.avisAdmin as AdminOpinion)) {
+        errors.push('Avis admin invalide');
       }
+    }
+    
+    return errors;
+  }
 
-      if (import.meta.env.DEV) {
-        globalThis.console.log(
-          '📤 Données envoyées au backend:',
-          processedData
-        );
-      }
+  // Méthode pour formater la date pour l'affichage
+  formatDisplayDate(dateStr: string): string {
+    const date = new Date(dateStr);
+    return date.toLocaleDateString('fr-FR', {
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric'
+    });
+  }
 
-      const result = await authenticatedFetch<Rendezvous>('/api/rendezvous', {
-        method: 'POST',
-        body: JSON.stringify(processedData),
-      });
+  // Méthode pour formater l'heure
+  formatDisplayTime(timeStr: string): string {
+    const [hours, minutes] = timeStr.split(':').map(Number);
+    return `${hours}h${minutes === 0 ? '00' : minutes}`;
+  }
 
-      return result;
-    },
+  // Méthode pour obtenir le statut avec style
+  getStatusStyle(status: RendezvousStatus): { bg: string; text: string; icon: string } {
+    switch (status) {
+      case 'En attente':
+        return { bg: 'bg-amber-100', text: 'text-amber-800', icon: '⏱️' };
+      case 'Confirmé':
+        return { bg: 'bg-sky-100', text: 'text-sky-800', icon: '✅' };
+      case 'Terminé':
+        return { bg: 'bg-green-100', text: 'text-green-800', icon: '✓' };
+      case 'Annulé':
+        return { bg: 'bg-red-100', text: 'text-red-800', icon: '✗' };
+      default:
+        return { bg: 'bg-gray-100', text: 'text-gray-800', icon: '❓' };
+    }
+  }
 
-    /**
-     * RÉCUPÉRER UN RENDEZ-VOUS SPÉCIFIQUE
-     * GET /api/rendezvous/:id
-     * ✅ ENDPOINT EXISTANT
-     */
-    fetchRendezvousById: async (id: string): Promise<Rendezvous> => {
-      if (!id || id.trim() === '') {
-        throw new Error('ID de rendez-vous requis');
-      }
+  // Méthode pour vérifier si un rendez-vous peut être annulé par l'utilisateur
+  canUserCancelRendezvous(rendezvous: Rendezvous): boolean {
+    if (rendezvous.status !== RENDEZVOUS_STATUS.CONFIRMED) {
+      return false;
+    }
+    
+    if (rendezvous.canBeCancelledByUser !== undefined) {
+      return rendezvous.canBeCancelledByUser;
+    }
+    
+    // Calcul manuel si la propriété n'est pas disponible
+    const rdvDateTime = new Date(`${rendezvous.date}T${rendezvous.time}:00`);
+    const now = new Date();
+    const diffMs = rdvDateTime.getTime() - now.getTime();
+    const twoHoursMs = 2 * 60 * 60 * 1000;
+    
+    return diffMs > twoHoursMs;
+  }
 
-      const result = await authenticatedFetch<Rendezvous>(
-        `/api/rendezvous/${id}`
-      );
+  // Méthode pour générer tous les créneaux horaires
+  getAllTimeSlots(): string[] {
+    return [...TIME_SLOTS];
+  }
 
-      return result;
-    },
+  // Méthode pour obtenir les niveaux d'étude disponibles
+  getEducationLevels(): string[] {
+    return [...EDUCATION_LEVELS];
+  }
 
-    /**
-     * METTRE À JOUR UN RENDEZ-VOUS
-     * PUT /api/rendezvous/:id
-     * ✅ ENDPOINT EXISTANT
-     */
-    updateRendezvous: async (
-      id: string,
-      updateData: Partial<CreateRendezVousData>
-    ): Promise<Rendezvous> => {
-      if (import.meta.env.DEV) {
-        globalThis.console.log('🔄 updateRendezvous appelé:', {
-          id,
-          updateData,
-        });
-      }
+  // Méthode pour obtenir les statuts disponibles
+  getAllStatuses(): RendezvousStatus[] {
+    return Object.values(RENDEZVOUS_STATUS);
+  }
 
-      if (!id || id.trim() === '') {
-        throw new Error('ID de rendez-vous requis');
-      }
+  // Méthode pour obtenir les avis admin disponibles
+  getAdminOpinions(): AdminOpinion[] {
+    return Object.values(ADMIN_OPINION);
+  }
 
-      const result = await authenticatedFetch<Rendezvous>(
-        `/api/rendezvous/${id}`,
-        {
-          method: 'PUT',
-          body: JSON.stringify(updateData),
-        }
-      );
+  // Méthode pour vérifier si une date est un weekend
+  isWeekend(dateStr: string): boolean {
+    const date = new Date(dateStr);
+    return date.getDay() === 0 || date.getDay() === 6;
+  }
 
-      return result;
-    },
+  // Méthode pour vérifier si un créneau est passé
+  isPastTimeSlot(dateStr: string, timeStr: string): boolean {
+    const now = new Date();
+    const slotDateTime = new Date(`${dateStr}T${timeStr}:00`);
+    return slotDateTime < now;
+  }
 
-    /**
-     * CONFIRMER UN RENDEZ-VOUS (Endpoint pour utilisateur)
-     * PUT /api/rendezvous/:id/confirm
-     * ✅ ENDPOINT EXISTANT
-     */
-    confirmRendezvous: async (id: string): Promise<Rendezvous> => {
-      if (import.meta.env.DEV) {
-        globalThis.console.log('✅ confirmRendezvous appelé:', id);
-      }
+  // Méthode pour masquer l'email (sécurité)
+  maskEmail(email: string): string {
+    if (!email) return '***';
+    const [localPart, domain] = email.split('@');
+    if (!localPart || !domain) return '***';
+    
+    if (localPart.length <= 2) {
+      return `${localPart.charAt(0)}***@${domain}`;
+    }
+    return `${localPart.charAt(0)}***${localPart.charAt(localPart.length - 1)}@${domain}`;
+  }
+}
 
-      if (!id || id.trim() === '') {
-        throw new Error('ID de rendez-vous requis');
-      }
+// Hook personnalisé pour utiliser le service
+export function useAdminRendezVousService(fetchWithAuth: (endpoint: string, options?: RequestInit) => Promise<Response>) {
+  return useMemo(() => new AdminRendezVousService(fetchWithAuth), [fetchWithAuth]);
+}
 
-      const result = await authenticatedFetch<Rendezvous>(
-        `/api/rendezvous/${id}/confirm`,
-        {
-          method: 'PUT',
-        }
-      );
+// Fonction pour créer une instance du service (utile pour les composants non-hooks)
+export function createAdminRendezVousService(fetchWithAuth: (endpoint: string, options?: RequestInit) => Promise<Response>): AdminRendezVousService {
+  return new AdminRendezVousService(fetchWithAuth);
+}
 
-      return result;
-    },
-
-    /**
-     * RENDEZ-VOUS PAR UTILISATEUR
-     * GET /api/rendezvous/user?email=test@example.com&page=1&limit=10&status=En attente
-     * ✅ ENDPOINT EXISTANT
-     */
-    fetchRendezvousByUser: async (
-      email: string,
-      page: number = 1,
-      limit: number = 10,
-      status?: string
-    ): Promise<RendezvousListResponse> => {
-      if (import.meta.env.DEV) {
-        globalThis.console.log('👤 fetchRendezvousByUser appelé:', {
-          email,
-          page,
-          limit,
-          status,
-        });
-      }
-
-      if (!email || email.trim() === '') {
-        throw new Error('Email requis');
-      }
-
-      const emailRegex = /^\S+@\S+\.\S+$/;
-      if (!emailRegex.test(email)) {
-        throw new Error('Format email invalide');
-      }
-
-      const params = new URLSearchParams();
-      params.append('email', encodeURIComponent(email));
-      params.append('page', page.toString());
-      params.append('limit', limit.toString());
-
-      if (status && status !== 'tous') {
-        params.append('status', status);
-      }
-
-      const url = `/api/rendezvous/user?${params.toString()}`;
-      if (import.meta.env.DEV) {
-        globalThis.console.log('🌐 URL de la requête:', url);
-      }
-
-      return authenticatedFetch<RendezvousListResponse>(url);
-    },
-
-    // ==================== FONCTIONNALITÉS DISPONIBILITÉ ====================
-
-    /**
-     * CRÉNEAUX DISPONIBLES POUR UNE DATE
-     * GET /api/rendezvous/available-slots?date=2024-12-25
-     * ✅ ENDPOINT EXISTANT
-     */
-    fetchAvailableSlots: async (date: string): Promise<string[]> => {
-      if (!date || date.trim() === '') {
-        throw new Error('La date est requise');
-      }
-
-      const dateRegex = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$/;
-      if (!dateRegex.test(date)) {
-        throw new Error('Format de date invalide (YYYY-MM-DD requis)');
-      }
-
-      return authenticatedFetch<string[]>(
-        `/api/rendezvous/available-slots?date=${encodeURIComponent(date)}`
-      );
-    },
-
-    /**
-     * DATES DISPONIBLES
-     * GET /api/rendezvous/available-dates
-     * ✅ ENDPOINT EXISTANT
-     */
-    fetchAvailableDates: async (): Promise<string[]> => {
-      return authenticatedFetch<string[]>('/api/rendezvous/available-dates');
-    },
-
-    // ==================== CONSTANTES ET UTILITAIRES ====================
-
-    /**
-     * NIVEAUX D'ÉTUDE (constants)
-     */
-    getEducationLevels: (): string[] => {
-      return [...EDUCATION_LEVELS];
-    },
-
-    /**
-     * CRÉNEAUX HORAIRES (constants)
-     */
-    getTimeSlots: (): string[] => {
-      return [...TIME_SLOTS];
-    },
-
-    /**
-     * STATUTS DISPONIBLES (constants)
-     */
-    getStatusOptions: (): string[] => {
-      return Object.values(RENDEZVOUS_STATUS);
-    },
-
-    /**
-     * AVIS ADMIN (constants)
-     */
-    getAdminOpinionOptions: (): string[] => {
-      return Object.values(ADMIN_OPINION);
-    },
-
-    /**
-     * MASQUER L'EMAIL (pour l'affichage)
-     */
-    maskEmail: (email: string): string => {
-      if (!email) return '';
-
-      const [localPart, domain] = email.split('@');
-
-      if (!localPart || !domain) {
-        if (import.meta.env.DEV) {
-          globalThis.console.warn(`Format email invalide: ${email}`);
-        }
-        return 'email_non_disponible';
-      }
-
-      const maskedLocal =
-        localPart.length <= 2
-          ? localPart.charAt(0) + '*'
-          : localPart.charAt(0) +
-            '***' +
-            localPart.charAt(localPart.length - 1);
-
-      return `${maskedLocal}@${domain}`;
-    },
-
-    /**
-     * VALIDER LES DONNÉES DE CRÉATION (comme backend)
-     */
-    validateCreateData: (data: CreateRendezVousData): string[] => {
-      const errors: string[] = [];
-
-      if (!data.firstName?.trim()) errors.push('Le prénom est obligatoire');
-      if (!data.lastName?.trim()) errors.push('Le nom est obligatoire');
-      if (!data.email?.trim()) errors.push("L'email est obligatoire");
-      if (!data.telephone?.trim()) errors.push('Le téléphone est obligatoire');
-      if (!data.date?.trim()) errors.push('La date est obligatoire');
-      if (!data.time?.trim()) errors.push("L'heure est obligatoire");
-      if (!data.destination?.trim())
-        errors.push('La destination est obligatoire');
-      if (!data.niveauEtude?.trim())
-        errors.push("Le niveau d'étude est obligatoire");
-      if (!data.filiere?.trim()) errors.push('La filière est obligatoire');
-
-      if (data.email && !/^\S+@\S+\.\S+$/.test(data.email)) {
-        errors.push('Format email invalide');
-      }
-
-      if (data.destination === 'Autre' && !data.destinationAutre?.trim()) {
-        errors.push('La destination "Autre" nécessite une précision');
-      }
-
-      if (data.filiere === 'Autre' && !data.filiereAutre?.trim()) {
-        errors.push('La filière "Autre" nécessite une précision');
-      }
-
-      return errors;
-    },
+// Fonction utilitaire pour créer un fetchWithAuth avec token
+export function createAuthFetch(token: string): (endpoint: string, options?: RequestInit) => Promise<Response> {
+  return async (endpoint: string, options?: RequestInit) => {
+    const baseUrl = import.meta.env.VITE_API_URL || '';
+    const response = await fetch(`${baseUrl}${endpoint}`, {
+      ...options,
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,
+        ...options?.headers,
+      },
+    });
+    return response;
   };
-};
-
-// ✅ Hook custom pour utiliser le service admin
-export const useAdminRendezVousService = () => {
-  const { access_token } = useAuth();
-  return createAdminRendezVousService(access_token);
-};
+}

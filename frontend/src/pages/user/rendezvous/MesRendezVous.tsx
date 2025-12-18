@@ -1,846 +1,670 @@
-/* global console */
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { useAuth } from '../../../context/AuthContext';
-import { useRendezvousApi } from '../../../api/user/Rendezvous/MesRendezVous';
-import { format, parseISO } from 'date-fns';
-import { fr } from 'date-fns/locale';
-import {
-  CalendarDays,
-  Clock,
-  MapPin,
-  Filter,
-  Search,
-  ChevronRight,
-  AlertCircle,
-  CheckCircle,
-  XCircle,
-  RefreshCw,
-  Building,
-  GraduationCap,
-  Info,
-} from 'lucide-react';
-import {
-  UserRendezvousParams,
-  RendezvousStatus,
-} from '../../../api/user/types/rendezvous.types';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Helmet } from 'react-helmet-async';
+import { toast } from 'react-toastify';
+import { useNavigate, useLocation } from 'react-router-dom';
+import {
+  FiCalendar,
+  FiClock,
+  FiMapPin,
+  FiBook,
+  FiAward,
+  FiCheckCircle,
+  FiXCircle,
+  FiAlertCircle,
+  FiTrash2,
+  FiChevronLeft,
+  FiChevronRight,
+  FiRefreshCw,
+  FiInfo,
+  FiStar,
+  FiFilter,
+  FiX,
+  FiAlertTriangle,
+} from 'react-icons/fi';
+import { useAuth } from '../../../context/AuthContext';
+import { UserHeader } from '../../../components/user/UserHeader';
+import { 
+  UserRendezvousService, 
+  Rendezvous, 
+  PaginationState,
+  AuthFunctions 
+} from '../../../api/user/Rendezvous/UserRendezvousService';
 
-// ==================== COMPOSANT POPOVER CONFIRMATION ====================
-
-interface ConfirmPopoverProps {
-  isOpen: boolean;
-  onClose: () => void;
-  onConfirm: () => void;
-  title: string;
-  message: string;
-  confirmText?: string;
-  cancelText?: string;
-}
-
-const ConfirmPopover: React.FC<ConfirmPopoverProps> = ({
-  isOpen,
-  onClose,
-  onConfirm,
-  title,
-  message,
-  confirmText = 'Confirmer',
-  cancelText = 'Annuler',
-}) => {
-  if (!isOpen) return null;
-
-  return (
-    <div className='fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4'>
-      <div className='bg-white rounded-2xl shadow-2xl max-w-md w-full animate-in fade-in duration-200'>
-        <div className='p-6'>
-          <div className='flex items-start gap-3 mb-4'>
-            <div className='bg-sky-100 p-2 rounded-full'>
-              <Info className='w-6 h-6 text-sky-600' />
-            </div>
-            <div>
-              <h3 className='text-lg font-semibold text-gray-900'>{title}</h3>
-              <p className='text-gray-600 mt-1'>{message}</p>
-            </div>
-          </div>
-
-          <div className='flex gap-3 mt-6'>
-            <button
-              onClick={onClose}
-              className='flex-1 px-4 py-2.5 text-gray-700 font-medium bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors'
-            >
-              {cancelText}
-            </button>
-            <button
-              onClick={onConfirm}
-              className='flex-1 px-4 py-2.5 text-white font-medium bg-gradient-to-r from-sky-500 to-sky-600 hover:from-sky-600 hover:to-sky-700 rounded-lg transition-all'
-            >
-              {confirmText}
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
+const pageConfigs = {
+  '/mon-profil': {
+    title: 'Mon Profil',
+    subtitle: 'Gérez vos informations personnelles',
+    pageTitle: 'Mon Profil - Paname Consulting',
+    description: 'Gérez vos informations personnelles avec Paname Consulting'
+  },
+  '/mes-rendez-vous': {
+    title: 'Mes Rendez-vous',
+    subtitle: 'Consultez et gérez vos rendez-vous',
+    pageTitle: 'Mes Rendez-vous - Paname Consulting',
+    description: 'Consultez et gérez vos rendez-vous avec Paname Consulting'
+  },
+  '/ma-procedure': {
+    title: 'Ma Procédure',
+    subtitle: 'Suivez l\'avancement de votre dossier',
+    pageTitle: 'Ma Procédure - Paname Consulting',
+    description: 'Suivez l\'avancement de votre dossier avec Paname Consulting'
+  },
 };
 
-// ==================== COMPOSANT CARTE RENDEZ-VOUS ====================
+const statusOptions = [
+  { value: '', label: 'Tous les statuts' },
+  { value: 'En attente', label: 'En attente' },
+  { value: 'Confirmé', label: 'Confirmé' },
+  { value: 'Terminé', label: 'Terminé' },
+  { value: 'Annulé', label: 'Annulé' },
+];
 
-interface RendezvousCardProps {
-  rendezvous: any;
-  onCancel: (id: string) => Promise<void>;
-  onConfirm: (id: string) => Promise<void>;
-}
-
-const RendezvousCard: React.FC<RendezvousCardProps> = ({
-  rendezvous,
-  onCancel,
-  onConfirm,
-}) => {
-  const [isExpanded, setIsExpanded] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [showConfirmCancel, setShowConfirmCancel] = useState(false);
-  const [showConfirmConfirm, setShowConfirmConfirm] = useState(false);
-  const [actionType, setActionType] = useState<'cancel' | 'confirm'>('cancel');
-
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'En attente':
-        return 'bg-yellow-100 text-yellow-800 border-yellow-300';
-      case 'Confirmé':
-        return 'bg-green-100 text-green-800 border-green-300';
-      case 'Terminé':
-        return 'bg-blue-100 text-blue-800 border-blue-300';
-      case 'Annulé':
-        return 'bg-red-100 text-red-800 border-red-300';
-      default:
-        return 'bg-gray-100 text-gray-800 border-gray-300';
-    }
-  };
-
-  const getStatusIcon = (status: string) => {
-    switch (status) {
-      case 'En attente':
-        return <AlertCircle className='w-4 h-4' />;
-      case 'Confirmé':
-        return <CheckCircle className='w-4 h-4' />;
-      case 'Terminé':
-        return <CheckCircle className='w-4 h-4' />;
-      case 'Annulé':
-        return <XCircle className='w-4 h-4' />;
-      default:
-        return null;
-    }
-  };
-
-  const formatDateTime = (dateStr: string, timeStr: string) => {
-    try {
-      const date = parseISO(dateStr);
-      return {
-        date: format(date, 'EEEE d MMMM yyyy', { locale: fr }),
-        time: timeStr.replace(':', 'h'),
-      };
-    } catch {
-      return { date: dateStr, time: timeStr };
-    }
-  };
-
-  const { date, time } = formatDateTime(rendezvous.date, rendezvous.time);
-
-  const isUpcoming = useMemo(() => {
-    if (rendezvous.status === 'Terminé' || rendezvous.status === 'Annulé') {
-      return false;
-    }
-
-    try {
-      const rdvDateTime = new Date(`${rendezvous.date}T${rendezvous.time}:00`);
-      const now = new Date();
-      return rdvDateTime > now;
-    } catch {
-      return false;
-    }
-  }, [rendezvous]);
-
-  const { canCancelRendezvous, getTimeRemainingMessage } = useRendezvousApi();
-  const canCancel = canCancelRendezvous(rendezvous);
-  const timeRemaining = getTimeRemainingMessage(rendezvous);
-
-  const handleCancelClick = () => {
-    setActionType('cancel');
-    setShowConfirmCancel(true);
-  };
-
-  const handleConfirmClick = () => {
-    setActionType('confirm');
-    setShowConfirmConfirm(true);
-  };
-
-  const executeAction = async () => {
-    if (!rendezvous._id) {
-      setError("Impossible d'identifier ce rendez-vous");
-      return;
-    }
-
-    // Vérification supplémentaire basée sur le backend
-    if (actionType === 'cancel' && !canCancel) {
-      setError(
-        'Vous ne pouvez plus annuler ce rendez-vous (moins de 2h avant)'
-      );
-      return;
-    }
-
-    if (actionType === 'confirm' && rendezvous.status !== 'En attente') {
-      setError('Seuls les rendez-vous en attente peuvent être confirmés');
-      return;
-    }
-
-    setIsLoading(true);
-    setError(null);
-
-    try {
-      if (actionType === 'cancel') {
-        await onCancel(rendezvous._id);
-      } else {
-        await onConfirm(rendezvous._id);
-      }
-      setShowConfirmCancel(false);
-      setShowConfirmConfirm(false);
-    } catch (err: any) {
-      setError(
-        err.message ||
-          `Erreur lors de l'${actionType === 'cancel' ? 'annulation' : 'confirmation'}`
-      );
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  return (
-    <>
-      <ConfirmPopover
-        isOpen={showConfirmCancel}
-        onClose={() => setShowConfirmCancel(false)}
-        onConfirm={executeAction}
-        title='Annuler le rendez-vous'
-        message='Êtes-vous sûr de vouloir annuler ce rendez-vous ? Cette action est irréversible.'
-        confirmText={isLoading ? 'Annulation...' : 'Oui, annuler'}
-        cancelText='Non, garder'
-      />
-
-      <ConfirmPopover
-        isOpen={showConfirmConfirm}
-        onClose={() => setShowConfirmConfirm(false)}
-        onConfirm={executeAction}
-        title='Confirmer le rendez-vous'
-        message='Voulez-vous confirmer votre participation à ce rendez-vous ?'
-        confirmText={isLoading ? 'Confirmation...' : 'Oui, confirmer'}
-        cancelText='Non, plus tard'
-      />
-
-      <div className='bg-white rounded-2xl shadow-lg border border-gray-200 overflow-hidden mb-4'>
-        <div
-          className='p-4 cursor-pointer'
-          onClick={() => setIsExpanded(!isExpanded)}
-        >
-          <div className='flex items-center justify-between'>
-            <div className='flex-1'>
-              <div className='flex items-center gap-2 mb-2'>
-                <span
-                  className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium border ${getStatusColor(rendezvous.status)}`}
-                >
-                  {getStatusIcon(rendezvous.status)}
-                  {rendezvous.status}
-                </span>
-                {timeRemaining && isUpcoming && (
-                  <span className='text-xs text-sky-600 bg-sky-50 px-2 py-0.5 rounded-full'>
-                    {timeRemaining}
-                  </span>
-                )}
-              </div>
-
-              <h3 className='font-semibold text-gray-900 mb-1'>
-                {rendezvous.destination}
-              </h3>
-
-              <div className='flex items-center gap-3 text-sm text-gray-600'>
-                <div className='flex items-center gap-1'>
-                  <CalendarDays className='w-4 h-4 text-sky-500' />
-                  <span>{date}</span>
-                </div>
-                <div className='flex items-center gap-1'>
-                  <Clock className='w-4 h-4 text-sky-500' />
-                  <span>{time}</span>
-                </div>
-              </div>
-            </div>
-
-            <ChevronRight
-              className={`w-5 h-5 text-gray-400 transition-transform ${isExpanded ? 'rotate-90' : ''}`}
-            />
-          </div>
-        </div>
-
-        {isExpanded && (
-          <div className='px-4 pb-4 border-t border-gray-100 pt-4'>
-            {error && (
-              <div className='mb-4 bg-red-50 border border-red-200 rounded-lg p-3'>
-                <div className='flex items-center gap-2 text-sm text-red-600'>
-                  <AlertCircle className='w-4 h-4 flex-shrink-0' />
-                  <span>{error}</span>
-                </div>
-              </div>
-            )}
-
-            <div className='space-y-3'>
-              <div className='flex items-start gap-3'>
-                <MapPin className='w-5 h-5 text-sky-500 mt-0.5 flex-shrink-0' />
-                <div>
-                  <p className='text-sm font-medium text-gray-900'>
-                    Destination
-                  </p>
-                  <p className='text-sm text-gray-600'>
-                    {rendezvous.destination}
-                  </p>
-                </div>
-              </div>
-
-              <div className='flex items-start gap-3'>
-                <Building className='w-5 h-5 text-sky-500 mt-0.5 flex-shrink-0' />
-                <div>
-                  <p className='text-sm font-medium text-gray-900'>Filière</p>
-                  <p className='text-sm text-gray-600'>{rendezvous.filiere}</p>
-                </div>
-              </div>
-
-              <div className='flex items-start gap-3'>
-                <GraduationCap className='w-5 h-5 text-sky-500 mt-0.5 flex-shrink-0' />
-                <div>
-                  <p className='text-sm font-medium text-gray-900'>
-                    Niveau d'études
-                  </p>
-                  <p className='text-sm text-gray-600'>
-                    {rendezvous.niveauEtude}
-                  </p>
-                </div>
-              </div>
-
-              {rendezvous.avisAdmin && (
-                <div className='bg-sky-50 rounded-lg p-3'>
-                  <p className='text-sm font-medium text-sky-900 mb-1'>
-                    Avis administratif
-                  </p>
-                  <p className='text-sm text-sky-700'>{rendezvous.avisAdmin}</p>
-                </div>
-              )}
-            </div>
-
-            <div className='flex gap-2 mt-4 pt-4 border-t border-gray-100'>
-              {rendezvous.status === 'En attente' && isUpcoming && (
-                <button
-                  onClick={handleConfirmClick}
-                  disabled={isLoading}
-                  className='flex-1 bg-gradient-to-r from-sky-500 to-sky-600 hover:from-sky-600 hover:to-sky-700 text-white font-medium py-2.5 px-4 rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-lg shadow-sky-500/25'
-                >
-                  <CheckCircle className='w-4 h-4' />
-                  {isLoading ? 'Confirmation...' : 'Confirmer'}
-                </button>
-              )}
-
-              {(rendezvous.status === 'En attente' ||
-                rendezvous.status === 'Confirmé') &&
-                canCancel &&
-                isUpcoming && (
-                  <button
-                    onClick={handleCancelClick}
-                    disabled={isLoading}
-                    className='flex-1 bg-white hover:bg-gray-50 text-gray-700 font-medium py-2.5 px-4 rounded-lg border border-gray-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2'
-                  >
-                    <XCircle className='w-4 h-4' />
-                    {isLoading ? 'Annulation...' : 'Annuler'}
-                  </button>
-                )}
-            </div>
-          </div>
-        )}
-      </div>
-    </>
-  );
+const statusColors: Record<string, string> = {
+  'En attente': 'bg-amber-100 text-amber-800 border-amber-300',
+  'Confirmé': 'bg-sky-100 text-sky-800 border-sky-300',
+  'Terminé': 'bg-emerald-100 text-emerald-800 border-emerald-300',
+  'Annulé': 'bg-red-100 text-red-800 border-red-300',
 };
 
-// ==================== COMPOSANT PRINCIPAL ====================
+const avisColors: Record<string, string> = {
+  'Favorable': 'bg-emerald-100 text-emerald-800 border-emerald-300',
+  'Défavorable': 'bg-red-100 text-red-800 border-red-300',
+};
 
-interface FilterOptions {
-  status: string;
-  date: string;
-  search: string;
-}
+const MesRendezvous = () => {
+  const { 
+    user,
+    fetchWithAuth,
+    isLoading: authLoading,
+    updateProfile,
+    isAuthenticated
+  } = useAuth();
+  
+  const navigate = useNavigate();
+  const location = useLocation();
+  const [headerHeight, setHeaderHeight] = useState(0);
 
-const MesRendezVous: React.FC = () => {
-  const { user, isAuthenticated, logout } = useAuth();
-
-  const {
-    getUserRendezvous,
-    cancelRendezvous,
-    confirmRendezvous,
-    isUpcoming,
-    RENDEZVOUS_STATUS,
-  } = useRendezvousApi();
-
-  const [rendezvousList, setRendezvousList] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [globalError, setGlobalError] = useState<string | null>(null);
-  const [page, setPage] = useState(1);
-  const [hasMore, setHasMore] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [stats, setStats] = useState({
+  const [rendezvous, setRendezvous] = useState<Rendezvous[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [cancelling, setCancelling] = useState<string | null>(null);
+  const [selectedStatus, setSelectedStatus] = useState<string>('');
+  const [pagination, setPagination] = useState<PaginationState>({
+    page: 1,
+    limit: 10,
     total: 0,
-    upcoming: 0,
-    pending: 0,
+    totalPages: 1,
   });
 
-  const [filters, setFilters] = useState<FilterOptions>({
-    status: 'all',
-    date: 'all',
-    search: '',
-  });
-  const [showFilters, setShowFilters] = useState(false);
+  // État pour le popover d'annulation
+  const [showCancelPopover, setShowCancelPopover] = useState<string | null>(null);
+  const popoverRef = useRef<HTMLDivElement>(null);
 
-  const loadRendezvous = useCallback(
-    async (reset = false) => {
-      if (!isAuthenticated) {
-        setError('Vous devez être connecté pour voir vos rendez-vous');
-        setLoading(false);
-        return;
-      }
-
-      if (!user?.email) {
-        setError('Informations utilisateur incomplètes');
-        setLoading(false);
-        return;
-      }
-
-      try {
-        const currentPage = reset ? 1 : page;
-        const params: UserRendezvousParams = {
-          email: user.email.trim().toLowerCase(),
-          page: currentPage,
-          limit: 10,
-          status:
-            filters.status !== 'all'
-              ? (filters.status as RendezvousStatus)
-              : undefined,
-        };
-
-        const response = await getUserRendezvous(params);
-
-        if (reset) {
-          setRendezvousList(response.data);
-        } else {
-          setRendezvousList(prev => [...prev, ...response.data]);
-        }
-
-        // CORRECTION ICI : Vérification de totalPages
-        setHasMore(currentPage < (response.totalPages || 1));
-
-        const upcomingCount = response.data.filter((rdv: any) => {
-          const isActiveStatus =
-            rdv.status === RENDEZVOUS_STATUS.PENDING ||
-            rdv.status === RENDEZVOUS_STATUS.CONFIRMED;
-          return isActiveStatus && isUpcoming(rdv);
-        }).length;
-
-        const pendingCount = response.data.filter(
-          (rdv: any) => rdv.status === RENDEZVOUS_STATUS.PENDING
-        ).length;
-
-        setStats({
-          total: response.total || 0,
-          upcoming: upcomingCount,
-          pending: pendingCount,
-        });
-
-        setGlobalError(null);
-        setError(null);
-      } catch (err: any) {
-        if (
-          err.message.includes('session') ||
-          err.message.includes('expirée')
-        ) {
-          setError('Votre session a expiré. Veuillez vous reconnecter.');
-          logout();
-        } else {
-          console.error('Erreur détaillée:', err);
-          setError(`Impossible de charger vos rendez-vous: ${err.message}`);
-        }
-      } finally {
-        setLoading(false);
-        setRefreshing(false);
-      }
-    },
-    [
-      isAuthenticated,
-      user?.email,
-      page,
-      filters.status,
-      getUserRendezvous,
-      logout,
-      isUpcoming,
-      RENDEZVOUS_STATUS,
-    ]
-  );
-
+  // Fermer le popover en cliquant en dehors
   useEffect(() => {
-    if (isAuthenticated && user?.email) {
-      loadRendezvous(true);
-    }
-  }, [isAuthenticated, user?.email]);
+    const handleClickOutside = (event: MouseEvent) => {
+      if (popoverRef.current && !popoverRef.current.contains(event.target as Node)) {
+        setShowCancelPopover(null);
+      }
+    };
 
-  const handleRefresh = async () => {
-    setRefreshing(true);
-    setGlobalError(null);
-    await loadRendezvous(true);
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, []);
+
+  // Fonction pour obtenir la configuration de page
+  const getCurrentPageConfig = () => {
+    const currentPath = location.pathname;
+    if (pageConfigs[currentPath as keyof typeof pageConfigs]) {
+      return pageConfigs[currentPath as keyof typeof pageConfigs];
+    }
+    
+    for (const [path, config] of Object.entries(pageConfigs)) {
+      if (currentPath.startsWith(path)) {
+        return config;
+      }
+    }
+    
+    return pageConfigs['/mes-rendez-vous'];
   };
 
-  const handleCancelRendezvous = async (id: string) => {
-    if (!id || id.trim() === '') {
-      setGlobalError('Identifiant du rendez-vous manquant');
-      return;
-    }
+  const currentPage = getCurrentPageConfig();
 
-    try {
-      await cancelRendezvous(id);
-      await loadRendezvous(true);
-    } catch (err: any) {
-      setGlobalError(err.message || "Erreur lors de l'annulation");
-    }
-  };
-
-  const handleConfirmRendezvous = async (id: string) => {
-    if (!id || id.trim() === '') {
-      setGlobalError('Identifiant du rendez-vous manquant');
-      return;
-    }
-
-    try {
-      await confirmRendezvous(id);
-      await loadRendezvous(true);
-    } catch (err: any) {
-      setGlobalError(err.message || 'Erreur lors de la confirmation');
-    }
-  };
-
-  const handleLoadMore = () => {
-    if (!loading && hasMore) {
-      setPage(prev => prev + 1);
-      loadRendezvous();
-    }
-  };
-
-  const filteredRendezvous = useMemo(() => {
-    let filtered = rendezvousList;
-
-    if (filters.search) {
-      const searchLower = filters.search.toLowerCase();
-      filtered = filtered.filter(
-        rdv =>
-          rdv.destination?.toLowerCase().includes(searchLower) ||
-          rdv.filiere?.toLowerCase().includes(searchLower) ||
-          rdv.niveauEtude?.toLowerCase().includes(searchLower)
-      );
-    }
-
-    if (filters.date === 'upcoming') {
-      filtered = filtered.filter(
-        rdv =>
-          (rdv.status === RENDEZVOUS_STATUS.PENDING ||
-            rdv.status === RENDEZVOUS_STATUS.CONFIRMED) &&
-          isUpcoming(rdv)
-      );
-    } else if (filters.date === 'past') {
-      filtered = filtered.filter(
-        rdv =>
-          rdv.status === RENDEZVOUS_STATUS.COMPLETED ||
-          rdv.status === RENDEZVOUS_STATUS.CANCELLED ||
-          !isUpcoming(rdv)
-      );
-    }
-
-    if (filters.status !== 'all') {
-      filtered = filtered.filter(rdv => rdv.status === filters.status);
-    }
-
-    return filtered;
-  }, [rendezvousList, filters, isUpcoming, RENDEZVOUS_STATUS]);
-
-  const renderStats = () => (
-    <div className='grid grid-cols-3 gap-3 mb-6'>
-      <div className='bg-gradient-to-br from-sky-50 to-white border border-sky-100 rounded-xl p-3 text-center'>
-        <div className='text-2xl font-bold text-sky-600'>{stats.total}</div>
-        <div className='text-xs text-sky-800 font-medium'>Total</div>
-      </div>
-      <div className='bg-gradient-to-br from-sky-50 to-white border border-sky-100 rounded-xl p-3 text-center'>
-        <div className='text-2xl font-bold text-sky-600'>{stats.upcoming}</div>
-        <div className='text-xs text-sky-800 font-medium'>À venir</div>
-      </div>
-      <div className='bg-gradient-to-br from-sky-50 to-white border border-sky-100 rounded-xl p-3 text-center'>
-        <div className='text-2xl font-bold text-sky-600'>{stats.pending}</div>
-        <div className='text-xs text-sky-800 font-medium'>En attente</div>
-      </div>
-    </div>
-  );
-
-  const renderFilters = () => (
-    <div className='bg-white rounded-2xl shadow-lg border border-gray-200 p-4 mb-4'>
-      <div className='space-y-4'>
-        <div>
-          <label className='block text-sm font-medium text-gray-700 mb-2'>
-            Statut
-          </label>
-          <select
-            value={filters.status}
-            onChange={e =>
-              setFilters(prev => ({ ...prev, status: e.target.value }))
-            }
-            className='w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-500/20'
-          >
-            <option value='all'>Tous les statuts</option>
-            <option value={RENDEZVOUS_STATUS.PENDING}>
-              {RENDEZVOUS_STATUS.PENDING}
-            </option>
-            <option value={RENDEZVOUS_STATUS.CONFIRMED}>
-              {RENDEZVOUS_STATUS.CONFIRMED}
-            </option>
-            <option value={RENDEZVOUS_STATUS.COMPLETED}>
-              {RENDEZVOUS_STATUS.COMPLETED}
-            </option>
-            <option value={RENDEZVOUS_STATUS.CANCELLED}>
-              {RENDEZVOUS_STATUS.CANCELLED}
-            </option>
-          </select>
-        </div>
-
-        <div>
-          <label className='block text-sm font-medium text-gray-700 mb-2'>
-            Période
-          </label>
-          <select
-            value={filters.date}
-            onChange={e =>
-              setFilters(prev => ({ ...prev, date: e.target.value }))
-            }
-            className='w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-500/20'
-          >
-            <option value='all'>Toutes les dates</option>
-            <option value='upcoming'>À venir</option>
-            <option value='past'>Passés</option>
-          </select>
-        </div>
-
-        <div>
-          <label className='block text-sm font-medium text-gray-700 mb-2'>
-            Rechercher
-          </label>
-          <div className='relative'>
-            <Search className='absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400' />
-            <input
-              type='text'
-              value={filters.search}
-              onChange={e =>
-                setFilters(prev => ({ ...prev, search: e.target.value }))
-              }
-              placeholder='Destination, filière...'
-              className='w-full pl-10 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-500/20'
-            />
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-
-  if (!isAuthenticated) {
+  // Vérification d'authentification
+  if (authLoading) {
     return (
-      <div className='min-h-screen flex items-center justify-center bg-gray-50'>
-        <div className='text-center'>
-          <h1 className='text-2xl font-bold text-gray-900 mb-4'>
-            Veuillez vous connecter
-          </h1>
-          <p className='text-gray-600 mb-6'>
-            Vous devez être connecté pour voir vos rendez-vous
-          </p>
-          <a
-            href='/connexion'
-            className='inline-block bg-gradient-to-r from-sky-500 to-sky-600 hover:from-sky-600 hover:to-sky-700 text-white px-6 py-3 rounded-lg font-medium'
-          >
-            Se connecter
-          </a>
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-sky-50 to-white">
+        <div className="text-center">
+          <div className="animate-pulse rounded-full h-16 w-16 bg-gradient-to-r from-sky-400 to-blue-500 mx-auto mb-4 flex items-center justify-center">
+            <div className="animate-spin rounded-full h-12 w-12 border-4 border-white border-t-transparent"></div>
+          </div>
+          <p className="text-gray-600 animate-pulse">Chargement de l'authentification...</p>
         </div>
       </div>
     );
   }
 
-  return (
-    <div className='min-h-screen bg-gradient-to-b from-sky-50 to-white'>
-      <Helmet>
-        <title>Mes rendez-vous</title>
-      </Helmet>
+  if (!user || !isAuthenticated) {
+    navigate('/connexion');
+    return null;
+  }
 
-      <div className='bg-gradient-to-r from-sky-500 to-sky-600 text-white px-4 pt-12 pb-8'>
-        <div className='max-w-3xl mx-auto'>
-          <div className='flex items-center justify-between mb-6'>
-            <div>
-              <h1 className='text-2xl font-bold mb-1'>Mes rendez-vous</h1>
-              <p className='text-sky-100'>
-                Gérez vos rendez-vous de consultation
-              </p>
+  const authFunctions: AuthFunctions = useMemo(() => ({
+    fetchWithAuth,
+    getAccessToken: () => null,
+    refreshToken: async () => true,
+    logout: () => {}
+  }), [fetchWithAuth]);
+
+  const rendezvousService = useMemo(() => {
+    return new UserRendezvousService(authFunctions);
+  }, [authFunctions]);
+
+  // Fonction pour charger les rendez-vous
+  const fetchRendezvous = useCallback(async () => {
+    setLoading(true);
+    
+    try {
+      const data = await rendezvousService.fetchUserRendezvous({
+        page: pagination.page,
+        limit: pagination.limit,
+        status: selectedStatus || undefined,
+      });
+      
+      setRendezvous(data.data);
+      setPagination({
+        page: data.page,
+        limit: data.limit,
+        total: data.total,
+        totalPages: data.totalPages,
+      });
+      
+    } catch (error: any) {
+      console.error('Erreur lors du chargement des rendez-vous:', error);
+      
+      if (error.message !== 'SESSION_EXPIRED' && 
+          error.message !== 'SESSION_CHECK_IN_PROGRESS') {
+        toast.error("Impossible de charger les rendez-vous");
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, [rendezvousService, selectedStatus, pagination.page, pagination.limit]);
+
+  // Charger les rendez-vous au montage et quand les filtres changent
+  useEffect(() => {
+    if (location.pathname === '/mes-rendez-vous') {
+      fetchRendezvous();
+    }
+  }, [location.pathname, selectedStatus, pagination.page, fetchRendezvous]);
+
+  // Annuler un rendez-vous
+  const handleCancelRendezvous = async (rdvId: string) => {
+    setShowCancelPopover(null);
+    setCancelling(rdvId);
+    
+    try {
+      const updatedRdv = await rendezvousService.cancelRendezvous(rdvId);
+      
+      setRendezvous(prev => 
+        prev.map(rdv => 
+          rdv._id === rdvId ? { ...rdv, ...updatedRdv } : rdv
+        )
+      );
+      
+      toast.success('Rendez-vous annulé avec succès');
+    } catch (error: any) {
+      console.error('Erreur lors de l\'annulation:', error);
+      
+      if (error.message !== 'SESSION_EXPIRED' && 
+          error.message !== 'SESSION_CHECK_IN_PROGRESS') {
+        toast.error("Impossible d'annuler le rendez-vous");
+      }
+    } finally {
+      setCancelling(null);
+    }
+  };
+
+  // Ouvrir le popover d'annulation
+  const openCancelPopover = (rdvId: string, event: React.MouseEvent) => {
+    event.stopPropagation();
+    setShowCancelPopover(rdvId);
+  };
+
+  // Composant Popover d'annulation
+  const CancelConfirmationPopover = ({ rdvId, rdv }: { rdvId: string, rdv: Rendezvous }) => (
+    <div 
+      ref={popoverRef}
+      className="absolute z-50 w-72 bg-white rounded-lg shadow-xl border border-red-200 animate-fadeIn"
+      style={{ 
+        top: '100%', 
+        right: 0,
+        marginTop: '8px'
+      }}
+    >
+      <div className="p-4">
+        <div className="flex items-start justify-between mb-3">
+          <div className="flex items-center gap-2">
+            <div className="p-1.5 bg-red-50 rounded-lg">
+              <FiAlertTriangle className="h-4 w-4 text-red-600" />
             </div>
-            <button
-              onClick={handleRefresh}
-              disabled={refreshing || loading}
-              className='bg-white/20 hover:bg-white/30 p-2 rounded-full transition-colors disabled:opacity-50'
-            >
-              <RefreshCw
-                className={`w-5 h-5 ${refreshing ? 'animate-spin' : ''}`}
-              />
-            </button>
+            <h3 className="text-sm font-semibold text-gray-900">Annuler le rendez-vous</h3>
           </div>
-
-          <div className='relative mb-4'>
-            <Search className='absolute left-4 top-1/2 transform -translate-y-1/2 w-5 h-5 text-sky-400' />
-            <input
-              type='text'
-              placeholder='Rechercher un rendez-vous...'
-              value={filters.search}
-              onChange={e =>
-                setFilters(prev => ({ ...prev, search: e.target.value }))
-              }
-              className='w-full pl-12 pr-4 py-3 bg-white/20 backdrop-blur-sm rounded-xl border border-white/30 text-white placeholder-sky-200 focus:outline-none focus:ring-2 focus:ring-white/50'
-            />
-          </div>
-
           <button
-            onClick={() => setShowFilters(!showFilters)}
-            className='inline-flex items-center gap-2 text-sm font-medium text-white bg-white/20 hover:bg-white/30 px-4 py-2 rounded-lg transition-colors'
+            onClick={() => setShowCancelPopover(null)}
+            className="text-gray-400 hover:text-gray-500 transition-colors"
           >
-            <Filter className='w-4 h-4' />
-            Filtres
-            {showFilters ? (
-              <ChevronRight className='w-4 h-4 rotate-90' />
+            <FiX className="h-4 w-4" />
+          </button>
+        </div>
+        
+        <div className="space-y-3">
+          <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+            <div className="flex items-start gap-2">
+              <FiAlertCircle className="h-4 w-4 text-amber-600 mt-0.5 flex-shrink-0" />
+              <div>
+                <p className="text-xs text-amber-800 font-medium">Cette action est irréversible</p>
+                <p className="text-xs text-amber-700 mt-1">
+                  • Le rendez-vous sera marqué comme "Annulé"
+                  <br />
+                  • Vous ne pourrez pas le réactiver
+                  <br />
+                  • La raison sera enregistrée
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-gray-50 rounded-lg p-3">
+            <p className="text-xs text-gray-700">
+              <span className="font-medium">Rendez-vous du :</span> {UserRendezvousService.formatDate(rdv.date)} à {UserRendezvousService.formatTime(rdv.time)}
+              <br />
+              <span className="font-medium">Destination :</span> {UserRendezvousService.getEffectiveDestination(rdv)}
+            </p>
+          </div>
+        </div>
+
+        <div className="flex gap-2 mt-4">
+          <button
+            onClick={() => setShowCancelPopover(null)}
+            className="flex-1 px-3 py-2 text-sm font-medium text-gray-700 bg-gray-100 border border-gray-300 rounded-lg hover:bg-gray-200 transition-all duration-150"
+          >
+            Annuler
+          </button>
+          <button
+            onClick={() => handleCancelRendezvous(rdvId)}
+            disabled={cancelling === rdvId}
+            className="flex-1 px-3 py-2 text-sm font-medium text-white bg-red-600 rounded-lg hover:bg-red-700 transition-all duration-150 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+          >
+            {cancelling === rdvId ? (
+              <>
+                <div className="h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent"></div>
+                Annulation...
+              </>
             ) : (
-              <ChevronRight className='w-4 h-4' />
+              <>
+                <FiTrash2 className="h-3 w-3" />
+                Confirmer
+              </>
             )}
           </button>
         </div>
       </div>
+    </div>
+  );
 
-      <div className='px-4 pb-8 -mt-6'>
-        <div className='max-w-3xl mx-auto'>
-          {showFilters && renderFilters()}
+  const handleRefresh = () => {
+    if (location.pathname === '/mes-rendez-vous') {
+      fetchRendezvous();
+    } else {
+      updateProfile();
+    }
+  };
 
-          {globalError && (
-            <div className='mb-4 bg-red-50 border border-red-200 rounded-xl p-4'>
-              <div className='flex items-start gap-3'>
-                <AlertCircle className='w-5 h-5 text-red-500 mt-0.5 flex-shrink-0' />
-                <div className='text-sm text-red-700'>{globalError}</div>
+  const handlePageChange = (newPage: number) => {
+    if (newPage >= 1 && newPage <= pagination.totalPages) {
+      setPagination((prev: any) => ({ ...prev, page: newPage }));
+    }
+  };
+
+  const renderStatusBadge = (status: string) => (
+    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${statusColors[status] || 'bg-gray-100 text-gray-800 border-gray-300'}`}>
+      {status === 'En attente' && <FiAlertCircle className="mr-1 h-3 w-3" />}
+      {status === 'Confirmé' && <FiCheckCircle className="mr-1 h-3 w-3" />}
+      {status === 'Terminé' && <FiCheckCircle className="mr-1 h-3 w-3" />}
+      {status === 'Annulé' && <FiXCircle className="mr-1 h-3 w-3" />}
+      {status}
+    </span>
+  );
+
+  const renderAvisBadge = (avis: string) => (
+    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${avisColors[avis] || 'bg-gray-100 text-gray-800 border-gray-300'}`}>
+      <FiStar className="mr-1 h-3 w-3" />
+      {avis}
+    </span>
+  );
+
+  const renderRendezvousItem = (rdv: Rendezvous) => (
+    <div 
+      key={rdv._id} 
+      className="bg-white rounded-lg border border-gray-200 p-4 hover:shadow-md transition-all duration-300 relative"
+    >
+      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+        <div className="flex-1">
+          <div className="flex flex-wrap items-center gap-2 mb-3">
+            {renderStatusBadge(rdv.status)}
+            {rdv.status === 'Terminé' && rdv.avisAdmin && renderAvisBadge(rdv.avisAdmin)}
+          </div>
+
+          <div className="space-y-2">
+            <div className="flex items-center text-sm text-gray-700">
+              <FiCalendar className="mr-2 h-4 w-4 text-sky-500" />
+              <span className="font-medium">{UserRendezvousService.formatDate(rdv.date)}</span>
+              <FiClock className="ml-4 mr-2 h-4 w-4 text-sky-500" />
+              <span className="font-medium">{UserRendezvousService.formatTime(rdv.time)}</span>
+            </div>
+
+            <div className="flex items-center text-sm text-gray-600">
+              <FiMapPin className="mr-2 h-4 w-4 text-sky-500" />
+              <span>{UserRendezvousService.getEffectiveDestination(rdv)}</span>
+            </div>
+
+            <div className="flex items-center text-sm text-gray-600">
+              <FiBook className="mr-2 h-4 w-4 text-sky-500" />
+              <span>{UserRendezvousService.getEffectiveFiliere(rdv)}</span>
+            </div>
+
+            <div className="flex items-center text-sm text-gray-600">
+              <FiAward className="mr-2 h-4 w-4 text-sky-500" />
+              <span>{rdv.niveauEtude}</span>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex flex-col sm:items-end gap-2">
+          {UserRendezvousService.canCancelRendezvous(rdv) && (
+            <div className="relative">
+              <button
+                onClick={(e) => openCancelPopover(rdv._id, e)}
+                disabled={cancelling === rdv._id}
+                className="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium text-red-700 bg-red-50 border border-red-200 rounded-lg hover:bg-red-100 hover:border-red-300 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed relative"
+              >
+                {cancelling === rdv._id ? (
+                  <>
+                    <div className="mr-2 h-3 w-3 animate-spin rounded-full border-2 border-red-600 border-t-transparent"></div>
+                    Annulation...
+                  </>
+                ) : (
+                  <>
+                    <FiTrash2 className="mr-2 h-3 w-3" />
+                    Annuler
+                  </>
+                )}
+              </button>
+              
+              {showCancelPopover === rdv._id && (
+                <CancelConfirmationPopover rdvId={rdv._id} rdv={rdv} />
+              )}
+            </div>
+          )}
+
+          {rdv.status === 'Terminé' && rdv.avisAdmin && (
+            <div className="text-xs text-gray-500">
+              <div className="flex items-center">
+                <FiInfo className="mr-1 h-3 w-3" />
+                Avis administrateur reçu
               </div>
             </div>
           )}
 
-          {renderStats()}
+          <div className="text-xs text-gray-400">
+            Créé le {new Date(rdv.createdAt).toLocaleDateString('fr-FR')}
+          </div>
+        </div>
+      </div>
 
-          {error && (
-            <div className='mb-6 bg-red-50 border border-red-200 rounded-xl p-4'>
-              <div className='flex items-start gap-3'>
-                <AlertCircle className='w-5 h-5 text-red-500 mt-0.5 flex-shrink-0' />
-                <div className='text-sm text-red-700'>{error}</div>
-              </div>
+      {rdv.status === 'Annulé' && rdv.cancellationReason && (
+        <div className="mt-3 pt-3 border-t border-gray-100">
+          <div className="text-sm text-gray-600">
+            <span className="font-medium">Raison d'annulation :</span>{' '}
+            {rdv.cancellationReason}
+          </div>
+          {rdv.cancelledAt && (
+            <div className="text-xs text-gray-500 mt-1">
+              Annulé le {new Date(rdv.cancelledAt).toLocaleDateString('fr-FR')}
             </div>
           )}
+        </div>
+      )}
+    </div>
+  );
 
-          <div className='mb-6'>
-            <div className='flex items-center justify-between mb-4'>
-              <h2 className='text-lg font-semibold text-gray-900'>
-                Vos rendez-vous
-              </h2>
-              <span className='text-sm text-gray-500'>
-                {filteredRendezvous.length} résultat
-                {filteredRendezvous.length > 1 ? 's' : ''}
+  // Mise à jour de la hauteur du header après le rendu
+  useEffect(() => {
+    const header = document.querySelector('header');
+    if (header) {
+      setHeaderHeight(header.offsetHeight);
+    }
+  }, []);
+
+  return (
+    <>
+      <Helmet>
+        <title>{currentPage.pageTitle}</title>
+        <meta name="description" content={currentPage.description} />
+      </Helmet>
+
+      <UserHeader
+        title={currentPage.title}
+        subtitle={currentPage.subtitle}
+        pageTitle={currentPage.pageTitle}
+        description={currentPage.description}
+        isLoading={loading}
+        onRefresh={handleRefresh}
+      >
+        {/* Indicateur de statut */}
+        <div className='mt-2 pt-2 border-t border-gray-100'>
+          <div className='flex items-center justify-between'>
+            <div className='flex items-center gap-1.5'>
+              <div className='w-1.5 h-1.5 bg-emerald-500 rounded-full'></div>
+              <span className='text-xs text-gray-600'>
+                Connecté: {user?.email}
               </span>
             </div>
+            <span className='text-xs text-gray-500'>
+              {new Date().toLocaleTimeString('fr-FR', { 
+                hour: '2-digit',
+                minute: '2-digit'
+              })}
+            </span>
+          </div>
+        </div>
+      </UserHeader>
 
-            {loading && page === 1 ? (
-              <div className='text-center py-12'>
-                <div className='inline-block animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-sky-500'></div>
-                <p className='mt-4 text-gray-600'>
-                  Chargement de vos rendez-vous...
-                </p>
-              </div>
-            ) : filteredRendezvous.length === 0 ? (
-              <div className='text-center py-12'>
-                <div className='w-20 h-20 mx-auto mb-4 rounded-full bg-gradient-to-br from-sky-50 to-sky-100 flex items-center justify-center'>
-                  <CalendarDays className='w-10 h-10 text-sky-500' />
-                </div>
-                <h3 className='text-lg font-semibold text-gray-900 mb-2'>
-                  Aucun rendez-vous trouvé
-                </h3>
-                <p className='text-gray-600 mb-6'>
-                  {filters.status !== 'all' ||
-                  filters.date !== 'all' ||
-                  filters.search !== ''
-                    ? 'Aucun rendez-vous ne correspond à vos critères de recherche'
-                    : "Vous n'avez pas encore de rendez-vous programmé"}
-                </p>
-                <a
-                  href='/rendez-vous'
-                  className='inline-flex items-center gap-2 bg-gradient-to-r from-sky-500 to-sky-600 hover:from-sky-600 hover:to-sky-700 text-white font-medium py-2.5 px-6 rounded-full transition-all shadow-lg shadow-sky-500/25'
+      {/* Contenu principal */}
+      <div 
+        className="min-h-screen bg-gradient-to-b from-sky-50 to-white"
+        style={{ paddingTop: `${headerHeight}px` }}
+      >
+        <div className="max-w-4xl mx-auto px-4 py-8">
+          {/* Contrôles */}
+          <div className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div className="relative">
+                <FiFilter className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                <select
+                  value={selectedStatus}
+                  onChange={(e) => {
+                    setSelectedStatus(e.target.value);
+                    setPagination(prev => ({ ...prev, page: 1 }));
+                  }}
+                  className="pl-10 pr-4 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-transparent bg-white transition-all duration-200 hover:border-sky-400"
+                  disabled={loading}
                 >
-                  <CalendarDays className='w-4 h-4' />
-                  Prendre un rendez-vous
-                </a>
+                  {statusOptions.map(option => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
               </div>
-            ) : (
-              <>
-                <div className='space-y-3'>
-                  {filteredRendezvous.map((rendezvous, index) => {
-                    const uniqueKey = rendezvous._id
-                      ? `rdv-${rendezvous._id}`
-                      : `rdv-fallback-${index}`;
+
+              <button
+                onClick={fetchRendezvous}
+                disabled={loading}
+                className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 hover:border-gray-400 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <FiRefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+                Actualiser
+              </button>
+            </div>
+
+            <button
+              onClick={() => navigate('/rendez-vous')}
+              className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-sky-600 rounded-lg hover:bg-sky-700 transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-sky-500 focus:ring-offset-2"
+            >
+              <FiCalendar className="h-4 w-4" />
+              Nouveau rendez-vous
+            </button>
+          </div>
+
+          {/* État de chargement */}
+          {loading && (
+            <div className="mb-6 text-center py-12">
+              <div className="inline-block">
+                <div className="h-8 w-8 animate-spin rounded-full border-4 border-sky-600 border-t-transparent"></div>
+                <p className="mt-3 text-sm text-gray-600">Chargement de vos rendez-vous...</p>
+              </div>
+            </div>
+          )}
+
+          {/* Liste des rendez-vous */}
+          {!loading && rendezvous.length > 0 && (
+            <div className="space-y-4 mb-8">
+              {rendezvous.map(rdv => renderRendezvousItem(rdv))}
+            </div>
+          )}
+
+          {/* Aucun rendez-vous */}
+          {!loading && rendezvous.length === 0 && (
+            <div className="bg-white rounded-lg border border-gray-200 p-12 text-center">
+              <div className="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-full bg-gray-100">
+                <FiCalendar className="h-8 w-8 text-gray-400" />
+              </div>
+              <h3 className="text-lg font-medium text-gray-800 mb-2">
+                Aucun rendez-vous trouvé
+              </h3>
+              <p className="text-gray-600 mb-6 max-w-md mx-auto">
+                {selectedStatus 
+                  ? `Vous n'avez pas de rendez-vous avec le statut "${selectedStatus}"`
+                  : "Vous n'avez pas encore pris de rendez-vous"}
+              </p>
+              <button
+                onClick={() => navigate('/rendez-vous')}
+                className="inline-flex items-center gap-2 px-6 py-3 text-sm font-medium text-white bg-sky-600 rounded-lg hover:bg-sky-700 transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-sky-500 focus:ring-offset-2"
+              >
+                <FiCalendar className="h-4 w-4" />
+                Prendre un rendez-vous
+              </button>
+            </div>
+          )}
+
+          {/* Pagination */}
+          {!loading && pagination.totalPages > 1 && (
+            <div className="flex items-center justify-between">
+              <div className="text-sm text-gray-600">
+                Page {pagination.page} sur {pagination.totalPages} • 
+                Total : {pagination.total} rendez-vous{pagination.total > 1 ? 's' : ''}
+              </div>
+              
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => handlePageChange(pagination.page - 1)}
+                  disabled={pagination.page === 1}
+                  className="inline-flex items-center gap-1 px-3 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 hover:border-gray-400 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <FiChevronLeft className="h-4 w-4" />
+                  Précédent
+                </button>
+
+                <div className="flex items-center gap-1">
+                  {Array.from({ length: Math.min(5, pagination.totalPages) }, (_, i) => {
+                    let pageNum;
+                    if (pagination.totalPages <= 5) {
+                      pageNum = i + 1;
+                    } else if (pagination.page <= 3) {
+                      pageNum = i + 1;
+                    } else if (pagination.page >= pagination.totalPages - 2) {
+                      pageNum = pagination.totalPages - 4 + i;
+                    } else {
+                      pageNum = pagination.page - 2 + i;
+                    }
 
                     return (
-                      <RendezvousCard
-                        key={uniqueKey}
-                        rendezvous={rendezvous}
-                        onCancel={handleCancelRendezvous}
-                        onConfirm={handleConfirmRendezvous}
-                      />
+                      <button
+                        key={pageNum}
+                        onClick={() => handlePageChange(pageNum)}
+                        className={`min-w-[2.5rem] px-3 py-2 text-sm font-medium rounded-lg transition-all duration-200 ${
+                          pagination.page === pageNum
+                            ? 'bg-sky-600 text-white'
+                            : 'text-gray-700 bg-white border border-gray-300 hover:bg-gray-50'
+                        }`}
+                      >
+                        {pageNum}
+                      </button>
                     );
                   })}
                 </div>
 
-                {hasMore && (
-                  <div className='text-center mt-6'>
-                    <button
-                      onClick={handleLoadMore}
-                      disabled={loading}
-                      className='inline-flex items-center gap-2 text-sky-600 hover:text-sky-700 font-medium disabled:opacity-50'
-                    >
-                      {loading ? (
-                        <>
-                          <RefreshCw className='w-4 h-4 animate-spin' />
-                          Chargement...
-                        </>
-                      ) : (
-                        'Charger plus de rendez-vous'
-                      )}
-                    </button>
-                  </div>
-                )}
-              </>
-            )}
+                <button
+                  onClick={() => handlePageChange(pagination.page + 1)}
+                  disabled={pagination.page === pagination.totalPages}
+                  className="inline-flex items-center gap-1 px-3 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 hover:border-gray-400 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Suivant
+                  <FiChevronRight className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Informations */}
+          <div className="mt-8 bg-sky-50 border border-sky-200 rounded-lg p-4">
+            <h3 className="font-medium text-sky-800 mb-2 flex items-center">
+              <FiInfo className="mr-2 h-4 w-4" />
+              Informations importantes
+            </h3>
+            <ul className="text-sm text-sky-700 space-y-1">
+              <li>• Les rendez-vous annulés apparaissent avec la raison d'annulation</li>
+              <li>• Vous ne pouvez annuler qu'un rendez-vous <strong>Confirmé</strong></li>
+              <li>• L'annulation n'est plus possible à moins de 2 heures du rendez-vous</li>
+              <li>• Pour les rendez-vous <strong>Terminés</strong>, l'avis administrateur est affiché</li>
+              <li>• Un rendez-vous <strong>Terminé</strong> avec avis <strong>Favorable</strong> peut déclencher une procédure</li>
+            </ul>
           </div>
         </div>
       </div>
-    </div>
+
+      {/* Styles CSS pour l'animation du popover */}
+      <style>{`
+        @keyframes fadeIn {
+          from {
+            opacity: 0;
+            transform: translateY(-10px);
+          }
+          to {
+            opacity: 1;
+            transform: translateY(0);
+          }
+        }
+        
+        .animate-fadeIn {
+          animation: fadeIn 0.15s ease-out;
+        }
+      `}</style>
+    </>
   );
 };
 
-export default MesRendezVous;
+export default MesRendezvous;

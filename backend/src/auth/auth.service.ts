@@ -51,28 +51,28 @@ export class AuthService {
   ) {}
 
   private convertObjectIdToString(id: any): string {
-  if (!id) {
-    throw new Error("ID utilisateur manquant");
-  }
-
-  if (id instanceof Types.ObjectId) {
-    return id.toString();
-  }
-
-  if (typeof id === "string") {
-    if (isValidObjectId(id)) {
-      return id;
+    if (!id) {
+      throw new Error("ID utilisateur manquant");
     }
-    throw new Error(`Format ID string invalide.`);
-  }
 
-  const stringId = String(id);
-  if (isValidObjectId(stringId)) {
-    return stringId;
-  }
+    if (id instanceof Types.ObjectId) {
+      return id.toString();
+    }
 
-  throw new Error(`Impossible de convertir l'ID.`);
-}
+    if (typeof id === "string") {
+      if (isValidObjectId(id)) {
+        return id;
+      }
+      throw new Error(`Format ID string invalide.`);
+    }
+
+    const stringId = String(id);
+    if (isValidObjectId(stringId)) {
+      return stringId;
+    }
+
+    throw new Error(`Impossible de convertir l'ID.`);
+  }
 
   private getLoginAttempts(email: string): {
     attempts: number;
@@ -129,103 +129,107 @@ export class AuthService {
     this.logger.log(`Réinitialisation des tentatives pour ${this.maskEmail(email)}`);
   }
 
-  async register(registerDto: RegisterDto) {
-      try {
-        // ✅ EMPÊCHER L'INSCRIPTION AVEC L'EMAIL ADMIN
-        const adminEmail = process.env.EMAIL_USER;
-        if (registerDto.email === adminEmail) {
-          throw new BadRequestException("Cet email est réservé au système");
-        }
-
-        // ✅ FORCER LE RÔLE USER POUR TOUTES LES INSCRIPTIONS
-        const userData = {
-          ...registerDto,
-          role: UserRole.USER // ← Toujours USER
-        };
-
-        // ✅ Le service users gère maintenant toutes les validations
-        const newUser = await this.usersService.create(userData);
-        const userId = this.convertObjectIdToString(newUser._id);
-
-        const jtiAccess = uuidv4();
-        const jtiRefresh = uuidv4();
-
-        // Access Token
-        const access_token = this.jwtService.sign(
-          {
-            sub: userId,
-            email: newUser.email,
-            role: newUser.role,
-            jti: jtiAccess,
-            tokenType: "access",
-          },
-          {
-            expiresIn: AuthConstants.JWT_EXPIRATION,
-          },
-        );
-
-        // Refresh Token
-        const refresh_token = this.jwtService.sign(
-          {
-            sub: userId,
-            email: newUser.email,
-            role: newUser.role,
-            jti: jtiRefresh,
-            tokenType: "refresh",
-          },
-          {
-            expiresIn: AuthConstants.REFRESH_TOKEN_EXPIRATION,
-            secret: process.env.JWT_REFRESH_SECRET,
-          },
-        );
-
-        // Créer session avec durée synchronisée
-        await this.sessionService.create(
-          userId,
-          access_token,
-          new Date(Date.now() + AuthConstants.ACCESS_TOKEN_EXPIRATION_SECONDS * 1000),
-        );
-
-        await this.refreshTokenService.deactivateAllForUser(userId);
-        const decodedRefresh = this.jwtService.decode(refresh_token) as any;
-        const refreshExp = new Date(
-          (decodedRefresh?.exp || 0) * 1000 || Date.now() + AuthConstants.REFRESH_TOKEN_EXPIRATION_SECONDS * 1000,
-        );
-        await this.refreshTokenService.create(userId, refresh_token, refreshExp);
-
-        // Email de bienvenue
-        try {
-          await this.mailService.sendWelcomeEmail(
-            newUser.email,
-            newUser.firstName,
-          );
-        } catch (emailError) {
-          this.logger.warn(`Échec envoi email bienvenue: ${emailError.message}`);
-        }
-
-        this.logger.log(`Nouvel utilisateur enregistré: ${this.maskEmail(newUser.email)}`);
-
-        return {
-          access_token,
-          refresh_token,
-          user: {
-            id: userId,
-            email: newUser.email,
-            firstName: newUser.firstName,
-            lastName: newUser.lastName,
-            telephone: newUser.telephone,
-            role: newUser.role,
-            isAdmin: newUser.role === UserRole.ADMIN,
-            isActive: newUser.isActive,
-          },
-        };
-
-        } catch (error) {
-        this.logger.error(`Erreur lors de l'enregistrement: ${error.message}`, error.stack);
-        
-        throw error;
+ async register(registerDto: RegisterDto) {
+  try {
+    const adminEmail = process.env.EMAIL_USER;
+    
+    // ✅ LOGIQUE SIMPLIFIÉE : TOUJOURS USER SAUF EMAIL_USER (premier seulement)
+    const existingAdmin = await this.usersService.findByRole(UserRole.ADMIN);
+    
+    if (registerDto.email === adminEmail) {
+      // Email admin spécifique détecté
+      if (existingAdmin) {
+        // Admin existe déjà → devient USER
+        registerDto.role = UserRole.USER;
+        this.logger.warn(`⚠️ Email admin utilisé pour créer un USER (admin existe déjà)`);
+      } else {
+        // Premier admin → devient ADMIN
+        registerDto.role = UserRole.ADMIN;
+        this.logger.log(`✅ Création du SEUL et UNIQUE admin: ${this.maskEmail(adminEmail)}`);
       }
+    } else {
+      // Tous les autres emails sont USER
+      registerDto.role = UserRole.USER;
+      this.logger.log(`✅ Création d'utilisateur standard: ${this.maskEmail(registerDto.email)}`);
+    }
+
+    const newUser = await this.usersService.create(registerDto);
+    const userId = this.convertObjectIdToString(newUser._id);
+
+    const jtiAccess = uuidv4();
+    const jtiRefresh = uuidv4();
+
+    const access_token = this.jwtService.sign(
+      {
+        sub: userId,
+        email: newUser.email,
+        role: newUser.role,
+        jti: jtiAccess,
+        tokenType: "access",
+      },
+      {
+        expiresIn: AuthConstants.JWT_EXPIRATION,
+      },
+    );
+
+    const refresh_token = this.jwtService.sign(
+      {
+        sub: userId,
+        email: newUser.email,
+        role: newUser.role,
+        jti: jtiRefresh,
+        tokenType: "refresh",
+      },
+      {
+        expiresIn: AuthConstants.REFRESH_TOKEN_EXPIRATION,
+        secret: process.env.JWT_REFRESH_SECRET,
+      },
+    );
+
+    await this.sessionService.create(
+      userId,
+      access_token,
+      new Date(Date.now() + AuthConstants.ACCESS_TOKEN_EXPIRATION_SECONDS * 1000),
+    );
+
+    await this.refreshTokenService.deactivateAllForUser(userId);
+    const decodedRefresh = this.jwtService.decode(refresh_token) as any;
+    const refreshExp = new Date(
+      (decodedRefresh?.exp || 0) * 1000 || Date.now() + AuthConstants.REFRESH_TOKEN_EXPIRATION_SECONDS * 1000,
+    );
+    await this.refreshTokenService.create(userId, refresh_token, refreshExp);
+
+    try {
+      await this.mailService.sendWelcomeEmail(
+        newUser.email,
+        newUser.firstName,
+      );
+    } catch (emailError) {
+      this.logger.warn(`Échec envoi email bienvenue: ${emailError.message}`);
+    }
+
+    this.logger.log(`Nouvel utilisateur enregistré: ${this.maskEmail(newUser.email)}`);
+
+    return {
+      access_token,
+      refresh_token,
+      user: {
+        id: userId,
+        email: newUser.email,
+        firstName: newUser.firstName,
+        lastName: newUser.lastName,
+        telephone: newUser.telephone,
+        role: newUser.role,
+        isAdmin: newUser.role === UserRole.ADMIN,
+        isActive: newUser.isActive,
+      },
+    };
+
+  } catch (error) {
+    this.logger.error(`Erreur lors de l'enregistrement: ${error.message}`, error.stack);
+    throw error;
   }
+}
 
   async login(user: User) {
     const jtiAccess = uuidv4();
@@ -258,14 +262,12 @@ export class AuthService {
       secret: process.env.JWT_REFRESH_SECRET,
     });
 
-    // ✅ Créer session avec durée synchronisée
     await this.sessionService.create(
       userId,
       access_token,
       new Date(Date.now() + AuthConstants.ACCESS_TOKEN_EXPIRATION_SECONDS * 1000),
     );
 
-    // Whitelist refresh token
     try {
       await this.refreshTokenService.deactivateAllForUser(userId);
       const decodedRefresh = this.jwtService.decode(refresh_token) as any;
@@ -350,7 +352,6 @@ export class AuthService {
         },
       );
 
-      // ✅ Créer session avec durée synchronisée
       await this.sessionService.create(
         userId,
         new_access_token,
@@ -391,144 +392,117 @@ export class AuthService {
     }
   }
 
+ 
+
   async logoutAll(): Promise<{
-    success: boolean;
-    message: string;
-    stats: {
-      usersLoggedOut: number;
-      adminPreserved: boolean;
-      duration: string;
-      timestamp: string;
-      userEmails: string[];
-    };
-  }> {
-    const startTime = Date.now();
+  success: boolean;
+  message: string;
+  stats: {
+    usersLoggedOut: number;
+    adminPreserved: boolean;
+    adminEmail: string;
+    duration: string;
+    timestamp: string;
+    userEmails: string[];
+  };
+}> {
+  const startTime = Date.now();
+  
+  try {
+    this.logger.log("🚀 Début déconnexion temporaire (24h) des utilisateurs NON-ADMIN");
+
+    // ✅ PROTECTION STRICTE : SEULEMENT l'email du .env
+    const adminEmail = process.env.EMAIL_USER;
     
-    try {
-      this.logger.log("🚀 Début déconnexion temporaire (24h) des utilisateurs NON-ADMIN");
+    if (!adminEmail) {
+      this.logger.error("❌ EMAIL_USER non configuré");
+      throw new BadRequestException("EMAIL_USER non défini dans l'environnement");
+    }
 
-      // 🔐 VÉRIFICATION DE SÉCURITÉ : S'assurer qu'au moins un admin reste actif
-      const activeAdmins = await this.userModel.countDocuments({
-        role: UserRole.ADMIN,
-        isActive: true
-      }).exec();
+    // ✅ DÉCONNECTER TOUS SAUF EMAIL_USER
+    const activeNonAdminUsers = await this.userModel
+      .find({
+        email: { $ne: adminEmail }, // EXCLURE UNIQUEMENT EMAIL_USER
+        isActive: true,
+      })
+      .select('_id email firstName lastName role')
+      .lean()
+      .exec();
 
-      if (activeAdmins === 0) {
-        this.logger.error("❌ Bloqué : Aucun administrateur actif trouvé");
-        throw new BadRequestException(
-          "Opération bloquée : Aucun administrateur actif dans le système"
-        );
-      }
+    this.logger.log(`📊 ${activeNonAdminUsers.length} utilisateurs non-admin trouvés`);
 
-      // 📊 Récupérer les utilisateurs non-admin actifs
-      const activeNonAdminUsers = await this.userModel
-        .find({
-          role: { $ne: UserRole.ADMIN },
-          isActive: true,
-        })
-        .select('_id email firstName lastName')
-        .lean()
-        .exec();
-
-      this.logger.log(`📊 ${activeNonAdminUsers.length} utilisateurs non-admin actifs trouvés`);
-
-      if (activeNonAdminUsers.length === 0) {
-        return {
-          success: true,
-          message: "Aucun utilisateur non-admin à déconnecter",
-          stats: {
-            usersLoggedOut: 0,
-            adminPreserved: true,
-            duration: "24h",
-            timestamp: new Date().toISOString(),
-            userEmails: []
-          }
-        };
-      }
-
-      const userIds = activeNonAdminUsers.map(user => user._id.toString());
-      const userObjectIds = activeNonAdminUsers.map(user => user._id);
-      const userEmails = activeNonAdminUsers.map(user => this.maskEmail(user.email));
-
-      // ⏱️ Calculer la date d'expiration (24 heures)
-      const logoutUntilDate = new Date(Date.now() + 24 * 60 * 60 * 1000);
-
-      // 🔄 MISE À JOUR ATOMIQUE EN PARALLÈLE
-      await Promise.all([
-        // 1. Bloquer les utilisateurs pour 24h (NE PAS désactiver isActive)
-        this.userModel.updateMany(
-          { _id: { $in: userObjectIds } },
-          {
-            $set: {
-              logoutUntil: logoutUntilDate,
-              lastLogout: new Date(),
-            }
-          }
-        ).exec(),
-
-        // 2. Désactiver toutes leurs sessions actives
-        this.sessionModel.updateMany(
-          { user: { $in: userIds }, isActive: true },
-          {
-            isActive: false,
-            deactivatedAt: new Date(),
-            revocationReason: "admin global logout 24h"
-          }
-        ).exec(),
-
-        // 3. Désactiver tous leurs refresh tokens
-        this.refreshTokenService.deactivateByUserIds(userIds),
-
-        // 4. Supprimer leurs tokens de reset
-        this.resetTokenModel.deleteMany({ user: { $in: userObjectIds } }).exec(),
-      ]);
-
-      // 📈 Nettoyer le cache des utilisateurs
-      await this.usersService.clearAllCache();
-
-      // 📊 Calcul des métriques
-      const executionTime = Date.now() - startTime;
-
-      this.logger.log(`✅ DÉCONNEXION GLOBALE RÉUSSIE : ${activeNonAdminUsers.length} utilisateurs déconnectés pour 24h`);
-
-      // 🎯 Log détaillé pour audit
-      activeNonAdminUsers.forEach(user => {
-        this.logger.debug(`🔒 Utilisateur déconnecté`, {
-          userId: this.maskUserId(user._id.toString()),
-          email: this.maskEmail(user.email),
-          name: `${user.firstName} ${user.lastName}`,
-          logoutUntil: logoutUntilDate.toLocaleString('fr-FR'),
-        });
-      });
-
+    if (activeNonAdminUsers.length === 0) {
       return {
         success: true,
-        message: `${activeNonAdminUsers.length} utilisateurs non-admin déconnectés avec succès pour 24 heures`,
+        message: "Aucun utilisateur non-admin à déconnecter",
         stats: {
-          usersLoggedOut: activeNonAdminUsers.length,
+          usersLoggedOut: 0,
           adminPreserved: true,
-          duration: "24 heures",
+          adminEmail: this.maskEmail(adminEmail), // ✅ MASQUÉ
+          duration: "24h",
           timestamp: new Date().toISOString(),
-          userEmails,
+          userEmails: []
         }
       };
-
-    } catch (error) {
-      this.logger.error(`❌ ÉCHEC déconnexion globale`, {
-        error: error.message,
-        stack: error.stack,
-        timestamp: new Date().toISOString()
-      });
-
-      if (error instanceof BadRequestException) {
-        throw error;
-      }
-
-      throw new BadRequestException(
-        `Échec de la déconnexion globale: ${error.message || 'Erreur technique'}`
-      );
     }
+
+    const userIds = activeNonAdminUsers.map(user => user._id.toString());
+    const userObjectIds = activeNonAdminUsers.map(user => user._id);
+    const userEmails = activeNonAdminUsers.map(user => this.maskEmail(user.email));
+
+    const logoutUntilDate = new Date(Date.now() + 24 * 60 * 60 * 1000);
+
+    await Promise.all([
+      this.userModel.updateMany(
+        { _id: { $in: userObjectIds } },
+        {
+          $set: {
+            logoutUntil: logoutUntilDate,
+            lastLogout: new Date(),
+          }
+        }
+      ).exec(),
+
+      this.sessionModel.updateMany(
+        { user: { $in: userIds }, isActive: true },
+        {
+          isActive: false,
+          deactivatedAt: new Date(),
+          revocationReason: "admin global logout 24h"
+        }
+      ).exec(),
+
+      this.refreshTokenService.deactivateByUserIds(userIds),
+
+      this.resetTokenModel.deleteMany({ user: { $in: userObjectIds } }).exec(),
+    ]);
+
+    await this.usersService.clearAllCache();
+
+    const executionTime = Date.now() - startTime;
+
+    this.logger.log(`✅ DÉCONNEXION GLOBALE RÉUSSIE : ${activeNonAdminUsers.length} utilisateurs déconnectés`);
+    this.logger.log(`✅ ADMIN PRÉSERVÉ : ${this.maskEmail(adminEmail)}`);
+
+    return {
+      success: true,
+      message: `${activeNonAdminUsers.length} utilisateurs non-admin déconnectés pour 24 heures`,
+      stats: {
+        usersLoggedOut: activeNonAdminUsers.length,
+        adminPreserved: true,
+        adminEmail: this.maskEmail(adminEmail), // ✅ MASQUÉ
+        duration: "24 heures",
+        timestamp: new Date().toISOString(),
+        userEmails,
+      }
+    };
+
+  } catch (error) {
+    this.logger.error(`❌ ÉCHEC déconnexion globale: ${error.message}`);
+    throw new BadRequestException(`Échec de la déconnexion globale: ${error.message}`);
   }
+}
+
 
   async revokeToken(token: string, expiresAt: Date): Promise<void> {
     try {
@@ -555,7 +529,6 @@ export class AuthService {
   }> {
     const tokensResult = await this.revokedTokenService.revokeAllTokens();
     
-    // ✅ Désactiver plutôt que supprimer les sessions
     await this.sessionModel.updateMany(
       { isActive: true },
       { 
@@ -579,7 +552,6 @@ export class AuthService {
     token: string,
   ): Promise<void> {
     try {
-      // ✅ Désactiver la session plutôt que la supprimer
       await this.sessionModel.updateOne(
         { token, user: userId },
         { 
@@ -606,11 +578,10 @@ export class AuthService {
     }
   }
 
-  async validateUser(email: string, password: string): Promise<User | null> {
+ async validateUser(email: string, password: string): Promise<User | null> {
   try {
     const attempts = this.getLoginAttempts(email);
 
-    // Vérifier les tentatives de connexion
     if (attempts.attempts >= AuthConstants.MAX_LOGIN_ATTEMPTS) {
       const timeSinceLastAttempt =
         (Date.now() - attempts.lastAttempt.getTime()) / (1000 * 60);
@@ -625,10 +596,8 @@ export class AuthService {
       }
     }
 
-    this.logger.debug(`[DEBUG] validateUser appelé pour: ${this.maskEmail(email)}`);
-    this.logger.debug(`[DEBUG] Password fourni: ${!!password}, Longueur: ${password?.length || 0}`);
+    this.logger.debug(`Validation utilisateur pour: ${this.maskEmail(email)}`);
 
-    // ✅ CORRECTION CRITIQUE: Toujours inclure .select('+password')
     const user = await this.userModel
       .findOne({ email: email.toLowerCase().trim() })
       .select('+password')
@@ -640,63 +609,58 @@ export class AuthService {
       return null;
     }
 
-    // ✅ LOGS DÉTAILLÉS
-    this.logger.debug(`[DEBUG] Utilisateur trouvé: ${this.maskEmail(email)}`);
-    this.logger.debug(`[DEBUG] User ID: ${user._id}`);
-    this.logger.debug(`[DEBUG] User role: ${user.role}`);
-    this.logger.debug(`[DEBUG] User isActive: ${user.isActive}`);
-    this.logger.debug(`[DEBUG] User password présent: ${!!user.password}`);
-    this.logger.debug(`[DEBUG] User password longueur: ${user.password?.length || 0}`);
-    
-    // ✅ VÉRIFIER QUE LE MOT DE PASSE EST DÉFINI DANS LA BASE
+    // ✅ VÉRIFICATION STRICTE : SEUL L'EMAIL DU .ENV PEUT ÊTRE ADMIN
+    if (user.role === UserRole.ADMIN) {
+      const adminEmail = process.env.EMAIL_USER;
+      
+      if (!adminEmail) {
+        this.logger.error('❌ EMAIL_USER non configuré dans .env');
+        throw new UnauthorizedException("Configuration système invalide");
+      }
+      
+      if (user.email !== adminEmail) {
+        this.logger.error(`❌ ADMIN NON AUTORISÉ DÉTECTÉ: ${this.maskEmail(user.email)}`);
+        this.incrementLoginAttempts(email);
+        throw new UnauthorizedException("Accès refusé");
+      }
+      
+      this.logger.log(`✅ ADMIN LÉGITIME: ${this.maskEmail(user.email)}`);
+    }
+
     if (!user.password || user.password.trim() === '') {
       this.logger.error(`❌ CRITICAL: User ${this.maskEmail(email)} has no password in database`);
       
-      // CORRECTION: Si c'est un utilisateur existant sans mot de passe
-      // (peut arriver si créé par admin ou importé)
       if (user.role === UserRole.ADMIN) {
-        // Pour les admins, autoriser à créer un mot de passe
         this.logger.warn(`Admin ${this.maskEmail(email)} n'a pas de mot de passe - réinitialisation requise`);
         throw new UnauthorizedException(
           AuthConstants.ERROR_MESSAGES.PASSWORD_RESET_REQUIRED,
           {
-            description: "PASSWORD RESET REQUIRED",
-            cause: "NO PASSWORD IN DB"
+            description: "PASSWORD_RESET_REQUIRED",
+            cause: "NO_PASSWORD_IN_DB"
           }
         );
       } else {
-        // Pour les utilisateurs normaux, c'est une erreur
         this.incrementLoginAttempts(email);
         return null;
       }
     }
 
-    // ✅ VÉRIFIER QUE LE MOT DE PASSE FOURNI N'EST PAS VIDE
     if (!password || password.trim() === '') {
       this.logger.warn(`Mot de passe vide fourni pour: ${this.maskEmail(email)}`);
       this.incrementLoginAttempts(email);
       return null;
     }
 
-    // ✅ COMPARER LES MOTS DE PASSE
     let isPasswordValid = false;
     try {
-      this.logger.debug(`[DEBUG] Début comparaison bcrypt pour: ${this.maskEmail(email)}`);
-      
-      // Nettoyer les espaces
       const cleanPassword = password.trim();
       
-      // Vérifier que les deux paramètres sont valides
       if (!user.password || !cleanPassword) {
         this.logger.error(`Arguments manquants pour bcrypt.compare`);
         throw new Error('Arguments manquants pour la comparaison');
       }
       
-      this.logger.debug(`[DEBUG] Hash bcrypt: ${user.password.substring(0, 10)}...`);
-      
       isPasswordValid = await bcrypt.compare(cleanPassword, user.password);
-      
-      this.logger.debug(`[DEBUG] Résultat bcrypt.compare: ${isPasswordValid}`);
       
     } catch (bcryptError) {
       this.logger.error(`❌ Erreur bcrypt.compare pour ${this.maskEmail(email)}: ${bcryptError.message}`);
@@ -715,7 +679,6 @@ export class AuthService {
       return null;
     }
 
-    // ✅ VÉRIFIER L'ACCÈS UTILISATEUR
     const userId = this.convertObjectIdToString(user._id);
     const accessCheck = await this.usersService.checkUserAccess(userId);
     
@@ -725,7 +688,6 @@ export class AuthService {
       if (accessCheck.reason?.includes('Compte désactivé')) {
         throw new UnauthorizedException(AuthConstants.ERROR_MESSAGES.COMPTE_DESACTIVE);
       } else if (accessCheck.reason?.includes('Déconnecté temporairement')) {
-        // Extraire les heures restantes si disponibles
         const remainingHours = accessCheck.details?.remainingHours || 24;
         throw new UnauthorizedException(
           `${AuthConstants.ERROR_MESSAGES.COMPTE_TEMPORAIREMENT_DECONNECTE}:${remainingHours}`
@@ -737,10 +699,8 @@ export class AuthService {
       }
     }
 
-    // ✅ RÉINITIALISER LES TENTATIVES EN CAS DE SUCCÈS
     this.resetLoginAttempts(email);
     
-    // ✅ Retourner l'utilisateur SANS le mot de passe
     const userWithoutPassword = user.toObject();
     delete userWithoutPassword.password;
     
@@ -748,19 +708,16 @@ export class AuthService {
     return userWithoutPassword;
 
   } catch (error) {
-    // ✅ PROPAGER LES EXCEPTIONS DE BLOCAGE (compte désactivé, maintenance, etc.)
     if (error instanceof UnauthorizedException) {
       this.logger.log(`Blocage connexion pour ${this.maskEmail(email)}: ${error.message}`);
       throw error;
     }
     
-    // ✅ LOG DES ERREURS INATTENDUES
     this.logger.error(
       `❌ Erreur inattendue validateUser ${this.maskEmail(email)}: ${error.message}`,
       error.stack
     );
     
-    // Pour les autres erreurs, retourner null (pas d'utilisateur)
     return null;
   }
 }
@@ -944,7 +901,6 @@ export class AuthService {
         }
       }
 
-      // ✅ Désactiver plutôt que supprimer
       await this.sessionModel.updateMany(
         { user: userId, isActive: true },
         { 
@@ -978,7 +934,6 @@ export class AuthService {
         }
       }
 
-      // ✅ Désactiver les sessions expirées plutôt que les supprimer
       await this.sessionModel.updateMany(
         { expiresAt: { $lt: new Date() }, isActive: true },
         { 
@@ -997,13 +952,12 @@ export class AuthService {
 
   async cleanupUserSessions(userId: string): Promise<void> {
     try {
-      // ✅ Désactiver plutôt que supprimer
       await this.sessionModel.updateMany(
         { user: userId, isActive: true },
         { 
           isActive: false, 
           deactivatedAt: new Date(),
-          revocationReason: "admin cleanup" 
+          revocationReason: "admin_cleanup" 
         },
       );
       
@@ -1014,62 +968,49 @@ export class AuthService {
     }
   }
 
-  // ✅ Méthodes de masquage unifiées
-  private maskEmail(email: string): string {
-    if (!email) return '***@***';
-    const [name, domain] = email.split('@');
-    if (!name || !domain) return '***@***';
-    
-    const maskedName = name.length <= 2 
-      ? name.charAt(0) + '*'
-      : name.charAt(0) + '***' + (name.length > 1 ? name.charAt(name.length - 1) : '');
-    
-    return `${maskedName}@${domain}`;
+ private maskEmail(email: string): string {
+  if (!email || typeof email !== 'string') return '***@***';
+  
+  const trimmedEmail = email.trim();
+  const [name, domain] = trimmedEmail.split('@');
+  
+  if (!name || !domain || name.length === 0 || domain.length === 0) {
+    return '***@***';
+  }
+  
+  // Masquer le nom (garder première lettre et dernière)
+  const maskedName = name.length <= 2 
+    ? name.charAt(0) + '*'
+    : name.charAt(0) + '***' + (name.length > 1 ? name.charAt(name.length - 1) : '');
+  
+  // Masquer partiellement le domaine
+  const domainParts = domain.split('.');
+  if (domainParts.length < 2) return `${maskedName}@***`;
+  
+  const maskedDomain = domainParts.length === 2 
+    ? '***.' + domainParts[1]
+    : '***.' + domainParts.slice(-2).join('.');
+  
+  return `${maskedName}@${maskedDomain}`;
   }
 
   private maskUserId(userId: string): string {
-    if (!userId) return 'user_***';
-    if (userId.length <= 8) return userId;
-    return `${userId.substring(0, 4)}***${userId.substring(userId.length - 4)}`;
+    if (!userId || typeof userId !== 'string' || userId.length === 0) {
+      return 'user_***';
+    }
+    
+    if (userId.length <= 6) {
+      return 'user_***';
+    }
+    
+    return `user_${userId.substring(0, 3)}***${userId.substring(userId.length - 3)}`;
   }
 
   private maskToken(token: string): string {
-    if (!token || token.length < 10) return '***';
-    return `${token.substring(0, 6)}...${token.substring(token.length - 4)}`;
-  }
-
-  // ✅ MÉTHODE POUR CRÉER L'ADMIN UNIQUE AU DÉMARRAGE
-  async createUniqueAdmin(): Promise<void> {
-    try {
-      const adminEmail = process.env.EMAIL_USER;
-      
-      // Vérifier si l'admin existe déjà
-      const existingAdmin = await this.userModel.findOne({ 
-        email: adminEmail,
-        role: UserRole.ADMIN 
-      }).exec();
-
-      if (!existingAdmin) {
-        this.logger.log(`Création de l'administrateur unique avec email: ${adminEmail}`);
-        
-        // Créer l'admin sans mot de passe (doit utiliser "forgot password")
-        const adminUser = new this.userModel({
-          firstName: 'Damini',
-          lastName: 'Sangaré',
-          email: adminEmail,
-          telephone: '+223 91 83 09 41',
-          role: UserRole.ADMIN,
-          isActive: true,
-          password: '', // ❌ PAS DE MOT DE PASSE PAR DÉFAUT
-        });
-
-        await adminUser.save();
-        this.logger.log('✅ Administrateur unique créé. Utilisez "mot de passe oublié" pour définir un mot de passe.');
-      } else {
-        this.logger.log('✅ Administrateur unique déjà présent dans le système');
-      }
-    } catch (error) {
-      this.logger.error('❌ Erreur lors de la création de l\'administrateur unique:', error);
+    if (!token || typeof token !== 'string' || token.length < 10) {
+      return 'token_***';
     }
+    
+    return `token_${token.substring(0, 4)}***${token.substring(token.length - 4)}`;
   }
 }

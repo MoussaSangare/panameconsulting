@@ -39,7 +39,7 @@ export class CreateRendezvousDto {
 
   @ApiProperty({
     example: 'jean.dupont@example.com',
-    description: 'Email du client',
+    description: 'Email du client (doit correspondre à un compte existant)',
   })
   @IsNotEmpty({ message: "L'email est obligatoire" })
   @IsEmail({}, { message: "Format d'email invalide" })

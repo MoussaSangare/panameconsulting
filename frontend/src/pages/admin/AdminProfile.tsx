@@ -1,10 +1,13 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useId } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { Eye, EyeOff, Shield, CheckCircle, XCircle } from 'lucide-react';
 import { Helmet } from 'react-helmet-async';
 import { useNavigate } from 'react-router-dom';
 
 const AdminProfile: React.FC = () => {
+  // ✅ Generate unique ID for this component instance
+  const uniqueId = useId();
+  
   const { user, access_token, isAuthenticated, isLoading } = useAuth();
   const navigate = useNavigate();
   const [formData, setFormData] = useState({
@@ -86,7 +89,7 @@ const AdminProfile: React.FC = () => {
 
     try {
       const VITE_API_URL =
-        import.meta.env.VITE_API_URL || 'http://localhost:3000';
+        import.meta.env.VITE_API_URL;
 
       // Vérifie que le token est disponible
       if (!access_token) {
@@ -242,7 +245,7 @@ const AdminProfile: React.FC = () => {
         <meta name='seznam' content='noindex, nofollow' />
       </Helmet>
 
-      <div className='min-h-screen bg-gray-50 py-8 px-4 sm:px-6 lg:px-8'>
+      <div className='min-h-screen py-8 px-4 sm:px-6 lg:px-8'>
         <div className='max-w-md mx-auto'>
           {/* En-tête */}
           <div className='text-center mb-8'>
@@ -259,7 +262,7 @@ const AdminProfile: React.FC = () => {
 
           {/* Carte principale */}
           <div className='bg-white rounded-xl shadow-sm border border-gray-200 p-6'>
-            {/* Info admin - CORRIGÉ */}
+            {/* Info admin */}
             <div className='bg-blue-50 rounded-lg p-4 mb-6 border border-blue-100'>
               <div className='flex items-center justify-between'>
                 <div className='flex-1 min-w-0'>
@@ -285,7 +288,7 @@ const AdminProfile: React.FC = () => {
               {/* Champ username caché pour l'accessibilité */}
               <div className='sr-only'>
                 <input
-                  id='admin-username'
+                  id={`${uniqueId}-admin-username`}
                   type='text'
                   name='username'
                   autoComplete='username'
@@ -298,14 +301,14 @@ const AdminProfile: React.FC = () => {
               {/* Mot de passe actuel */}
               <div>
                 <label
-                  htmlFor='admin-currentPassword'
+                  htmlFor={`${uniqueId}-admin-currentPassword`}
                   className='block text-sm font-medium text-gray-700 mb-2'
                 >
                   Mot de passe actuel
                 </label>
                 <div className='relative'>
                   <input
-                    id='admin-currentPassword'
+                    id={`${uniqueId}-admin-currentPassword`}
                     name='currentPassword'
                     type={showPasswords.current ? 'text' : 'password'}
                     value={formData.currentPassword}
@@ -315,7 +318,7 @@ const AdminProfile: React.FC = () => {
                         currentPassword: e.target.value,
                       }))
                     }
-                    className='w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none hover:border-blue-400 transition-colors duration-200 bg-white text-gray-900 placeholder-gray-400 text-base'
+                    className='w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-none focus:border-blue-500 outline-none hover:border-blue-400 transition-colors duration-200 bg-white text-gray-900 placeholder-gray-400 text-base'
                     placeholder='Mot de passe actuel'
                     required
                     autoComplete='current-password'
@@ -342,14 +345,14 @@ const AdminProfile: React.FC = () => {
               {/* Nouveau mot de passe */}
               <div>
                 <label
-                  htmlFor='admin-newPassword'
+                  htmlFor={`${uniqueId}-admin-newPassword`}
                   className='block text-sm font-medium text-gray-700 mb-2'
                 >
                   Nouveau mot de passe
                 </label>
                 <div className='relative'>
                   <input
-                    id='admin-newPassword'
+                    id={`${uniqueId}-admin-newPassword`}
                     name='newPassword'
                     type={showPasswords.new ? 'text' : 'password'}
                     value={formData.newPassword}
@@ -359,7 +362,7 @@ const AdminProfile: React.FC = () => {
                         newPassword: e.target.value,
                       }))
                     }
-                    className='w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none hover:border-blue-400 transition-colors duration-200 bg-white text-gray-900 placeholder-gray-400 text-base'
+                    className='w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-none focus:border-blue-500 outline-none hover:border-blue-400 transition-colors duration-200 bg-white text-gray-900 placeholder-gray-400 text-base'
                     placeholder='Nouveau mot de passe'
                     required
                     autoComplete='new-password'
@@ -386,14 +389,14 @@ const AdminProfile: React.FC = () => {
               {/* Confirmation mot de passe */}
               <div>
                 <label
-                  htmlFor='admin-confirmPassword'
+                  htmlFor={`${uniqueId}-admin-confirmPassword`}
                   className='block text-sm font-medium text-gray-700 mb-2'
                 >
                   Confirmer le mot de passe
                 </label>
                 <div className='relative'>
                   <input
-                    id='admin-confirmPassword'
+                    id={`${uniqueId}-admin-confirmPassword`}
                     name='confirmPassword'
                     type={showPasswords.confirm ? 'text' : 'password'}
                     value={formData.confirmPassword}
@@ -403,7 +406,7 @@ const AdminProfile: React.FC = () => {
                         confirmPassword: e.target.value,
                       }))
                     }
-                    className='w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none hover:border-blue-400 transition-colors duration-200 bg-white text-gray-900 placeholder-gray-400 text-base'
+                    className='w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-none focus:border-blue-500 outline-none hover:border-blue-400 transition-colors duration-200 bg-white text-gray-900 placeholder-gray-400 text-base'
                     placeholder='Confirmer le mot de passe'
                     required
                     autoComplete='new-password'

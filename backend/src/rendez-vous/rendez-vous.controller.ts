@@ -39,6 +39,7 @@ const ADMIN_OPINION = {
 } as const;
 
 @ApiTags('rendezvous')
+@ApiBearerAuth()
 @Controller('rendezvous')
 export class RendezvousController {
   private readonly logger = new Logger(RendezvousController.name);
@@ -46,9 +47,11 @@ export class RendezvousController {
   constructor(private readonly rendezvousService: RendezvousService) {}
 
   @Post()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.USER)
   @ApiOperation({ 
     summary: 'Créer un nouveau rendez-vous',
-    description: 'Créer un rendez-vous sans compte utilisateur (ouvert à tous)'
+    description: 'Créer un rendez-vous pour l\'utilisateur connecté (compte requis)'
   })
   @ApiResponse({ 
     status: 201, 
@@ -72,11 +75,33 @@ export class RendezvousController {
     }
   })
   @ApiResponse({ status: 400, description: 'Données invalides ou créneau non disponible' })
-  async create(@Body() createDto: CreateRendezvousDto) {
-    this.logger.log('Création rendez-vous sans compte');
+  @ApiResponse({ status: 401, description: 'Non authentifié' })
+  @ApiResponse({ status: 403, description: 'Non autorisé ou pas de compte' })
+  async create(
+    @Body() createDto: CreateRendezvousDto,
+    @Req() req: AuthenticatedRequest
+  ) {
+    this.logger.log('Création rendez-vous par utilisateur');
     
+    const userEmail = req.user?.email;
+    const isAdmin = req.user?.role === UserRole.ADMIN;
+    
+    if (!userEmail) {
+      throw new BadRequestException('Email utilisateur non trouvé dans le token');
+    }
+
+    // VÉRIFICATION : Pour les utilisateurs non-admin, l'email doit correspondre
+    if (!isAdmin) {
+      const normalizedDtoEmail = createDto.email.toLowerCase().trim();
+      const normalizedUserEmail = userEmail.toLowerCase().trim();
+      
+      if (normalizedDtoEmail !== normalizedUserEmail) {
+        throw new ForbiddenException('Vous ne pouvez créer un rendez-vous que pour votre propre compte');
+      }
+    }
+
     try {
-      const result = await this.rendezvousService.create(createDto);
+      const result = await this.rendezvousService.create(createDto, userEmail, isAdmin);
       this.logger.log('Rendez-vous créé avec succès');
       return result;
     } catch (error) {
@@ -88,7 +113,6 @@ export class RendezvousController {
   @Get()
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.ADMIN)
-  @ApiBearerAuth()
   @ApiOperation({ 
     summary: 'Lister tous les rendez-vous (admin)',
     description: 'Récupérer tous les rendez-vous avec pagination et filtres (admin uniquement)'
@@ -125,7 +149,7 @@ export class RendezvousController {
     name: 'search', 
     required: false, 
     type: String, 
-    description: 'Recherche textuelle (nom, prénom, email, destination, téléphone)',
+    description: 'Recherche textuelle (nom, prénom, email, destination)',
     example: 'Dupont'
   })
   @ApiResponse({ 
@@ -186,15 +210,11 @@ export class RendezvousController {
     return this.rendezvousService.findAll(page, limit, status, date, search);
   }
 
-  @Get('email/:email')
+  @Get('user')
+  @UseGuards(JwtAuthGuard)
   @ApiOperation({ 
-    summary: 'Lister les rendez-vous par email',
-    description: 'Récupérer les rendez-vous associés à un email spécifique'
-  })
-  @ApiParam({ 
-    name: 'email', 
-    description: 'Email du client', 
-    example: 'jean.dupont@example.com' 
+    summary: 'Lister les rendez-vous de l\'utilisateur connecté',
+    description: 'Récupérer les rendez-vous de l\'utilisateur connecté par son email (compte requis)'
   })
   @ApiQuery({ 
     name: 'page', 
@@ -219,7 +239,7 @@ export class RendezvousController {
   })
   @ApiResponse({ 
     status: 200, 
-    description: 'Liste des rendez-vous de l\'email',
+    description: 'Liste des rendez-vous de l\'utilisateur',
     schema: {
       example: {
         data: [
@@ -245,18 +265,23 @@ export class RendezvousController {
       }
     }
   })
-  async findByEmail(
-    @Param('email') email: string,
+  @ApiResponse({ status: 401, description: 'Non authentifié' })
+  @ApiResponse({ status: 403, description: 'Pas de compte pour cet email' })
+  async findByUser(
+    @Req() req: AuthenticatedRequest,
     @Query('page') page: number = 1,
     @Query('limit') limit: number = 10,
     @Query('status') status?: string,
   ) {
-    this.logger.log('Recherche rendez-vous par email');
+    // Récupérer l'email de l'utilisateur depuis le token JWT
+    const userEmail = req.user?.email;
     
-    if (!email || email.trim() === '') {
-      throw new BadRequestException('Email requis');
+    this.logger.log('Recherche rendez-vous pour utilisateur');
+    
+    if (!userEmail) {
+      throw new BadRequestException('Email utilisateur non trouvé dans le token');
     }
-
+  
     // Validation des paramètres
     if (page < 1) throw new BadRequestException('Page invalide');
     if (limit < 1 || limit > 100) throw new BadRequestException('Limite invalide');
@@ -265,7 +290,7 @@ export class RendezvousController {
       throw new BadRequestException(`Statut invalide. Valeurs autorisées: ${Object.values(RENDEZVOUS_STATUS).join(', ')}`);
     }
 
-    return this.rendezvousService.findByEmail(email, page, limit, status);
+    return this.rendezvousService.findByEmail(userEmail, page, limit, status);
   }
 
   @Get('available-slots')
@@ -323,9 +348,10 @@ export class RendezvousController {
   }
 
   @Get(':id')
+  @UseGuards(JwtAuthGuard)
   @ApiOperation({ 
     summary: 'Récupérer un rendez-vous par ID',
-    description: 'Obtenir les détails d\'un rendez-vous spécifique par son ID'
+    description: 'Obtenir les détails d\'un rendez-vous spécifique par son ID (compte requis)'
   })
   @ApiParam({
     name: 'id',
@@ -337,15 +363,28 @@ export class RendezvousController {
     description: 'Détails du rendez-vous'
   })
   @ApiResponse({ status: 400, description: 'ID invalide' })
+  @ApiResponse({ status: 401, description: 'Non authentifié' })
+  @ApiResponse({ status: 403, description: 'Non autorisé ou pas de compte' })
   @ApiResponse({ status: 404, description: 'Rendez-vous non trouvé' })
-  async findOne(@Param('id') id: string) {
+  async findOne(@Param('id') id: string, @Req() req: AuthenticatedRequest) {
     if (!id || id.trim() === '') {
       throw new BadRequestException('ID du rendez-vous requis');
     }
 
+    if (id === 'stats') {
+      throw new BadRequestException('Invalid rendezvous ID');
+    }
+
+    const userEmail = req.user?.email;
+    const isAdmin = req.user?.role === UserRole.ADMIN;
+    
+    if (!isAdmin && !userEmail) {
+      throw new BadRequestException('Email utilisateur non trouvé dans le token');
+    }
+
     this.logger.log('Recherche rendez-vous par ID');
 
-    const rendezvous = await this.rendezvousService.findOne(id);
+    const rendezvous = await this.rendezvousService.findOne(id, userEmail, isAdmin);
     
     if (!rendezvous) {
       throw new NotFoundException(`Rendez-vous avec l'ID ${id} non trouvé`);
@@ -355,12 +394,10 @@ export class RendezvousController {
   }
 
   @Put(':id')
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
-  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
   @ApiOperation({ 
-    summary: 'Mettre à jour un rendez-vous (admin)',
-    description: 'Modifier les informations d\'un rendez-vous existant (admin uniquement)'
+    summary: 'Mettre à jour un rendez-vous',
+    description: 'Modifier les informations d\'un rendez-vous existant (compte requis)'
   })
   @ApiParam({ 
     name: 'id', 
@@ -390,7 +427,7 @@ export class RendezvousController {
   })
   @ApiResponse({ status: 400, description: 'Données invalides ou créneau non disponible' })
   @ApiResponse({ status: 401, description: 'Non authentifié' })
-  @ApiResponse({ status: 403, description: 'Non autorisé (admin uniquement)' })
+  @ApiResponse({ status: 403, description: 'Non autorisé à modifier ce rendez-vous ou pas de compte' })
   @ApiResponse({ status: 404, description: 'Rendez-vous non trouvé' })
   async update(
     @Param('id') id: string,
@@ -401,15 +438,21 @@ export class RendezvousController {
       throw new BadRequestException('ID du rendez-vous requis');
     }
 
-    this.logger.log('Modification rendez-vous par admin');
+    const userEmail = req.user?.email;
+    const isAdmin = req.user?.role === UserRole.ADMIN;
     
-    return this.rendezvousService.update(id, updateDto, req.user);
+    if (!isAdmin && !userEmail) {
+      throw new BadRequestException('Email utilisateur non trouvé dans le token');
+    }
+
+    this.logger.log('Modification rendez-vous');
+    
+    return this.rendezvousService.update(id, updateDto, userEmail, isAdmin);
   }
 
   @Put(':id/status')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.ADMIN)
-  @ApiBearerAuth()
   @ApiOperation({ 
     summary: 'Mettre à jour le statut d\'un rendez-vous (admin)',
     description: 'Changer le statut d\'un rendez-vous (admin uniquement)'
@@ -453,15 +496,18 @@ export class RendezvousController {
       throw new BadRequestException(`Statut invalide. Valeurs autorisées: ${Object.values(RENDEZVOUS_STATUS).join(', ')}`);
     }
 
-    this.logger.log('Changement statut rendez-vous par admin');
+    const userEmail = req.user?.email;
     
-    return this.rendezvousService.updateStatus(id, status, avisAdmin, req.user);
+    this.logger.log('Changement statut rendez-vous');
+    
+    return this.rendezvousService.updateStatus(id, status, avisAdmin, userEmail);
   }
 
   @Delete(':id')
+  @UseGuards(JwtAuthGuard)
   @ApiOperation({ 
     summary: 'Annuler un rendez-vous',
-    description: 'Annuler un rendez-vous (soft delete - changement de statut en "Annulé")'
+    description: 'Annuler un rendez-vous (soft delete - changement de statut en "Annulé") (compte requis)'
   })
   @ApiParam({ 
     name: 'id', 
@@ -483,20 +529,62 @@ export class RendezvousController {
     }
   })
   @ApiResponse({ status: 400, description: 'Impossible d\'annuler à moins de 2h' })
-  @ApiResponse({ status: 403, description: 'Non autorisé à annuler ce rendez-vous' })
+  @ApiResponse({ status: 401, description: 'Non authentifié' })
+  @ApiResponse({ status: 403, description: 'Non autorisé à annuler ce rendez-vous ou pas de compte' })
   @ApiResponse({ status: 404, description: 'Rendez-vous non trouvé' })
-  async cancel(
-    @Param('id') id: string, 
-    @Query('email') email?: string,
-    @Req() req?: AuthenticatedRequest
-  ) {
+  async remove(@Param('id') id: string, @Req() req: AuthenticatedRequest) {
     if (!id || id.trim() === '') {
       throw new BadRequestException('ID du rendez-vous requis');
     }
 
-    this.logger.log('Annulation rendez-vous');
+    const userEmail = req.user?.email;
+    const isAdmin = req.user?.role === UserRole.ADMIN;
     
-    const user = req?.user;
-    return this.rendezvousService.cancel(id, email, user);
+    if (!isAdmin && !userEmail) {
+      throw new BadRequestException('Email utilisateur non trouvé dans le token');
+    }
+
+    this.logger.log('Suppression rendez-vous');
+    
+    return this.rendezvousService.removeWithPolicy(id, userEmail, isAdmin);
+  }
+
+  @Put(':id/confirm')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({ 
+    summary: 'Confirmer un rendez-vous',
+    description: 'Confirmer un rendez-vous en attente (admin uniquement)'
+  })
+  @ApiParam({ 
+    name: 'id', 
+    description: 'ID du rendez-vous', 
+    example: '507f1f77bcf86cd799439011' 
+  })
+  @ApiResponse({ 
+    status: 200, 
+    description: 'Rendez-vous confirmé',
+    schema: {
+      example: {
+        _id: '507f1f77bcf86cd799439011',
+        status: 'Confirmé',
+        updatedAt: '2024-01-02T10:00:00.000Z'
+      }
+    }
+  })
+  @ApiResponse({ status: 400, description: 'Rendez-vous non en attente ou déjà passé' })
+  @ApiResponse({ status: 401, description: 'Non authentifié' })
+  @ApiResponse({ status: 403, description: 'Non autorisé à confirmer ce rendez-vous' })
+  @ApiResponse({ status: 404, description: 'Rendez-vous non trouvé' })
+  async confirmRendezvous(@Param('id') id: string, @Req() req: AuthenticatedRequest) {
+    if (!id || id.trim() === '') {
+      throw new BadRequestException('ID du rendez-vous requis');
+    }
+
+    const userEmail = req.user?.email;
+    
+    this.logger.log('Confirmation rendez-vous');
+    
+    return this.rendezvousService.confirmByUser(id, userEmail, true);
   }
 }

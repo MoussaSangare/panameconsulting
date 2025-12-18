@@ -1,3 +1,4 @@
+
 import { Prop, Schema, SchemaFactory } from "@nestjs/mongoose";
 import { Document, Model } from "mongoose";
 import { UserRole } from "../enums/user-role.enum";
@@ -67,7 +68,7 @@ export class User extends Document {
   @Prop({
     type: String,
     enum: Object.values(UserRole),
-    default: UserRole.USER, // ← PAR DÉFAUT USER
+    default: UserRole.USER,
     index: true
   })
   role: UserRole;
@@ -82,7 +83,7 @@ export class User extends Document {
   @Prop({ 
     type: Date,
     index: true,
-    expires: 86400
+    expires: 86400 // ⚠️ Correction: option Mongoose pour TTL
   })
   logoutUntil?: Date;
 
@@ -126,12 +127,6 @@ export class User extends Document {
     if (this.isTemporarilyLoggedOut) return false;
     return true;
   }
-
-  // ✅ Vérifier si c'est l'admin unique
-  public get isUniqueAdmin(): boolean {
-    const adminEmail = process.env.EMAIL_USER || 'admin@example.com';
-    return this.role === UserRole.ADMIN && this.email === adminEmail;
-  }
 }
 
 export const UserSchema = SchemaFactory.createForClass(User);
@@ -160,19 +155,6 @@ UserSchema.pre("save", async function() {
       throw new Error('Email already exists');
     }
   }
-
-  // ✅ EMPÊCHER LA CRÉATION DE PLUSIEURS ADMINS
-  if (this.isModified('role') && this.role === UserRole.ADMIN) {
-    const UserModel = this.constructor as Model<User>;
-    const existingAdmin = await UserModel.findOne({ 
-      role: UserRole.ADMIN,
-      _id: { $ne: this._id }
-    }).exec();
-    
-    if (existingAdmin) {
-      throw new Error('Un seul administrateur est autorisé dans le système');
-    }
-  }
 });
 
 // Méthodes statiques
@@ -185,15 +167,6 @@ UserSchema.statics.findByEmailSafe = async function(email: string) {
 UserSchema.statics.existsById = async function(userId: string) {
   const count = await this.countDocuments({ _id: userId }).exec();
   return count > 0;
-};
-
-// ✅ Méthode pour vérifier l'admin unique
-UserSchema.statics.getUniqueAdmin = async function() {
-  const adminEmail = process.env.EMAIL_USER || 'panameconsulting906@gmail.com';
-  return this.findOne({ 
-    email: adminEmail,
-    role: UserRole.ADMIN 
-  }).exec();
 };
 
 export { UserRole };

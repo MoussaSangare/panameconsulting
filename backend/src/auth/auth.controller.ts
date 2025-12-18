@@ -84,7 +84,7 @@ export class AuthController {
    return res.json({
     access_token: result.access_token,
     user: {
-      id: result.user.id, // ← ID MongoDB de l'utilisateur
+      id: result.user.id,
       email: result.user.email,
       firstName: result.user.firstName,
       lastName: result.user.lastName,
@@ -193,7 +193,7 @@ export class AuthController {
      return res.status(201).json({
       access_token: result.access_token,
       user: {
-        id: result.user.id, // ← ID MongoDB de l'utilisateur
+        id: result.user.id,
         email: result.user.email,
         firstName: result.user.firstName,
         lastName: result.user.lastName,
@@ -220,7 +220,6 @@ export class AuthController {
   @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: "Déconnexion" })
   async logout(@Request() req: any, @Res() res: Response) {
-    // Utiliser id directement
     const userId = req.user?.id;
     const token = req.headers.authorization?.split(" ")[1] || 
                   req.cookies?.access_token || "";
@@ -251,6 +250,7 @@ export class AuthController {
         stats: {
           usersLoggedOut: result.stats.usersLoggedOut,
           adminPreserved: result.stats.adminPreserved,
+          adminEmail: result.stats.adminEmail,
           duration: result.stats.duration || "30 minutes",
           timestamp: result.stats.timestamp || new Date().toISOString(),
           userEmails: result.stats.userEmails || []
@@ -265,32 +265,37 @@ export class AuthController {
   }
 
   @Get("me")
-@UseGuards(JwtAuthGuard)
-@ApiOperation({ summary: "Récupérer le profil utilisateur" })
-async getProfile(@Request() req: any) {
-  const userId = req.user?.id;
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: "Récupérer le profil utilisateur" })
+  async getProfile(@Request() req: any) {
+    const userId = req.user?.id;
 
-  if (!userId) {
-    throw new BadRequestException("ID utilisateur manquant dans le token");
+    if (!userId) {
+      this.logger.warn('ID utilisateur manquant dans le token');
+      throw new BadRequestException("ID utilisateur manquant");
+    }
+
+    try {
+      const user = await this.authService.getProfile(userId);
+
+      // ✅ RETOURNER LES DONNÉES COMPLÈTES SANS MASQUAGE
+      return {
+        id: user._id?.toString() || userId,
+        email: user.email, // ✅ COMPLET
+        firstName: user.firstName,
+        lastName: user.lastName,
+        role: user.role,
+        isAdmin: user.role === UserRole.ADMIN,
+        telephone: user.telephone, // ✅ COMPLET
+        isActive: user.isActive,
+      };
+    } catch (error: any) {
+      this.logger.error(`Erreur récupération profil: ${this.maskUserId(userId)}`);
+      throw error;
+    }
   }
 
-  try {
-    const user = await this.authService.getProfile(userId);
 
-    return {
-      id: user._id?.toString() || userId, // ← Convertir ObjectId en string
-      email: user.email,
-      firstName: user.firstName,
-      lastName: user.lastName,
-      role: user.role,
-      isAdmin: user.role === UserRole.ADMIN,
-      telephone: user.telephone,
-      isActive: user.isActive,
-    };
-  } catch (error: any) {
-    throw error;
-  }
-}
 
   @Post("update-password")
   @UseGuards(JwtAuthGuard)
@@ -304,7 +309,6 @@ async getProfile(@Request() req: any) {
       confirmNewPassword: string;
     },
   ) {
-    // Utiliser id directement
     const userId = req.user?.id;
 
     if (!body.currentPassword || body.currentPassword.trim() === '') {
@@ -378,4 +382,46 @@ async getProfile(@Request() req: any) {
     res.clearCookie("refresh_token", cookieOptions);
     res.clearCookie("access_token", cookieOptions);
   }
+
+
+  
+  private maskPhone(phone: string): string {
+    if (!phone || typeof phone !== 'string') return '***';
+    if (phone.length <= 4) return '***';
+    return `***${phone.substring(phone.length - 4)}`;
+  }
+
+  private maskUserId(userId: string): string {
+    if (!userId || typeof userId !== 'string' || userId.length <= 6) return 'user_***';
+    return `user_${userId.substring(0, 3)}***${userId.substring(userId.length - 3)}`;
+  }
+
+
+   private maskEmail(email: string): string {
+  if (!email || typeof email !== 'string') return '***@***';
+  
+  const trimmedEmail = email.trim();
+  const [name, domain] = trimmedEmail.split('@');
+  
+  if (!name || !domain || name.length === 0 || domain.length === 0) {
+    return '***@***';
+  }
+  
+  // Masquer le nom (garder première lettre et dernière)
+  const maskedName = name.length <= 2 
+    ? name.charAt(0) + '*'
+    : name.charAt(0) + '***' + (name.length > 1 ? name.charAt(name.length - 1) : '');
+  
+  // Masquer partiellement le domaine
+  const domainParts = domain.split('.');
+  if (domainParts.length < 2) return `${maskedName}@***`;
+  
+  const maskedDomain = domainParts.length === 2 
+    ? '***.' + domainParts[1]
+    : '***.' + domainParts.slice(-2).join('.');
+  
+  return `${maskedName}@${maskedDomain}`;
+  }
+
+  
 }

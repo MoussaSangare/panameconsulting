@@ -51,7 +51,7 @@ const defaultDestinations: DestinationType[] = [
 ];
 
 const VITE_API_URL =
-  (import.meta as any).env.VITE_API_BASE_URL || 'http://localhost:3000';
+  (import.meta as any).env.VITE_API_URL;
 
 const Destination = () => {
   const [destinations, setDestinations] =
@@ -143,9 +143,9 @@ const Destination = () => {
       <ToastContainer position='bottom-right' />
       <div className='max-w-7xl mx-auto'>
         <div className='text-center mb-16'>
-          <h2 className='text-4xl font-bold text-sky-600 mb-4 lg:text-5xl'>
-            Nos Destinations
-          </h2>
+           <span className='inline-block bg-sky-100 text-sky-600 px-4 py-1.5 rounded-full text-sm font-medium mb-3'>
+            Nos Destinations Phares
+          </span>
           <p className='text-lg text-gray-600 max-w-3xl mx-auto lg:text-xl'>
             Envie d'évasion ? Découvrez nos destinations les plus en vogue. Un
             voyage unique vous attend, juste au bon moment.

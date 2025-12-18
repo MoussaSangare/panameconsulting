@@ -41,8 +41,8 @@ export interface CreateContactDto {
 }
 
 export interface ContactFilters {
-  page?: number;
-  limit?: number;
+  page: number;
+  limit: number;
   isRead?: boolean;
   search?: string;
 }
@@ -135,7 +135,10 @@ export const useContactService = () => {
 
   // 📋 Récupérer tous les messages avec pagination et filtres
   const getAllContacts = useCallback(
-    async (filters: ContactFilters = {}): Promise<ContactResponse> => {
+    async (filters: ContactFilters = {
+      page: 0,
+      limit: 0
+    }): Promise<ContactResponse> => {
       setIsLoading(true);
       setError(null);
 

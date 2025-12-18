@@ -11,6 +11,33 @@ import {
 import { Helmet } from 'react-helmet-async';
 import RequireAdmin from '../../context/RequireAdmin';
 
+const VITE_API_URL = (import.meta as any).env.VITE_API_URL;
+
+const getFullImageUrl = (imagePath: string) => {
+  if (!imagePath) return '/paname-consulting.jpg';
+
+  // URLs déjà complètes
+  if (imagePath.startsWith('http') || imagePath.startsWith('data:')) {
+    return imagePath;
+  }
+
+  // Images dans public (par défaut)
+  if (imagePath.startsWith('/')) {
+    return imagePath;
+  }
+
+  const baseUrl = VITE_API_URL;
+
+  // Images uploadées
+  let cleanPath = imagePath;
+  if (!cleanPath.startsWith('uploads/')) {
+    cleanPath = `uploads/${cleanPath}`;
+  }
+  cleanPath = cleanPath.replace(/\/\//g, '/');
+
+  return `${baseUrl}/${cleanPath}`;
+};
+
 interface DataSourceInfo {
   count: number;
   lastUpdated: string | null;
@@ -55,18 +82,21 @@ const AdminDestinations: React.FC = (): React.JSX.Element => {
     try {
       const data =
         await destinationService.getAllDestinationsWithoutPagination();
-      setDestinations(data);
+      
+      // Transformer les données pour inclure les URLs complètes des images
+      const transformedData = data.map((dest: Destination) => ({
+        ...dest,
+        imagePath: getFullImageUrl(dest.imagePath),
+      }));
+      
+      setDestinations(transformedData);
 
       // Pour déboguer - seulement en développement
       if (import.meta.env.DEV) {
         console.log('Destinations loaded:', data);
-        if (data.length > 0) {
-          console.log('First destination image:', {
-            originalPath: data[0]?.imagePath,
-            fullUrl: destinationService.getFullImageUrl(
-              data[0]?.imagePath || ''
-            ),
-          });
+        console.log('Transformed destinations:', transformedData);
+        if (transformedData.length > 0) {
+          console.log('First destination image URL:', transformedData[0]?.imagePath);
         }
       }
 
@@ -307,7 +337,7 @@ const AdminDestinations: React.FC = (): React.JSX.Element => {
       </Helmet>
 
       <RequireAdmin>
-        <div className='min-h-screen bg-gradient-to-br from-slate-50 to-blue-50/30 max-w-[1024px] mx-auto overflow-x-hidden'>
+        <div className='min-h-screen max-w-[1024px] mx-auto overflow-x-hidden'>
           {/* Header */}
           <div className='mb-4 px-4'>
             <div className='flex items-center gap-2 mb-1'>
@@ -820,9 +850,7 @@ const AdminDestinations: React.FC = (): React.JSX.Element => {
                       <div className='flex gap-3'>
                         <div className='flex-shrink-0'>
                           <img
-                            src={destinationService.getFullImageUrl(
-                              dest.imagePath
-                            )}
+                            src={dest.imagePath}
                             alt={dest.country}
                             className='w-16 h-16 object-cover rounded-lg border border-slate-200 shadow-sm'
                             onError={e => {
@@ -965,9 +993,7 @@ const AdminDestinations: React.FC = (): React.JSX.Element => {
                         <td className='px-4 py-4'>
                           <div className='flex items-center'>
                             <img
-                              src={destinationService.getFullImageUrl(
-                                dest.imagePath
-                              )}
+                              src={dest.imagePath}
                               alt={dest.country}
                               className='w-12 h-12 object-cover rounded-lg border border-slate-200 shadow-sm'
                               onError={e => {

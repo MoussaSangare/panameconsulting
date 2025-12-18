@@ -1086,7 +1086,7 @@ const AdminProcedure: React.FC = () => {
                   <div className='p-6'>
                     {(actionType === 'reject' || actionType === 'delete') && (
                       <div className='mb-6'>
-                        <label className='block text-sm font-medium text-gray-700 mb-2 flex items-center'>
+                        <label className='text-sm font-medium text-gray-700 mb-2 flex items-center'>
                           <AlertTriangle className='w-4 h-4 mr-1' />
                           {actionType === 'reject'
                             ? 'Raison du rejet'

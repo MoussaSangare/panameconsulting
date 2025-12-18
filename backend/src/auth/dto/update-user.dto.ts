@@ -1,7 +1,5 @@
-// src/auth/dto/update-user.dto.ts
-import { IsEmail, IsOptional, IsEnum, IsString, MinLength } from "class-validator";
+import { IsEmail, IsOptional, IsString, MinLength } from "class-validator";
 import { ApiProperty } from "@nestjs/swagger";
-import { UserRole } from "../../enums/user-role.enum";
 
 export class UpdateUserDto {
   @ApiProperty({
@@ -21,15 +19,5 @@ export class UpdateUserDto {
   @IsOptional()
   @IsString({ message: "Le téléphone doit être une chaîne de caractères" })
   @MinLength(5, { message: "Le téléphone doit contenir au moins 5 caractères" })
-  telephone?: string; // ✅ AJOUTÉ
-
-  @ApiProperty({
-    example: "user",
-    description: "Rôle utilisateur",
-    enum: UserRole,
-    required: false,
-  })
-  @IsOptional()
-  @IsEnum(UserRole, { message: "Rôle invalide" })
-  role?: UserRole;
+  telephone?: string;
 }

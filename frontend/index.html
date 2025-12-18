@@ -105,17 +105,6 @@
   ]
 }
 </script>
-
-<!-- Politiques de sécurité modernes - CSP CORRIGÉE -->
-<meta http-equiv="Content-Security-Policy"
-  content="script-src 'self' 'unsafe-inline' https://maps.googleapis.com https://vercel.live; 
-           style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; 
-           font-src 'self' https://fonts.gstatic.com data:; 
-           frame-src https://www.google.com;">
-
-  
-  <!-- SUPPRIMER X-Frame-Options depuis meta - doit être géré par le serveur -->
-  <meta http-equiv="X-Content-Type-Options" content="nosniff" />
   <meta http-equiv="Referrer-Policy" content="strict-origin-when-cross-origin" />
   <meta name="format-detection" content="telephone=no" />
 

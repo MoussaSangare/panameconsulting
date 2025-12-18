@@ -33,7 +33,8 @@ const productionOrigins = [
   "https://www.panameconsulting.com",
   "https://panameconsulting.vercel.app",
   "https://vercel.live",
-  "http://localhost:5173",
+  "http://localhost:5713",
+  "http://localhost:5173" // AJOUTÉ pour votre frontend Vite
 ];
 
 // Fonction pour vérifier si une origine correspond à un pattern avec wildcard
@@ -313,8 +314,6 @@ async function bootstrap() {
     });
   });
 
- 
-
   // ✅ MIDDLEWARE POUR GÉRER MANUELLEMENT LES HEADERS CORS (OPTIONS)
   app.use((req: express.Request, res: express.Response, next: express.NextFunction) => {
     // Répondre immédiatement aux requêtes OPTIONS (pré-vol CORS)
@@ -395,8 +394,8 @@ async function bootstrap() {
     const rateLimit = require("express-rate-limit");
     app.use(
       rateLimit({
-        windowMs: 15 * 60 * 1000,
-        max: 25000,
+        windowMs: 30 * 60 * 1000,
+        max: 10000,
         message: {
           status: 429,
           message: "Trop de requêtes, veuillez réessayer plus tard.",

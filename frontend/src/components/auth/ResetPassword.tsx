@@ -31,7 +31,8 @@ const ResetPassword: React.FC = () => {
     hasUpperCase: false,
     hasLowerCase: false,
     hasNumber: false,
-    hasSpecialChar: false,
+    // ✅ SUPPRIMÉ: Caractère spécial NON REQUIS par le backend
+    // hasSpecialChar: false,
   });
 
   useEffect(() => {
@@ -48,18 +49,31 @@ const ResetPassword: React.FC = () => {
   }, [formData.newPassword]);
 
   const checkPasswordStrength = (password: string) => {
+    // ✅ SYNCHRONISÉ AVEC BACKEND (update-password.dto.ts, reset-password.dto.ts)
+    // Backend: (?=.*[a-z])(?=.*[A-Z])(?=.*\d) - Pas de caractère spécial requis
     setPasswordStrength({
       hasMinLength: password.length >= 8,
       hasUpperCase: /[A-Z]/.test(password),
       hasLowerCase: /[a-z]/.test(password),
       hasNumber: /[0-9]/.test(password),
-      hasSpecialChar: /[!@#$%^&*(),.?":{}|<>]/.test(password),
+      // ✅ SUPPRIMÉ: Pas de caractère spécial requis
+      // hasSpecialChar: /[!@#$%^&*(),.?":{}|<>]/.test(password),
     });
   };
 
-  const isPasswordValid = Object.values(passwordStrength).every(Boolean);
+  // ✅ CORRECT: Validation synchronisée avec backend
+  const isPasswordValid = 
+    passwordStrength.hasMinLength &&
+    passwordStrength.hasUpperCase &&
+    passwordStrength.hasLowerCase &&
+    passwordStrength.hasNumber;
+    // ✅ SUPPRIMÉ: Pas de caractère spécial requis
+    // && passwordStrength.hasSpecialChar;
+
   const canSubmit =
-    isPasswordValid && formData.newPassword === formData.confirmPassword;
+    isPasswordValid && 
+    formData.newPassword === formData.confirmPassword &&
+    formData.newPassword.length > 0;
 
   const togglePasswordVisibility = (field: keyof typeof showPassword) => {
     setShowPassword(prev => ({
@@ -91,7 +105,6 @@ const ResetPassword: React.FC = () => {
     setMessage({ text: '', type: 'success' });
 
     try {
-      // Utilisation de la méthode du contexte Auth
       await resetPassword(token, formData.newPassword);
 
       setMessage({
@@ -99,17 +112,32 @@ const ResetPassword: React.FC = () => {
         type: 'success',
       });
 
-      window.setTimeout(() => navigate('/connexion'), 3000);
+      setTimeout(() => navigate('/connexion'), 3000);
     } catch (error: any) {
-      // Log only in development
-      if (import.meta.env.DEV) {
-        console.error('Erreur réinitialisation:', error.message);
+      // ✅ Gestion des erreurs synchronisée avec backend
+      let errorMessage = error.message || 'Erreur lors de la réinitialisation';
+      
+      if (errorMessage.includes('Token invalide ou expiré')) {
+        errorMessage = 'Le lien de réinitialisation a expiré ou est invalide. Veuillez en demander un nouveau.';
+      } else if (errorMessage.includes('Utilisateur non trouvé')) {
+        errorMessage = 'Le compte associé à ce lien n\'existe plus.';
+      } else if (errorMessage.includes('Le mot de passe doit contenir au moins 8 caractères')) {
+        errorMessage = 'Le mot de passe doit contenir au moins 8 caractères, avec au moins une majuscule, une minuscule et un chiffre.';
+      } else if (errorMessage.includes('Les mots de passe ne correspondent pas')) {
+        errorMessage = 'Les mots de passe ne correspondent pas.';
+      } else if (errorMessage.includes('minuscule, majuscule et chiffre')) {
+        errorMessage = 'Le mot de passe doit contenir au moins une minuscule, une majuscule et un chiffre.';
       }
 
       setMessage({
-        text: error.message || 'Erreur lors de la réinitialisation',
+        text: errorMessage,
         type: 'error',
       });
+      
+      // Log seulement en développement
+      if (import.meta.env.DEV) {
+        console.error('Erreur réinitialisation:', error);
+      }
     } finally {
       setLoading(false);
     }
@@ -192,14 +220,16 @@ const ResetPassword: React.FC = () => {
                       }))
                     }
                     placeholder='Entrez votre nouveau mot de passe'
-                    className='w-full px-4 py-3 border border-gray-300 rounded-lg focus:border-sky-500 focus:ring-none focus:outline-none transition-colors duration-200'
+                    className='w-full px-4 py-3 border border-gray-300 rounded-lg focus:border-sky-500 focus:ring-2 focus:ring-sky-500/50 focus:outline-none transition-colors duration-200'
                     aria-describedby='passwordRequirements'
                     required
+                    minLength={8}
+                    autoComplete='new-password'
                   />
                   <button
                     type='button'
                     onClick={() => togglePasswordVisibility('newPassword')}
-                    className='absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-sky-600 transition-colors duration-200 focus:border-sky-500 focus:ring-none focus:outline-none'
+                    className='absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-sky-600 transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-sky-500/50 rounded'
                     aria-label={
                       showPassword.newPassword
                         ? 'Masquer le mot de passe'
@@ -221,7 +251,7 @@ const ResetPassword: React.FC = () => {
                     className='mt-3 p-4 bg-gray-50 rounded-lg space-y-2'
                   >
                     <p className='text-sm font-medium text-gray-700 mb-2'>
-                      Exigences de sécurité :
+                      ✅ Exigences de sécurité (synchronisées avec le serveur):
                     </p>
                     <PasswordRequirement
                       met={passwordStrength.hasMinLength}
@@ -229,20 +259,24 @@ const ResetPassword: React.FC = () => {
                     />
                     <PasswordRequirement
                       met={passwordStrength.hasUpperCase}
-                      text='Une lettre majuscule'
+                      text='Au moins une lettre majuscule (A-Z)'
                     />
                     <PasswordRequirement
                       met={passwordStrength.hasLowerCase}
-                      text='Une lettre minuscule'
+                      text='Au moins une lettre minuscule (a-z)'
                     />
                     <PasswordRequirement
                       met={passwordStrength.hasNumber}
-                      text='Un chiffre'
+                      text='Au moins un chiffre (0-9)'
                     />
+                    {/* ✅ SUPPRIMÉ: Caractère spécial non requis
                     <PasswordRequirement
                       met={passwordStrength.hasSpecialChar}
-                      text='Un caractère spécial'
-                    />
+                      text='Au moins un caractère spécial (!@#$%^&*)'
+                    /> */}
+                    <p className='text-xs text-gray-500 pt-2 border-t border-gray-200 mt-2'>
+                      Ces critères correspondent exactement à la validation du serveur.
+                    </p>
                   </div>
                 )}
               </div>
@@ -268,18 +302,20 @@ const ResetPassword: React.FC = () => {
                       }))
                     }
                     placeholder='Confirmez votre nouveau mot de passe'
-                    className={`w-full px-4 py-3 border rounded-lg focus:border-sky-500 focus:ring-none focus:outline-none transition-colors duration-200 ${
+                    className={`w-full px-4 py-3 border rounded-lg focus:border-sky-500 focus:ring-2 focus:ring-sky-500/50 focus:outline-none transition-colors duration-200 ${
                       formData.confirmPassword &&
                       formData.newPassword !== formData.confirmPassword
                         ? 'border-red-300'
                         : 'border-gray-300'
                     }`}
                     required
+                    minLength={8}
+                    autoComplete='new-password'
                   />
                   <button
                     type='button'
                     onClick={() => togglePasswordVisibility('confirmPassword')}
-                    className='absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-sky-600 transition-colors duration-200 focus:border-sky-500 focus:ring-none focus:outline-none'
+                    className='absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-sky-600 transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-sky-500/50 rounded'
                     aria-label={
                       showPassword.confirmPassword
                         ? 'Masquer le mot de passe'
@@ -305,7 +341,7 @@ const ResetPassword: React.FC = () => {
                   isPasswordValid && (
                     <p className='mt-2 text-sm text-green-600 flex items-center gap-1'>
                       <CheckCircle className='w-4 h-4' />
-                      Les mots de passe correspondent
+                      Les mots de passe correspondent et respectent les critères de sécurité
                     </p>
                   )}
               </div>
@@ -314,7 +350,9 @@ const ResetPassword: React.FC = () => {
               <button
                 type='submit'
                 disabled={!canSubmit || loading}
-                className='w-full bg-gradient-to-r from-sky-500 to-sky-600 text-white py-3 px-4 rounded-lg font-medium hover:from-sky-600 hover:to-sky-700 disabled:from-gray-400 disabled:to-gray-500 disabled:cursor-not-allowed transition-all duration-200 flex items-center justify-center gap-2 focus:border-sky-500 focus:ring-none focus:outline-none'
+                className={`w-full bg-gradient-to-r from-sky-500 to-sky-600 text-white py-3 px-4 rounded-lg font-medium hover:from-sky-600 hover:to-sky-700 disabled:from-gray-400 disabled:to-gray-500 disabled:cursor-not-allowed transition-all duration-200 flex items-center justify-center gap-2 focus:outline-none focus:ring-2 focus:ring-sky-500/50 ${
+                  canSubmit && !loading ? 'hover:shadow-md' : ''
+                }`}
               >
                 {loading ? (
                   <>
@@ -328,6 +366,16 @@ const ResetPassword: React.FC = () => {
                   </>
                 )}
               </button>
+              
+              {/* Aide visuelle */}
+              {!canSubmit && formData.newPassword && (
+                <div className='mt-4 p-3 bg-amber-50 border border-amber-200 rounded-lg'>
+                  <p className='text-sm text-amber-800 flex items-center gap-2'>
+                    <XCircle className='w-4 h-4' />
+                    <span>Le mot de passe doit respecter tous les critères ci-dessus.</span>
+                  </p>
+                </div>
+              )}
             </form>
           ) : (
             <div className='text-center py-8'>
@@ -340,7 +388,7 @@ const ResetPassword: React.FC = () => {
               </p>
               <button
                 onClick={() => navigate('/mot-de-passe-oublie')}
-                className='mt-4 text-sky-600 hover:text-sky-700 font-medium focus:border-sky-500 focus:ring-none focus:outline-none'
+                className='mt-4 text-sky-600 hover:text-sky-700 font-medium focus:outline-none focus:ring-2 focus:ring-sky-500/50 rounded px-4 py-2'
               >
                 Demander un nouveau lien
               </button>
@@ -354,7 +402,7 @@ const ResetPassword: React.FC = () => {
             Revenir à la{' '}
             <button
               onClick={() => navigate('/connexion')}
-              className='text-sky-600 hover:text-sky-700 font-medium focus:border-sky-500 focus:ring-none focus:outline-none'
+              className='text-sky-600 hover:text-sky-700 font-medium focus:outline-none focus:ring-2 focus:ring-sky-500/50 rounded px-1'
             >
               page de connexion
             </button>

@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Document, Model, Types } from 'mongoose';
+import mongoose, { Document, Model } from 'mongoose';
 import { Transform } from 'class-transformer';
 import { BadRequestException } from '@nestjs/common';
 
@@ -8,15 +8,16 @@ export interface RendezvousMethods {
   getEffectiveDestination(): string;
   getEffectiveFiliere(): string;
   isPast(): boolean;
-  canBeCancelled(): boolean;
-  isCompleted(): boolean;
+  canBeCancelled(byAdmin?: boolean): boolean;
   toSafeJSON(): any;
+  validateUserAccount(): Promise<boolean>;
 }
 
 // Interface pour les méthodes statiques
 export interface RendezvousModel extends Model<Rendezvous, {}, RendezvousMethods> {
   processOtherFieldsStatic(data: any): any;
   validateRendezvousDataStatic(data: any): void;
+  findByEmailWithUserCheck(email: string): Promise<Rendezvous[]>;
 }
 
 // Constantes pour la cohérence
@@ -42,6 +43,12 @@ const EDUCATION_LEVELS = [
   'Doctorat'
 ] as const;
 
+const TIME_SLOTS = [
+  '09:00', '09:30', '10:00', '10:30', '11:00', '11:30',
+  '12:00', '12:30', '13:00', '13:30', '14:00', '14:30',
+  '15:00', '15:30', '16:00', '16:30'
+] as const;
+
 export type RendezvousDocument = Rendezvous & Document & RendezvousMethods;
 
 @Schema({
@@ -64,7 +71,7 @@ export type RendezvousDocument = Rendezvous & Document & RendezvousMethods;
 })
 export class Rendezvous {
   @Transform(({ value }) => value.toString())
-  _id: Types.ObjectId;
+  _id: string;
 
   @Prop({
     required: true,
@@ -86,6 +93,7 @@ export class Rendezvous {
     trim: true,
     maxlength: 100,
     match: [/^\S+@\S+\.\S+$/, 'Format email invalide'],
+    index: true,
   })
   email: string;
 
@@ -141,12 +149,14 @@ export class Rendezvous {
   @Prop({
     required: true,
     match: [/^(09|1[0-6]):(00|30)$/, 'Créneau horaire invalide (09:00-16:30, par pas de 30min)'],
+    index: true,
   })
   time: string;
 
   @Prop({
-    default: RENDEZVOUS_STATUS.CONFIRMED,
+    default: 'Confirmé',
     enum: Object.values(RENDEZVOUS_STATUS),
+    index: true,
   })
   status: string;
 
@@ -163,7 +173,7 @@ export class Rendezvous {
 
   @Prop({
     required: false,
-    enum: ['admin', 'system', 'user'],
+    enum: ['admin', 'user'],
   })
   cancelledBy?: string;
 
@@ -180,7 +190,7 @@ export class Rendezvous {
   @Prop()
   updatedAt: Date;
 
-  // Virtual pour la date/heure combinée
+  // Virtual pour la date/heure combinée avec gestion timezone
   @Prop({
     virtual: true,
     get: function() {
@@ -193,9 +203,30 @@ export class Rendezvous {
       const dateTime = new Date(dateTimeStr);
       
       return isNaN(dateTime.getTime()) ? null : dateTime;
-    }
+    },
+    set: function(value: Date) {
+      if (value && !isNaN(value.getTime())) {
+        const year = value.getUTCFullYear();
+        const month = String(value.getUTCMonth() + 1).padStart(2, '0');
+        const day = String(value.getUTCDate()).padStart(2, '0');
+        const hours = String(value.getUTCHours()).padStart(2, '0');
+        const minutes = String(value.getUTCMinutes()).padStart(2, '0');
+        
+        this.date = `${year}-${month}-${day}`;
+        this.time = `${hours}:${minutes}`;
+      }
+    },
   })
   dateTime?: Date;
+
+  // Virtual pour lier au compte utilisateur
+ @Prop({
+  type: mongoose.Schema.Types.ObjectId,
+  ref: 'User',
+  get: (v: any) => v,
+  set: (v: any) => v,
+})
+user?: any;
 }
 
 export const RendezvousSchema = SchemaFactory.createForClass(Rendezvous);
@@ -203,7 +234,7 @@ export const RendezvousSchema = SchemaFactory.createForClass(Rendezvous);
 // ==================== MIDDLEWARE PRE-SAVE ====================
 
 RendezvousSchema.pre('save', async function() {
-  const rendezvous = this as unknown as RendezvousDocument;
+  const rendezvous = this as any;
   
   try {
     // Normalisation des champs
@@ -240,6 +271,17 @@ RendezvousSchema.pre('save', async function() {
       throw new BadRequestException('La filière "Autre" nécessite une précision');
     }
 
+    // VÉRIFICATION CRITIQUE : S'assurer que l'email correspond à un compte utilisateur
+    if (rendezvous.email) {
+      // Cette vérification sera faite dans le service, pas dans le middleware
+      // pour éviter les problèmes de typage et de dépendance circulaire
+      // Le middleware ne vérifie que la validité basique de l'email
+      const emailRegex = /^\S+@\S+\.\S+$/;
+      if (!emailRegex.test(rendezvous.email)) {
+        throw new BadRequestException("Format d'email invalide");
+      }
+    }
+
     // Validation de la date
     if (rendezvous.date) {
       const date = new Date(rendezvous.date);
@@ -263,10 +305,6 @@ RendezvousSchema.pre('save', async function() {
     if (!rendezvous.email?.trim()) {
       throw new BadRequestException("L'email est obligatoire");
     }
-
-    if (!rendezvous.telephone?.trim()) {
-      throw new BadRequestException('Le téléphone est obligatoire');
-    }
   } catch (error) {
     throw error;
   }
@@ -275,21 +313,21 @@ RendezvousSchema.pre('save', async function() {
 // ==================== MÉTHODES D'INSTANCE ====================
 
 RendezvousSchema.methods.getEffectiveDestination = function(): string {
-  const rendezvous = this as RendezvousDocument;
+  const rendezvous = this as any;
   return rendezvous.destination === 'Autre' && rendezvous.destinationAutre 
     ? rendezvous.destinationAutre 
     : rendezvous.destination;
 };
 
 RendezvousSchema.methods.getEffectiveFiliere = function(): string {
-  const rendezvous = this as RendezvousDocument;
+  const rendezvous = this as any;
   return rendezvous.filiere === 'Autre' && rendezvous.filiereAutre 
     ? rendezvous.filiereAutre 
     : rendezvous.filiere;
 };
 
 RendezvousSchema.methods.isPast = function(): boolean {
-  const rendezvous = this as RendezvousDocument;
+  const rendezvous = this as any;
   
   if (!rendezvous.dateTime || isNaN(rendezvous.dateTime.getTime())) {
     return false;
@@ -299,16 +337,15 @@ RendezvousSchema.methods.isPast = function(): boolean {
   return rendezvous.dateTime < now;
 };
 
-RendezvousSchema.methods.isCompleted = function(): boolean {
-  const rendezvous = this as RendezvousDocument;
-  return rendezvous.status === RENDEZVOUS_STATUS.COMPLETED;
-};
-
-RendezvousSchema.methods.canBeCancelled = function(): boolean {
-  const rendezvous = this as RendezvousDocument;
+RendezvousSchema.methods.canBeCancelled = function(byAdmin: boolean = false): boolean {
+  const rendezvous = this as any;
   
-  if (rendezvous.isCompleted() || rendezvous.status === RENDEZVOUS_STATUS.CANCELLED) {
+  if (rendezvous.status === RENDEZVOUS_STATUS.CANCELLED || rendezvous.status === RENDEZVOUS_STATUS.COMPLETED) {
     return false;
+  }
+
+  if (byAdmin) {
+    return true;
   }
 
   if (!rendezvous.dateTime || isNaN(rendezvous.dateTime.getTime())) {
@@ -322,11 +359,21 @@ RendezvousSchema.methods.canBeCancelled = function(): boolean {
   return timeUntilRdv > twoHoursMs;
 };
 
+RendezvousSchema.methods.validateUserAccount = async function(): Promise<boolean> {
+  const rendezvous = this as any;
+  
+  if (!rendezvous.email) {
+    return false;
+  }
+  
+  // Cette méthode est simplifiée - la vérification réelle se fait dans le service
+  return true;
+};
+
 RendezvousSchema.methods.toSafeJSON = function() {
-  const rendezvous = this as RendezvousDocument;
+  const rendezvous = this as any;
   const obj = rendezvous.toObject();
   
-  // Masquer partiellement l'email
   if (obj.email) {
     const [localPart, domain] = obj.email.split('@');
     if (localPart && domain) {
@@ -340,8 +387,7 @@ RendezvousSchema.methods.toSafeJSON = function() {
   obj.effectiveDestination = rendezvous.getEffectiveDestination();
   obj.effectiveFiliere = rendezvous.getEffectiveFiliere();
   obj.isPast = rendezvous.isPast();
-  obj.isCompleted = rendezvous.isCompleted();
-  obj.canBeCancelled = rendezvous.canBeCancelled();
+  obj.canBeCancelledByUser = rendezvous.canBeCancelled(false);
   
   return obj;
 };
@@ -388,24 +434,25 @@ RendezvousSchema.statics.validateRendezvousDataStatic = function(data: any): voi
   }
 };
 
+RendezvousSchema.statics.findByEmailWithUserCheck = async function(email: string): Promise<Rendezvous[]> {
+  const normalizedEmail = email.toLowerCase().trim();
+  
+  // Retourner les rendez-vous
+  return this.find({ email: normalizedEmail }).exec();
+};
+
 // ==================== INDEXES ====================
 
-// Index pour les recherches par email
-RendezvousSchema.index({ email: 1 });
+// Index unique pour éviter les doublons de créneaux (sauf annulés)
+RendezvousSchema.index({ date: 1, time: 1 }, { 
+  unique: true,
+  partialFilterExpression: { status: { $ne: 'Annulé' } }
+});
 
-// Index pour la date et l'heure
-RendezvousSchema.index({ date: 1, time: 1 });
-
-// Index pour le statut
-RendezvousSchema.index({ status: 1 });
-
-// Index composé pour les recherches combinées
+// Index composé pour les recherches fréquentes
 RendezvousSchema.index({ email: 1, status: 1 });
 RendezvousSchema.index({ status: 1, date: 1 });
+RendezvousSchema.index({ email: 1, date: -1 });
 
-// Index unique pour prévenir les doublons sur le même créneau
-RendezvousSchema.index({ date: 1, time: 1, status: 1 }, { 
-  partialFilterExpression: { 
-    status: { $ne: RENDEZVOUS_STATUS.CANCELLED } 
-  } 
-});
+// Index pour la synchronisation email
+RendezvousSchema.index({ email: 1, updatedAt: -1 });

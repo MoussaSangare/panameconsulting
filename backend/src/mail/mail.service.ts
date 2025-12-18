@@ -179,15 +179,6 @@ export class MailService {
 
             <p>Nous sommes impatients de vous accompagner dans votre projet d'études à l'international.</p>
             
-            <div style="text-align: center; margin: 30px 0;">
-              <a href="${appUrl}" 
-                 style="display: inline-block; padding: 12px 24px; background: #ffffff; 
-                        color: #0ea5e9; text-decoration: none; border-radius: 6px; font-weight: bold;
-                        border: 2px solid #0ea5e9;">
-                Accéder à mon espace
-              </a>
-            </div>
-            
             ${this.getEmailFooter()}
           </div>
         </body>

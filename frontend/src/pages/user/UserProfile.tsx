@@ -1,854 +1,645 @@
-import { useState, useEffect, FormEvent, FC } from 'react';
+// UserProfile.tsx - COMPLET ET SÉCURISÉ
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { toast } from 'react-toastify';
+import { UserHeader, usePageConfig } from '../../components/user/UserHeader';
 import { useAuth } from '../../context/AuthContext';
-import { useNavigate, Link } from 'react-router-dom';
-import {
-  User,
-  FileText,
-  Calendar,
-  Home,
-  Eye,
-  EyeOff,
-  CheckCircle,
-  XCircle,
-  Lock,
-  Mail,
-  Phone,
-} from 'lucide-react';
-import { Helmet } from 'react-helmet-async';
-import { userService } from '../../api/user/Profile/userProfileApi';
-
-/* global fetch */
+import { userProfileService, UserUpdateData, PasswordUpdateData } from '../../api/user/Profile/userProfileApi';
+import { Loader2, Mail, Phone, Calendar, Shield, User, UserCheck, Lock, Eye, EyeOff, CheckCircle, XCircle } from 'lucide-react';
 
 const UserProfile = () => {
-  const { user, access_token, isAuthenticated, logout } = useAuth();
-  const navigate = useNavigate();
-
+  const { user, updateProfile, fetchWithAuth, refreshToken, access_token } = useAuth();
+  const pageConfig = usePageConfig();
+  
+  const [isLoading, setIsLoading] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isUpdatingPassword, setIsUpdatingPassword] = useState(false);
+  
+  // États pour les informations du profil
   const [profileData, setProfileData] = useState({
     email: '',
     telephone: '',
   });
-
+  
+  // États pour le mot de passe
   const [passwordData, setPasswordData] = useState({
     currentPassword: '',
     newPassword: '',
     confirmNewPassword: '',
   });
-
-  const [isLoading, setIsLoading] = useState(false);
-  const [activeTab, setActiveTab] = useState<'profile' | 'password'>('profile');
+  
+  // États pour afficher/masquer les mots de passe
   const [showCurrentPassword, setShowCurrentPassword] = useState(false);
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  
+  // États pour la validation
+  const [emailError, setEmailError] = useState('');
+  const [telephoneError, setTelephoneError] = useState('');
+  const [passwordErrors, setPasswordErrors] = useState<string[]>([]);
+  
+  // États pour la validation en temps réel du mot de passe
+  const [passwordValidation, setPasswordValidation] = useState({
+    hasMinLength: false,
+    hasLowerCase: false,
+    hasUpperCase: false,
+    hasNumber: false,
+    passwordsMatch: false,
+  });
 
-  const [profileErrors, setProfileErrors] = useState<Record<string, string>>(
-    {}
-  );
-  const [passwordErrors, setPasswordErrors] = useState<Record<string, string>>(
-    {}
-  );
+  // Référence pour éviter les chargements multiples
+  const isInitialLoad = useRef(false);
 
-  const [profileTouched, setProfileTouched] = useState<Record<string, boolean>>(
-    {}
-  );
-  const [passwordTouched, setPasswordTouched] = useState<
-    Record<string, boolean>
-  >({});
-
-  // ==================== VÉRIFICATION D'ACCÈS SIMPLIFIÉE ====================
-  useEffect(() => {
-    // Vérification basique - si pas authentifié, rediriger
-    if (!isAuthenticated) {
-      navigate('/connexion');
-      return;
+  // Validation de l'email
+  const validateEmail = (email: string): boolean => {
+    if (!email || email.trim() === '') {
+      setEmailError('L\'email ne peut pas être vide');
+      return false;
     }
+    
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    const isValid = emailRegex.test(email);
+    setEmailError(isValid ? '' : 'Format d\'email invalide');
+    return isValid;
+  };
 
-    // Vérification supplémentaire si l'utilisateur existe mais est désactivé
-    if (user && !user.isActive) {
-      logout();
-      return;
+  // Validation du téléphone
+  const validateTelephone = (telephone: string): boolean => {
+    if (!telephone || telephone.trim() === '') {
+      setTelephoneError('');
+      return true;
     }
-  }, [isAuthenticated, user, navigate, logout]);
+    
+    const phoneRegex = /^[+]?[0-9\s\-\(\)\.]{8,20}$/;
+    const cleanedPhone = telephone.replace(/[\s\-\(\)\.]/g, '');
+    const hasMinDigits = cleanedPhone.length >= 8;
+    
+    const isValid = phoneRegex.test(telephone) && hasMinDigits;
+    setTelephoneError(isValid ? '' : 'Format invalide (minimum 8 chiffres)');
+    return isValid;
+  };
 
+  // Validation du mot de passe en temps réel
+  const validatePasswordInRealTime = useCallback(() => {
+    const validations = {
+      hasMinLength: passwordData.newPassword.length >= 8,
+      hasLowerCase: /[a-z]/.test(passwordData.newPassword),
+      hasUpperCase: /[A-Z]/.test(passwordData.newPassword),
+      hasNumber: /[0-9]/.test(passwordData.newPassword),
+      passwordsMatch: passwordData.newPassword === passwordData.confirmNewPassword && passwordData.newPassword.length > 0,
+    };
+    
+    setPasswordValidation(validations);
+    
+    const errors: string[] = [];
+    if (!validations.hasMinLength) errors.push('Minimum 8 caractères');
+    if (!validations.hasLowerCase) errors.push('Une minuscule');
+    if (!validations.hasUpperCase) errors.push('Une majuscule');
+    if (!validations.hasNumber) errors.push('Un chiffre');
+    if (!validations.passwordsMatch) errors.push('Les mots de passe doivent correspondre');
+    
+    setPasswordErrors(errors);
+    
+    return Object.values(validations).every(v => v);
+  }, [passwordData.newPassword, passwordData.confirmNewPassword]);
+
+  // Effet pour valider le mot de passe en temps réel
   useEffect(() => {
-    if (user) {
-      setProfileData({
-        email: user.email || '',
-        telephone: user.telephone || '',
+    if (passwordData.newPassword || passwordData.confirmNewPassword) {
+      validatePasswordInRealTime();
+    }
+  }, [passwordData.newPassword, passwordData.confirmNewPassword, validatePasswordInRealTime]);
+
+  // Charger les données du profil
+  const loadUserProfile = useCallback(async () => {
+    if (isLoading) return;
+    
+    setIsLoading(true);
+    try {
+      const userData = await userProfileService.getCurrentUser({
+        fetchWithAuth,
+        refreshToken,
+        access_token,
       });
+      
+      if (userData) {
+        setProfileData({
+          email: userData.email || '',
+          telephone: userData.telephone || '',
+        });
+      }
+    } catch (error) {
+      console.error('Erreur lors du chargement du profil:', error);
+      
+      if (user) {
+        setProfileData({
+          email: user.email || '',
+          telephone: user.telephone || '',
+        });
+      }
+    } finally {
+      setIsLoading(false);
     }
-  }, [user]);
+  }, [fetchWithAuth, refreshToken, access_token, user, isLoading]);
 
-  const validateProfileField = (name: string, value: string): string => {
-    switch (name) {
-      case 'email':
-        if (value && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) {
-          return "Format d'email invalide";
-        }
-        break;
-      case 'telephone':
-        if (value && value.trim().length < 5) {
-          return 'Le téléphone doit contenir au moins 5 caractères';
-        }
-        if (value && !/^[\d\s+\-()]+$/.test(value)) {
-          return 'Le téléphone contient des caractères invalides';
-        }
-        break;
-      default:
-        return '';
+  // Rafraîchir les données
+  const handleRefresh = useCallback(async () => {
+    if (isRefreshing) return;
+    
+    setIsRefreshing(true);
+    try {
+      await loadUserProfile();
+      toast.success('Profil actualisé');
+    } catch (error) {
+      console.error('Erreur lors du rafraîchissement:', error);
+    } finally {
+      setIsRefreshing(false);
     }
-    return '';
-  };
+  }, [loadUserProfile, isRefreshing]);
 
-  const validatePasswordField = (name: string, value: string): string => {
-    switch (name) {
-      case 'currentPassword':
-        if (!value.trim()) return 'Le mot de passe actuel est requis';
-        break;
-      case 'newPassword':
-        if (!value.trim()) return 'Le nouveau mot de passe est requis';
-        if (value.length < 8)
-          return 'Le mot de passe doit contenir au moins 8 caractères';
-        if (!/(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/.test(value)) {
-          return 'Le mot de passe doit contenir au moins une minuscule, une majuscule et un chiffre';
-        }
-        break;
-      case 'confirmNewPassword':
-        if (!value.trim()) return 'La confirmation du mot de passe est requise';
-        if (value !== passwordData.newPassword)
-          return 'Les mots de passe ne correspondent pas';
-        break;
-      default:
-        return '';
-    }
-    return '';
-  };
-
-  const handleProfileChange = (field: string, value: string) => {
-    setProfileData(prev => ({ ...prev, [field]: value }));
-    setProfileTouched(prev => ({ ...prev, [field]: true }));
-
-    const error = validateProfileField(field, value);
-    setProfileErrors(prev => ({ ...prev, [field]: error }));
-  };
-
-  const handlePasswordChange = (field: string, value: string) => {
-    setPasswordData(prev => ({ ...prev, [field]: value }));
-    setPasswordTouched(prev => ({ ...prev, [field]: true }));
-
-    const error = validatePasswordField(field, value);
-    setPasswordErrors(prev => ({ ...prev, [field]: error }));
-  };
-
-  // ==================== GESTION DU PROFIL (DÉLÉGATION TOTALE AU SERVICE) ====================
-  const handleProfileSubmit = async (e: FormEvent) => {
+  // Gérer la soumission du profil
+  const handleProfileSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-
-    if (!access_token || !user) return;
-
-    // Validation locale uniquement
-    const errors: Record<string, string> = {};
-    let hasValidData = false;
-
-    if (profileData.email !== undefined && profileData.email.trim() !== '') {
-      hasValidData = true;
-      const emailError = validateProfileField('email', profileData.email);
-      if (emailError) errors.email = emailError;
-    }
-
-    if (
-      profileData.telephone !== undefined &&
-      profileData.telephone.trim() !== ''
-    ) {
-      hasValidData = true;
-      const telephoneError = validateProfileField(
-        'telephone',
-        profileData.telephone
-      );
-      if (telephoneError) errors.telephone = telephoneError;
-    }
-
-    if (!hasValidData) {
-      errors.email = 'Au moins un champ (email ou téléphone) doit être modifié';
-    }
-
-    if (Object.keys(errors).length > 0) {
-      setProfileErrors(errors);
+    
+    // Validation des champs
+    const isEmailValid = validateEmail(profileData.email);
+    const isPhoneValid = validateTelephone(profileData.telephone);
+    
+    if (!isEmailValid || !isPhoneValid) {
+      toast.error('Veuillez corriger les erreurs avant de soumettre');
       return;
     }
 
-    if (!hasProfileChanges()) return;
+    // Vérifier si des modifications ont été apportées
+    const hasEmailChanged = profileData.email !== user?.email;
+    const hasTelephoneChanged = profileData.telephone !== user?.telephone;
+    
+    if (!hasEmailChanged && !hasTelephoneChanged) {
+      toast.info('Aucune modification à enregistrer');
+      return;
+    }
 
     setIsLoading(true);
-
+    
     try {
-      // DÉLÉGATION TOTALE AU SERVICE API
-      await userService.updateProfile(access_token, {
-        email: profileData.email,
-        telephone: profileData.telephone,
-      });
+      const updateData: UserUpdateData = {};
+      
+      if (hasEmailChanged && profileData.email.trim() !== '') {
+        updateData.email = profileData.email.trim();
+      }
+      
+      if (hasTelephoneChanged) {
+        updateData.telephone = profileData.telephone.trim();
+      }
 
-      // Réinitialiser après succès (le toast est déjà géré par le service)
-      setProfileTouched({});
-      setProfileErrors({});
-
-      // Note: Le contexte ne rafraîchit pas automatiquement les données utilisateur
-      // Le service a déjà géré le toast de succès
-    } catch (error) {
-      // Le service a déjà géré le toast d'erreur
-      // Si c'est une erreur d'authentification, le contexte gère la déconnexion
-      const err = error as Error;
-      if (
-        err.message.includes('Session expirée') ||
-        err.message.includes('401')
-      ) {
-        logout();
+      await userProfileService.updateProfile(
+        { fetchWithAuth, refreshToken, access_token },
+        updateData
+      );
+      
+      await updateProfile();
+      
+      toast.success('Profil mis à jour avec succès');
+      
+    } catch (error: any) {
+      if (error.message !== 'SESSION_EXPIRED') {
+        toast.error(error.message || 'Erreur lors de la mise à jour du profil');
       }
     } finally {
       setIsLoading(false);
     }
   };
 
-  // ==================== GESTION DU MOT DE PASSE (DÉLÉGATION TOTALE AU CONTEXTE) ====================
-  const handlePasswordSubmit = async (e: FormEvent) => {
+  // Gérer la soumission du mot de passe
+  const handlePasswordSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-
-    if (!access_token) return;
-
-    // Validation locale uniquement
-    const errors: Record<string, string> = {};
-    Object.keys(passwordData).forEach(key => {
-      const error = validatePasswordField(
-        key,
-        passwordData[key as keyof typeof passwordData]
-      );
-      if (error) errors[key] = error;
-    });
-
-    if (Object.keys(errors).length > 0) {
-      setPasswordErrors(errors);
+    
+    // Validation
+    if (!passwordData.currentPassword || passwordData.currentPassword.trim() === '') {
+      toast.error('Le mot de passe actuel est requis');
+      return;
+    }
+    
+    const isPasswordValid = validatePasswordInRealTime();
+    if (!isPasswordValid) {
+      toast.error('Veuillez corriger les erreurs du mot de passe');
       return;
     }
 
-    setIsLoading(true);
-
+    setIsUpdatingPassword(true);
+    
     try {
-      const response = await window.fetch(
-        `${import.meta.env.VITE_API_URL}/api/auth/update-password`,
+      await userProfileService.updatePassword(
+        { fetchWithAuth, refreshToken, access_token },
         {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${access_token}`,
-          },
-          credentials: 'include',
-          body: JSON.stringify(passwordData),
+          currentPassword: passwordData.currentPassword,
+          newPassword: passwordData.newPassword,
+          confirmNewPassword: passwordData.confirmNewPassword,
         }
       );
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        let errorMessage =
-          errorData.message || 'Erreur lors de la mise à jour du mot de passe';
-
-        if (response.status === 400 || response.status === 401) {
-          if (errorData.message?.includes('Mot de passe actuel incorrect')) {
-            errorMessage = 'Le mot de passe actuel est incorrect';
-          }
-          if (errorData.message?.includes('ne correspondent pas')) {
-            errorMessage = 'Les mots de passe ne correspondent pas';
-          }
-        }
-
-        throw new Error(errorMessage);
-      }
-
-      // Succès - réinitialiser le formulaire
+      
+      // Réinitialiser le formulaire
       setPasswordData({
         currentPassword: '',
         newPassword: '',
         confirmNewPassword: '',
       });
-      setPasswordTouched({});
-      setPasswordErrors({});
-
-      // Afficher un toast de succès
-      import('react-toastify').then(({ toast }) => {
-        toast.success('Mot de passe modifié avec succès');
+      
+      setPasswordValidation({
+        hasMinLength: false,
+        hasLowerCase: false,
+        hasUpperCase: false,
+        hasNumber: false,
+        passwordsMatch: false,
       });
-    } catch (error) {
-      const err = error as Error;
-
-      // Afficher l'erreur
-      import('react-toastify').then(({ toast }) => {
-        toast.error(
-          err.message || 'Erreur lors de la modification du mot de passe'
-        );
-      });
-
-      // Si c'est une erreur d'authentification, le contexte gère la déconnexion
-      if (
-        err.message.includes('Session expirée') ||
-        err.message.includes('401')
-      ) {
-        logout();
+      
+      setPasswordErrors([]);
+      
+      toast.success('Mot de passe changé avec succès');
+      
+    } catch (error: any) {
+      if (error.message !== 'SESSION_EXPIRED') {
+        toast.error(error.message || 'Erreur lors du changement de mot de passe');
       }
     } finally {
-      setIsLoading(false);
+      setIsUpdatingPassword(false);
     }
   };
 
-  // ==================== FONCTIONS UTILITAIRES ====================
-  const resetProfileForm = () => {
-    if (user) {
+  // Effet initial - charger les données
+  useEffect(() => {
+    if (!isInitialLoad.current && user) {
+      isInitialLoad.current = true;
+      loadUserProfile();
+    }
+  }, [user, loadUserProfile]);
+
+  // Synchroniser avec les données du contexte
+  useEffect(() => {
+    if (user && !profileData.email) {
       setProfileData({
         email: user.email || '',
         telephone: user.telephone || '',
       });
     }
-    setProfileErrors({});
-    setProfileTouched({});
-  };
-
-  const resetPasswordForm = () => {
-    setPasswordData({
-      currentPassword: '',
-      newPassword: '',
-      confirmNewPassword: '',
-    });
-    setPasswordErrors({});
-    setPasswordTouched({});
-  };
-
-  const hasProfileChanges = () => {
-    if (!user) return false;
-    return (
-      profileData.email !== user.email ||
-      profileData.telephone !== user.telephone
-    );
-  };
-
-  const isPasswordFormEmpty = () => {
-    return (
-      !passwordData.currentPassword &&
-      !passwordData.newPassword &&
-      !passwordData.confirmNewPassword
-    );
-  };
-
-  interface PasswordStrengthIndicatorProps {
-    password: string;
-  }
-
-  const PasswordStrengthIndicator: FC<PasswordStrengthIndicatorProps> = ({
-    password,
-  }) => {
-    if (!password) return null;
-
-    const checks = {
-      length: password.length >= 8,
-      lowercase: /[a-z]/.test(password),
-      uppercase: /[A-Z]/.test(password),
-      number: /\d/.test(password),
-    };
-
-    const strength = Object.values(checks).filter(Boolean).length;
-
-    return (
-      <div className='mt-2 space-y-1'>
-        <div className='flex items-center gap-2 text-xs'>
-          <div
-            className={`w-2 h-2 rounded-full ${strength >= 1 ? 'bg-green-500' : 'bg-gray-300'}`}
-          />
-          <span className={checks.length ? 'text-green-600' : 'text-gray-500'}>
-            8 caractères minimum
-          </span>
-        </div>
-        <div className='flex items-center gap-2 text-xs'>
-          <div
-            className={`w-2 h-2 rounded-full ${strength >= 2 ? 'bg-green-500' : 'bg-gray-300'}`}
-          />
-          <span
-            className={
-              checks.lowercase && checks.uppercase
-                ? 'text-green-600'
-                : 'text-gray-500'
-            }
-          >
-            Minuscule et majuscule
-          </span>
-        </div>
-        <div className='flex items-center gap-2 text-xs'>
-          <div
-            className={`w-2 h-2 rounded-full ${strength >= 3 ? 'bg-green-500' : 'bg-gray-300'}`}
-          />
-          <span className={checks.number ? 'text-green-600' : 'text-gray-500'}>
-            Au moins un chiffre
-          </span>
-        </div>
-      </div>
-    );
-  };
-
-  // ==================== RENDERING ====================
-  // Si pas authentifié, ne rien afficher (redirection en cours)
-  if (!isAuthenticated) {
-    return null;
-  }
+  }, [user, profileData.email]);
 
   return (
-    <>
-      <Helmet>
-        <title>Votre Profil utilisateur - Paname Consulting</title>
-        <meta name='robots' content='noindex, nofollow' />
-        <meta name='googlebot' content='noindex, nofollow' />
-        <meta name='bingbot' content='noindex, nofollow' />
-        <meta name='yandexbot' content='noindex, nofollow' />
-        <meta name='duckduckbot' content='noindex, nofollow' />
-        <meta name='baidu' content='noindex, nofollow' />
-        <meta name='naver' content='noindex, nofollow' />
-        <meta name='seznam' content='noindex, nofollow' />
-      </Helmet>
-      <div className='min-h-screen bg-gray-50'>
-        {/* Header uniformisé */}
-        <header className='bg-white shadow-sm border-b border-gray-200 sticky top-0 z-50'>
-          <div className='px-4 py-3'>
-            <div className='flex items-center justify-between'>
-              <div className='flex items-center space-x-3'>
-                <button
-                  onClick={() => navigate('/')}
-                  className='p-2 hover:bg-gray-100 rounded-xl transition-colors'
-                >
-                  <Home className='w-5 h-5 text-gray-600' />
-                </button>
-                <h1 className='text-lg font-semibold text-gray-800'>
-                  Mon Profil
-                </h1>
-              </div>
-            </div>
+    <div className="min-h-screen bg-gradient-to-b from-gray-50 to-white pt-16 pb-8">
+      <UserHeader
+        title={pageConfig.title}
+        subtitle={pageConfig.subtitle}
+        pageTitle={pageConfig.pageTitle}
+        description={pageConfig.description}
+        isLoading={isRefreshing}
+        onRefresh={handleRefresh}
+      />
 
-            {/* Navigation uniformisée */}
-            <div className='mt-3'>
-              <nav className='flex space-x-1'>
-                {[
-                  {
-                    id: 'profile',
-                    label: 'Profil',
-                    to: '/user-profile',
-                    icon: User,
-                    active: true,
-                  },
-                  {
-                    id: 'rendezvous',
-                    label: 'Rendez-vous',
-                    to: '/user-rendez-vous',
-                    icon: Calendar,
-                  },
-                  {
-                    id: 'procedures',
-                    label: 'Procédures',
-                    to: '/user-procedure',
-                    icon: FileText,
-                  },
-                ].map(tab => (
-                  <Link
-                    key={tab.id}
-                    to={tab.to}
-                    className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                      tab.active
-                        ? 'bg-blue-500 text-white shadow-lg'
-                        : 'bg-white text-gray-600 border border-gray-300 hover:border-blue-500'
-                    }`}
-                  >
-                    <tab.icon className='w-4 h-4' />
-                    {tab.label}
-                  </Link>
-                ))}
-              </nav>
-            </div>
+      <div className="px-4 max-w-4xl mx-auto mt-16 space-y-6">
+        {/* Section Informations personnelles */}
+        <div className="bg-white rounded-2xl shadow-lg border border-gray-100 overflow-hidden">
+          <div className="p-6">
+            <h2 className="text-xl font-bold text-gray-900 mb-6 flex items-center gap-2">
+              <User className="w-5 h-5 text-sky-600" />
+              Informations personnelles
+            </h2>
+
+            {isLoading && !profileData.email ? (
+              <div className="flex justify-center py-12">
+                <Loader2 className="w-8 h-8 text-sky-600 animate-spin" />
+              </div>
+            ) : (
+              <form onSubmit={handleProfileSubmit} className="space-y-6">
+                {/* Nom complet (lecture seule) */}
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-gray-700">
+                    Nom complet
+                  </label>
+                  <div className="px-4 py-3 bg-gray-50 rounded-xl border border-gray-200 text-gray-900">
+                    {user?.firstName} {user?.lastName}
+                  </div>
+                  <p className="text-xs text-gray-500">
+                    Le nom complet ne peut pas être modifié ici
+                  </p>
+                </div>
+
+                {/* Email */}
+                <div className="space-y-2">
+                  <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
+                    <Mail className="w-4 h-4" />
+                    Adresse email
+                  </label>
+                  <input
+                    type="email"
+                    value={profileData.email}
+                    onChange={(e) => {
+                      setProfileData({ ...profileData, email: e.target.value });
+                      if (e.target.value !== user?.email) {
+                        validateEmail(e.target.value);
+                      }
+                    }}
+                    onBlur={() => validateEmail(profileData.email)}
+                    className={`w-full px-4 py-3 rounded-xl border ${
+                      emailError ? 'border-red-300' : 'border-gray-300'
+                    } focus:border-sky-500 focus:ring-2 focus:ring-sky-200 outline-none transition-all`}
+                    placeholder="votre@email.com"
+                    required
+                  />
+                  {emailError && (
+                    <p className="text-sm text-red-600">{emailError}</p>
+                  )}
+                </div>
+
+                {/* Téléphone */}
+                <div className="space-y-2">
+                  <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
+                    <Phone className="w-4 h-4" />
+                    Téléphone
+                  </label>
+                  <input
+                    type="tel"
+                    value={profileData.telephone}
+                    onChange={(e) => {
+                      setProfileData({ ...profileData, telephone: e.target.value });
+                      if (e.target.value !== user?.telephone) {
+                        validateTelephone(e.target.value);
+                      }
+                    }}
+                    onBlur={() => validateTelephone(profileData.telephone)}
+                    className={`w-full px-4 py-3 rounded-xl border ${
+                      telephoneError ? 'border-red-300' : 'border-gray-300'
+                    } focus:border-sky-500 focus:ring-2 focus:ring-sky-200 outline-none transition-all`}
+                    placeholder="0612345678"
+                  />
+                  {telephoneError ? (
+                    <p className="text-sm text-red-600">{telephoneError}</p>
+                  ) : (
+                    <p className="text-xs text-gray-500">
+                      Format: 0612345678 ou +33612345678
+                    </p>
+                  )}
+                </div>
+
+                {/* Bouton de soumission */}
+                <button
+                  type="submit"
+                  disabled={isLoading}
+                  className="w-full py-3 px-4 bg-gradient-to-r from-sky-500 to-sky-600 text-white font-medium rounded-xl hover:from-sky-600 hover:to-sky-700 active:scale-95 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed shadow-md"
+                >
+                  {isLoading ? (
+                    <span className="flex items-center justify-center gap-2">
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      Enregistrement...
+                    </span>
+                  ) : (
+                    'Mettre à jour mon profil'
+                  )}
+                </button>
+              </form>
+            )}
           </div>
-        </header>
+        </div>
 
-        <div className='py-8 px-4 sm:px-6 lg:px-8'>
-          <div className='max-w-4xl mx-auto'>
-            {/* En-tête amélioré */}
-            <div className='text-center mb-12'>
-              <div className='inline-flex items-center justify-center w-16 h-16 bg-blue-100 rounded-2xl mb-4'>
-                <User className='w-8 h-8 text-blue-600' />
+        {/* Section Changement de mot de passe */}
+        <div className="bg-white rounded-2xl shadow-lg border border-gray-100 overflow-hidden">
+          <div className="p-6">
+            <h2 className="text-xl font-bold text-gray-900 mb-6 flex items-center gap-2">
+              <Lock className="w-5 h-5 text-sky-600" />
+              Changement de mot de passe
+            </h2>
+
+            <form onSubmit={handlePasswordSubmit} className="space-y-6">
+              {/* Mot de passe actuel */}
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-gray-700">
+                  Mot de passe actuel
+                </label>
+                <div className="relative">
+                  <input
+                    type={showCurrentPassword ? "text" : "password"}
+                    value={passwordData.currentPassword}
+                    onChange={(e) => setPasswordData({
+                      ...passwordData,
+                      currentPassword: e.target.value
+                    })}
+                    className="w-full px-4 py-3 pr-12 rounded-xl border border-gray-300 focus:border-sky-500 focus:ring-2 focus:ring-sky-200 outline-none transition-all"
+                    placeholder="Entrez votre mot de passe actuel"
+                    required
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowCurrentPassword(!showCurrentPassword)}
+                    className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-500 hover:text-gray-700"
+                  >
+                    {showCurrentPassword ? (
+                      <EyeOff className="w-5 h-5" />
+                    ) : (
+                      <Eye className="w-5 h-5" />
+                    )}
+                  </button>
+                </div>
               </div>
-              <p className='text-lg text-gray-600 max-w-2xl mx-auto'>
-                Gérez vos informations personnelles et votre sécurité
-              </p>
-            </div>
 
-            {/* Navigation des onglets */}
-            <div className='flex space-x-1 mb-8 bg-white p-1 rounded-2xl shadow-sm border border-gray-200'>
-              {[
-                {
-                  id: 'profile',
-                  label: 'Informations personnelles',
-                  icon: User,
-                },
-                { id: 'password', label: 'Sécurité', icon: Lock },
-              ].map(tab => (
-                <button
-                  key={tab.id}
-                  onClick={() => setActiveTab(tab.id as 'profile' | 'password')}
-                  className={`flex items-center gap-3 px-6 py-3 rounded-xl text-sm font-medium transition-all flex-1 ${
-                    activeTab === tab.id
-                      ? 'bg-blue-500 text-white shadow-lg'
-                      : 'text-gray-600 hover:text-blue-600 hover:bg-blue-50'
-                  }`}
-                >
-                  <tab.icon className='w-4 h-4' />
-                  {tab.label}
-                </button>
-              ))}
-            </div>
+              {/* Nouveau mot de passe */}
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-gray-700">
+                  Nouveau mot de passe
+                </label>
+                <div className="relative">
+                  <input
+                    type={showNewPassword ? "text" : "password"}
+                    value={passwordData.newPassword}
+                    onChange={(e) => setPasswordData({
+                      ...passwordData,
+                      newPassword: e.target.value
+                    })}
+                    className="w-full px-4 py-3 pr-12 rounded-xl border border-gray-300 focus:border-sky-500 focus:ring-2 focus:ring-sky-200 outline-none transition-all"
+                    placeholder="Entrez votre nouveau mot de passe"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowNewPassword(!showNewPassword)}
+                    className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-500 hover:text-gray-700"
+                  >
+                    {showNewPassword ? (
+                      <EyeOff className="w-5 h-5" />
+                    ) : (
+                      <Eye className="w-5 h-5" />
+                    )}
+                  </button>
+                </div>
+              </div>
 
-            {/* Contenu des onglets */}
-            <div className='bg-white rounded-2xl shadow-sm overflow-hidden border border-gray-200'>
-              {/* Informations personnelles */}
-              {activeTab === 'profile' && (
-                <div className='p-8'>
-                  <div className='mb-8'>
-                    <h2 className='text-2xl font-bold text-gray-800 mb-2'>
-                      Informations personnelles
-                    </h2>
-                    <p className='text-gray-600'>
-                      Mettez à jour votre adresse email et votre numéro de
-                      téléphone
-                    </p>
+              {/* Confirmation du nouveau mot de passe */}
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-gray-700">
+                  Confirmer le nouveau mot de passe
+                </label>
+                <div className="relative">
+                  <input
+                    type={showConfirmPassword ? "text" : "password"}
+                    value={passwordData.confirmNewPassword}
+                    onChange={(e) => setPasswordData({
+                      ...passwordData,
+                      confirmNewPassword: e.target.value
+                    })}
+                    className="w-full px-4 py-3 pr-12 rounded-xl border border-gray-300 focus:border-sky-500 focus:ring-2 focus:ring-sky-200 outline-none transition-all"
+                    placeholder="Confirmez votre nouveau mot de passe"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                    className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-500 hover:text-gray-700"
+                  >
+                    {showConfirmPassword ? (
+                      <EyeOff className="w-5 h-5" />
+                    ) : (
+                      <Eye className="w-5 h-5" />
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              {/* Validation du mot de passe */}
+              {passwordData.newPassword && (
+                <div className="space-y-3 p-4 bg-gray-50 rounded-xl">
+                  <p className="text-sm font-medium text-gray-700">
+                    Votre mot de passe doit contenir :
+                  </p>
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2">
+                      {passwordValidation.hasMinLength ? (
+                        <CheckCircle className="w-4 h-4 text-green-500" />
+                      ) : (
+                        <XCircle className="w-4 h-4 text-red-500" />
+                      )}
+                      <span className={`text-sm ${passwordValidation.hasMinLength ? 'text-green-600' : 'text-gray-600'}`}>
+                        Minimum 8 caractères
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {passwordValidation.hasLowerCase ? (
+                        <CheckCircle className="w-4 h-4 text-green-500" />
+                      ) : (
+                        <XCircle className="w-4 h-4 text-red-500" />
+                      )}
+                      <span className={`text-sm ${passwordValidation.hasLowerCase ? 'text-green-600' : 'text-gray-600'}`}>
+                        Au moins une lettre minuscule
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {passwordValidation.hasUpperCase ? (
+                        <CheckCircle className="w-4 h-4 text-green-500" />
+                      ) : (
+                        <XCircle className="w-4 h-4 text-red-500" />
+                      )}
+                      <span className={`text-sm ${passwordValidation.hasUpperCase ? 'text-green-600' : 'text-gray-600'}`}>
+                        Au moins une lettre majuscule
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {passwordValidation.hasNumber ? (
+                        <CheckCircle className="w-4 h-4 text-green-500" />
+                      ) : (
+                        <XCircle className="w-4 h-4 text-red-500" />
+                      )}
+                      <span className={`text-sm ${passwordValidation.hasNumber ? 'text-green-600' : 'text-gray-600'}`}>
+                        Au moins un chiffre
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {passwordValidation.passwordsMatch ? (
+                        <CheckCircle className="w-4 h-4 text-green-500" />
+                      ) : (
+                        <XCircle className="w-4 h-4 text-red-500" />
+                      )}
+                      <span className={`text-sm ${passwordValidation.passwordsMatch ? 'text-green-600' : 'text-gray-600'}`}>
+                        Les mots de passe correspondent
+                      </span>
+                    </div>
                   </div>
-
-                  <form onSubmit={handleProfileSubmit} className='space-y-6'>
-                    {/* Champ Email */}
-                    <div>
-                      <label
-                        htmlFor='email'
-                        className='block text-sm font-medium text-gray-700 mb-2'
-                      >
-                        Adresse email
-                      </label>
-                      <div className='relative'>
-                        <div className='absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none'>
-                          <Mail className='h-5 w-5 text-gray-400' />
-                        </div>
-                        <input
-                          type='email'
-                          id='email'
-                          value={profileData.email}
-                          onChange={e =>
-                            handleProfileChange('email', e.target.value)
-                          }
-                          className={`block w-full pl-10 pr-3 py-3 border rounded-xl focus:ring-none focus:outline-none hover:border-blue-600 focus:border-blue-500 transition-colors ${
-                            profileErrors.email
-                              ? 'border-red-300'
-                              : 'border-gray-300'
-                          }`}
-                          placeholder='votre@email.com'
-                        />
-                      </div>
-                      {profileTouched.email && profileErrors.email && (
-                        <p className='mt-2 text-sm text-red-600 flex items-center gap-1'>
-                          <XCircle className='w-4 h-4' />
-                          {profileErrors.email}
-                        </p>
-                      )}
-                    </div>
-
-                    {/* Champ Téléphone */}
-                    <div>
-                      <label
-                        htmlFor='telephone'
-                        className='block text-sm font-medium text-gray-700 mb-2'
-                      >
-                        Numéro de téléphone
-                      </label>
-                      <div className='relative'>
-                        <div className='absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none'>
-                          <Phone className='h-5 w-5 text-gray-400' />
-                        </div>
-                        <input
-                          type='tel'
-                          id='telephone'
-                          value={profileData.telephone}
-                          onChange={e =>
-                            handleProfileChange('telephone', e.target.value)
-                          }
-                          className={`block w-full pl-10 pr-3 py-3 border rounded-xl focus:ring-none focus:outline-none hover:border-blue-600 focus:border-blue-500 transition-colors ${
-                            profileErrors.telephone
-                              ? 'border-red-300'
-                              : 'border-gray-300'
-                          }`}
-                          placeholder='+33 1 23 45 67 89'
-                        />
-                      </div>
-                      {profileTouched.telephone && profileErrors.telephone && (
-                        <p className='mt-2 text-sm text-red-600 flex items-center gap-1'>
-                          <XCircle className='w-4 h-4' />
-                          {profileErrors.telephone}
-                        </p>
-                      )}
-                    </div>
-
-                    {/* Actions */}
-                    <div className='flex gap-3 pt-6 border-t border-gray-200'>
-                      <button
-                        type='button'
-                        onClick={resetProfileForm}
-                        disabled={!hasProfileChanges() || isLoading}
-                        className='px-6 py-3 border border-gray-300 text-gray-700 rounded-xl hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors font-medium'
-                      >
-                        Annuler
-                      </button>
-                      <button
-                        type='submit'
-                        disabled={
-                          !hasProfileChanges() ||
-                          isLoading ||
-                          Object.keys(profileErrors).some(
-                            key => profileErrors[key]
-                          )
-                        }
-                        className='flex-1 px-6 py-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors font-medium shadow-sm'
-                      >
-                        {isLoading
-                          ? 'Mise à jour...'
-                          : 'Enregistrer les modifications'}
-                      </button>
-                    </div>
-                  </form>
                 </div>
               )}
 
-              {/* Sécurité - Mot de passe */}
-              {activeTab === 'password' && (
-                <div className='p-8'>
-                  <div className='mb-8'>
-                    <h2 className='text-2xl font-bold text-gray-800 mb-2'>
-                      Sécurité du compte
-                    </h2>
-                    <p className='text-gray-600'>
-                      Modifiez votre mot de passe pour renforcer la sécurité de
-                      votre compte
+              {/* Bouton de soumission */}
+              <button
+                type="submit"
+                disabled={isUpdatingPassword || passwordErrors.length > 0 || !passwordData.currentPassword}
+                className="w-full py-3 px-4 bg-gradient-to-r from-emerald-500 to-emerald-600 text-white font-medium rounded-xl hover:from-emerald-600 hover:to-emerald-700 active:scale-95 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed shadow-md"
+              >
+                {isUpdatingPassword ? (
+                  <span className="flex items-center justify-center gap-2">
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Changement en cours...
+                  </span>
+                ) : (
+                  'Changer mon mot de passe'
+                )}
+              </button>
+            </form>
+          </div>
+        </div>
+
+        {/* Section Informations de sécurité */}
+        <div className="bg-white rounded-2xl shadow-lg border border-gray-100 overflow-hidden">
+          <div className="p-6">
+            <h2 className="text-xl font-bold text-gray-900 mb-6 flex items-center gap-2">
+              <Shield className="w-5 h-5 text-sky-600" />
+              Sécurité du compte
+            </h2>
+
+            <div className="space-y-4">
+              {/* Statut du compte */}
+              <div className="flex items-center justify-between p-4 bg-gradient-to-r from-sky-50 to-blue-50 rounded-xl border border-sky-100">
+                <div className="flex items-center gap-3">
+                  <div className={`w-3 h-3 rounded-full ${
+                    user?.isActive ? 'bg-green-500' : 'bg-red-500'
+                  }`} />
+                  <div>
+                    <p className="font-medium text-gray-900">Statut du compte</p>
+                    <p className="text-sm text-gray-600">
+                      {user?.isActive ? 'Actif' : 'Inactif'}
                     </p>
                   </div>
-
-                  <form onSubmit={handlePasswordSubmit} className='space-y-6'>
-                    {/* Mot de passe actuel */}
-                    <div>
-                      <label
-                        htmlFor='currentPassword'
-                        className='block text-sm font-medium text-gray-700 mb-2'
-                      >
-                        Mot de passe actuel
-                      </label>
-                      <div className='relative'>
-                        <div className='absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none'>
-                          <Lock className='h-5 w-5 text-gray-400' />
-                        </div>
-                        <input
-                          type={showCurrentPassword ? 'text' : 'password'}
-                          id='currentPassword'
-                          value={passwordData.currentPassword}
-                          onChange={e =>
-                            handlePasswordChange(
-                              'currentPassword',
-                              e.target.value
-                            )
-                          }
-                          className={`block w-full pl-10 pr-10 py-3 border rounded-xl focus:ring-none focus:outline-none hover:border-blue-600 focus:border-blue-500 transition-colors ${
-                            passwordErrors.currentPassword
-                              ? 'border-red-300'
-                              : 'border-gray-300'
-                          }`}
-                          placeholder='Votre mot de passe actuel'
-                        />
-                        <button
-                          type='button'
-                          onClick={() =>
-                            setShowCurrentPassword(!showCurrentPassword)
-                          }
-                          className='absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600'
-                        >
-                          {showCurrentPassword ? (
-                            <EyeOff className='h-5 w-5' />
-                          ) : (
-                            <Eye className='h-5 w-5' />
-                          )}
-                        </button>
-                      </div>
-                      {passwordTouched.currentPassword &&
-                        passwordErrors.currentPassword && (
-                          <p className='mt-2 text-sm text-red-600 flex items-center gap-1'>
-                            <XCircle className='w-4 h-4' />
-                            {passwordErrors.currentPassword}
-                          </p>
-                        )}
-                    </div>
-
-                    {/* Nouveau mot de passe */}
-                    <div>
-                      <label
-                        htmlFor='newPassword'
-                        className='block text-sm font-medium text-gray-700 mb-2'
-                      >
-                        Nouveau mot de passe
-                      </label>
-                      <div className='relative'>
-                        <div className='absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none'>
-                          <Lock className='h-5 w-5 text-gray-400' />
-                        </div>
-                        <input
-                          type={showNewPassword ? 'text' : 'password'}
-                          id='newPassword'
-                          value={passwordData.newPassword}
-                          onChange={e =>
-                            handlePasswordChange('newPassword', e.target.value)
-                          }
-                          className={`block w-full pl-10 pr-10 py-3 border rounded-xl focus:ring-none focus:outline-none hover:border-blue-600 focus:border-blue-500 transition-colors ${
-                            passwordErrors.newPassword
-                              ? 'border-red-300'
-                              : 'border-gray-300'
-                          }`}
-                          placeholder='Votre nouveau mot de passe'
-                        />
-                        <button
-                          type='button'
-                          onClick={() => setShowNewPassword(!showNewPassword)}
-                          className='absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600'
-                        >
-                          {showNewPassword ? (
-                            <EyeOff className='h-5 w-5' />
-                          ) : (
-                            <Eye className='h-5 w-5' />
-                          )}
-                        </button>
-                      </div>
-                      {passwordTouched.newPassword &&
-                        passwordErrors.newPassword && (
-                          <p className='mt-2 text-sm text-red-600 flex items-center gap-1'>
-                            <XCircle className='w-4 h-4' />
-                            {passwordErrors.newPassword}
-                          </p>
-                        )}
-                      <PasswordStrengthIndicator
-                        password={passwordData.newPassword}
-                      />
-                    </div>
-
-                    {/* Confirmation du nouveau mot de passe */}
-                    <div>
-                      <label
-                        htmlFor='confirmNewPassword'
-                        className='block text-sm font-medium text-gray-700 mb-2'
-                      >
-                        Confirmer le nouveau mot de passe
-                      </label>
-                      <div className='relative'>
-                        <div className='absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none'>
-                          <Lock className='h-5 w-5 text-gray-400' />
-                        </div>
-                        <input
-                          type={showConfirmPassword ? 'text' : 'password'}
-                          id='confirmNewPassword'
-                          value={passwordData.confirmNewPassword}
-                          onChange={e =>
-                            handlePasswordChange(
-                              'confirmNewPassword',
-                              e.target.value
-                            )
-                          }
-                          className={`block w-full pl-10 pr-10 py-3 border rounded-xl focus:ring-none focus:outline-none hover:border-blue-600 focus:border-blue-500 transition-colors ${
-                            passwordErrors.confirmNewPassword
-                              ? 'border-red-300'
-                              : 'border-gray-300'
-                          }`}
-                          placeholder='Confirmez votre nouveau mot de passe'
-                        />
-                        <button
-                          type='button'
-                          onClick={() =>
-                            setShowConfirmPassword(!showConfirmPassword)
-                          }
-                          className='absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600'
-                        >
-                          {showConfirmPassword ? (
-                            <EyeOff className='h-5 w-5' />
-                          ) : (
-                            <Eye className='h-5 w-5' />
-                          )}
-                        </button>
-                      </div>
-                      {passwordTouched.confirmNewPassword &&
-                        passwordErrors.confirmNewPassword && (
-                          <p className='mt-2 text-sm text-red-600 flex items-center gap-1'>
-                            <XCircle className='w-4 h-4' />
-                            {profileErrors.confirmNewPassword}
-                          </p>
-                        )}
-                      {passwordTouched.confirmNewPassword &&
-                        passwordData.newPassword &&
-                        passwordData.confirmNewPassword &&
-                        passwordData.newPassword ===
-                          passwordData.confirmNewPassword && (
-                          <p className='mt-2 text-sm text-green-600 flex items-center gap-1'>
-                            <CheckCircle className='w-4 h-4' />
-                            Les mots de passe correspondent
-                          </p>
-                        )}
-                    </div>
-
-                    {/* Actions */}
-                    <div className='flex gap-3 pt-6 border-t border-gray-200'>
-                      <button
-                        type='button'
-                        onClick={resetPasswordForm}
-                        disabled={isPasswordFormEmpty() || isLoading}
-                        className='px-6 py-3 border border-gray-300 text-gray-700 rounded-xl hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors font-medium'
-                      >
-                        Annuler
-                      </button>
-                      <button
-                        type='submit'
-                        disabled={
-                          isPasswordFormEmpty() ||
-                          isLoading ||
-                          Object.keys(passwordErrors).some(
-                            key => passwordErrors[key]
-                          )
-                        }
-                        className='flex-1 px-6 py-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors font-medium shadow-sm'
-                      >
-                        {isLoading
-                          ? 'Mise à jour...'
-                          : 'Modifier le mot de passe'}
-                      </button>
-                    </div>
-                  </form>
-
-                  {/* Conseils de sécurité */}
-                  <div className='mt-8 p-4 bg-blue-50 border border-blue-200 rounded-xl'>
-                    <h3 className='text-sm font-semibold text-blue-800 mb-2'>
-                      Conseils de sécurité
-                    </h3>
-                    <ul className='text-sm text-blue-700 space-y-1'>
-                      <li>• Utilisez un mot de passe unique et complexe</li>
-                      <li>
-                        • Évitez les mots de passe que vous utilisez sur
-                        d'autres sites
-                      </li>
-                      <li>• Changez régulièrement votre mot de passe</li>
-                      <li>• Ne partagez jamais votre mot de passe</li>
-                    </ul>
-                  </div>
                 </div>
-              )}
+                <UserCheck className="w-5 h-5 text-sky-600" />
+              </div>
+
+            </div>
+
+            {/* Conseils de sécurité */}
+            <div className="mt-6 pt-6 border-t border-gray-200">
+              <h3 className="font-medium text-gray-900 mb-3">Conseils de sécurité</h3>
+              <ul className="space-y-2">
+                <li className="flex items-start gap-2">
+                  <div className="w-1.5 h-1.5 bg-sky-500 rounded-full mt-2 flex-shrink-0" />
+                  <span className="text-sm text-gray-600">
+                    Utilisez des mots de passe uniques et complexes
+                  </span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <div className="w-1.5 h-1.5 bg-sky-500 rounded-full mt-2 flex-shrink-0" />
+                  <span className="text-sm text-gray-600">
+                    Ne partagez jamais vos identifiants de connexion
+                  </span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <div className="w-1.5 h-1.5 bg-sky-500 rounded-full mt-2 flex-shrink-0" />
+                  <span className="text-sm text-gray-600">
+                    Déconnectez-vous des appareils publics après utilisation
+                  </span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <div className="w-1.5 h-1.5 bg-sky-500 rounded-full mt-2 flex-shrink-0" />
+                  <span className="text-sm text-gray-600">
+                    Activez l'authentification à deux facteurs si disponible
+                  </span>
+                </li>
+              </ul>
             </div>
           </div>
         </div>
       </div>
-    </>
+    </div>
   );
 };
 
