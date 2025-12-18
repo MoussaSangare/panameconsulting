@@ -18,37 +18,64 @@ export class NotificationService {
     this.initializeEmailService();
   }
 
-  private initializeEmailService() {
-    const emailUser = this.configService.get<string>('EMAIL_USER');
-    const emailPass = this.configService.get<string>('EMAIL_PASS');
+ private initializeEmailService() {
+  const emailUser = this.configService.get<string>('EMAIL_USER');
+  const emailPass = this.configService.get<string>('EMAIL_PASS');
+  
+  if (emailUser && emailPass) {
+    this.emailServiceAvailable = true;
+    this.fromEmail = `"Paname Consulting" <${emailUser}>`;
+    this.frontendUrl = this.configService.get<string>('FRONTEND_URL') || this.frontendUrl;
     
-    if (emailUser && emailPass) {
-      this.emailServiceAvailable = true;
-      this.fromEmail = `"Paname Consulting" <${emailUser}>`;
-      this.frontendUrl = this.configService.get<string>('FRONTEND_URL') || this.frontendUrl;
-      
-      // Configuration SMTP simplifiée
-      this.transporter = nodemailer.createTransport({
-        host: 'smtp.gmail.com',
-        port: parseInt(this.configService.get<string>('EMAIL_PORT') || '587'),
-        secure: this.configService.get<string>('EMAIL_SECURE') === 'true',
-        auth: {
-          user: emailUser,
-          pass: emailPass
-        }
-      });
-
-      // Vérification de la connexion
-      this.transporter.verify()
-        .then(() => this.logger.log('Service email initialisé avec succès'))
-        .catch(err => {
-          this.logger.error('Erreur lors de l\'initialisation du service email:', err.message);
-          this.emailServiceAvailable = false;
-        });
-    } else {
-      this.logger.warn('Service email désactivé - EMAIL_USER ou EMAIL_PASS manquant');
+    // Configuration SMTP PRODUCTION optimisée
+    const smtpConfig: any = {
+      host: this.configService.get<string>('EMAIL_HOST') || 'smtp.gmail.com',
+      port: parseInt(this.configService.get<string>('EMAIL_PORT') || '587'),
+      secure: this.configService.get<string>('EMAIL_SECURE') === 'true',
+      auth: {
+        user: emailUser,
+        pass: emailPass
+      }
+    };
+    
+    // Ajouter TLS si en production et port 587
+    if (smtpConfig.port === 587) {
+      smtpConfig.tls = {
+        ciphers: 'SSLv3',
+        rejectUnauthorized: false
+      };
     }
+    
+    // Options de connexion pour la production
+    smtpConfig.connectionTimeout = 15000; // 15 secondes
+    smtpConfig.socketTimeout = 15000; // 15 secondes
+    smtpConfig.greetingTimeout = 15000; // 15 secondes
+    smtpConfig.pool = true;
+    smtpConfig.maxConnections = 3;
+    
+    this.transporter = nodemailer.createTransport(smtpConfig);
+
+    // Vérification de la connexion avec timeout
+    const verifyPromise = this.transporter.verify();
+    
+    // Timeout pour la vérification
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(() => reject(new Error('Timeout de vérification SMTP')), 10000);
+    });
+    
+    Promise.race([verifyPromise, timeoutPromise])
+      .then(() => this.logger.log('✅ Service email initialisé avec succès'))
+      .catch(err => {
+        this.logger.error('❌ Erreur lors de l\'initialisation du service email:', err.message);
+        this.emailServiceAvailable = false;
+        // Log plus détaillé pour le debug
+        this.logger.debug(`Configuration SMTP utilisée: host=${smtpConfig.host}, port=${smtpConfig.port}, secure=${smtpConfig.secure}`);
+      });
+      
+  } else {
+    this.logger.warn('⚠️ Service email désactivé - EMAIL_USER ou EMAIL_PASS manquant');
   }
+}
 
   private async sendEmail(
     to: string, 

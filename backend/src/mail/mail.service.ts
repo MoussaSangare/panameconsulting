@@ -28,42 +28,119 @@ export class MailService {
     this.initializeTransporter();
   }
 
-  private initializeTransporter() {
-    if (!this.isServiceAvailable) {
-      this.logger.warn('Service email non configuré - transporter non initialisé');
-      return;
-    }
+ private initializeTransporter() {
+  if (!this.isServiceAvailable) {
+    this.logger.warn('Service email non configuré - transporter non initialisé');
+    return;
+  }
 
-    this.transporter = nodemailer.createTransport({
-      host: this.configService.get('EMAIL_HOST') || 'smtp.gmail.com',
-      port: parseInt(this.configService.get('EMAIL_PORT') || '587'),
-      secure: this.configService.get('EMAIL_SECURE') === 'true',
-      auth: {
-        user: this.configService.get('EMAIL_USER'),
-        pass: this.configService.get('EMAIL_PASS'),
-      },
-      tls: {
-        rejectUnauthorized: this.configService.get('NODE_ENV') === 'production',
-      },
+  const emailHost = this.configService.get('EMAIL_HOST') || 'smtp.gmail.com';
+  const emailPort = parseInt(this.configService.get('EMAIL_PORT') || '587');
+  const isSecure = this.configService.get('EMAIL_SECURE') === 'true';
+  const isProduction = this.configService.get('NODE_ENV') === 'production';
+
+  // Configuration SMTP optimisée pour la production
+  const smtpConfig: any = {
+    host: emailHost,
+    port: emailPort,
+    secure: isSecure,
+    auth: {
+      user: this.configService.get('EMAIL_USER'),
+      pass: this.configService.get('EMAIL_PASS'),
+    },
+    // Options de connexion robustes pour la production
+    connectionTimeout: 15000, // 15 secondes
+    socketTimeout: 15000,     // 15 secondes
+    greetingTimeout: 10000,   // 10 secondes
+    pool: true,               // Utiliser le pooling pour les performances
+    maxConnections: 3,        // Nombre maximal de connexions simultanées
+    maxMessages: 100,         // Messages par connexion avant recyclage
+  };
+
+  // Configuration TLS adaptée au port et à l'environnement
+  if (emailPort === 587 && !isSecure) {
+    // STARTTLS pour le port 587
+    smtpConfig.tls = {
+      ciphers: 'SSLv3',
+      rejectUnauthorized: isProduction // Ne rejeter que si le certificat est invalide en production
+    };
+  } else if (isSecure) {
+    // TLS direct pour les ports sécurisés (465)
+    smtpConfig.tls = {
+      rejectUnauthorized: isProduction
+    };
+  }
+
+  // Désactiver temporairement la vérification TLS pour debug si nécessaire
+  if (this.configService.get('EMAIL_DISABLE_TLS_CHECK') === 'true') {
+    smtpConfig.tls = { rejectUnauthorized: false };
+    this.logger.warn('⚠️ Vérification TLS désactivée - pour le debug uniquement');
+  }
+
+  this.transporter = nodemailer.createTransport(smtpConfig);
+
+  // Vérification automatique de la connexion au démarrage
+  this.checkConnection().then(isConnected => {
+    if (isConnected) {
+      this.logger.log(`✅ Service email connecté: ${emailHost}:${emailPort}`);
+    } else {
+      this.logger.error(`❌ Échec de connexion SMTP: ${emailHost}:${emailPort}`);
+      this.logger.debug(`Configuration utilisée: ${JSON.stringify({
+        host: emailHost,
+        port: emailPort,
+        secure: isSecure,
+        authUser: this.maskEmail(this.configService.get('EMAIL_USER') || '')
+      })}`);
+    }
+  });
+}
+
+async checkConnection(): Promise<boolean> {
+  if (!this.isServiceAvailable) {
+    this.logger.warn('Service email non disponible - EMAIL_USER ou EMAIL_PASS manquant');
+    return false;
+  }
+
+  if (!this.transporter) {
+    this.logger.error('Transporter non initialisé');
+    return false;
+  }
+
+  try {
+    // Utiliser Promise.race pour éviter les timeouts infinis
+    const verifyPromise = this.transporter.verify();
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      setTimeout(() => reject(new Error('Timeout de vérification SMTP (10s)')), 10000);
     });
-  }
 
-  async checkConnection(): Promise<boolean> {
-    if (!this.isServiceAvailable) {
-      this.logger.warn('Email service is not available');
-      return false;
+    await Promise.race([verifyPromise, timeoutPromise]);
+    
+    this.logger.log('✅ Service email connecté avec succès');
+    return true;
+    
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Erreur inconnue';
+    
+    // Log adapté selon le type d'erreur
+    if (errorMessage.includes('Timeout')) {
+      this.logger.error(`⌛ Timeout SMTP: Vérifiez votre réseau/firewall`);
+    } else if (errorMessage.includes('Invalid login') || errorMessage.includes('535')) {
+      this.logger.error(`🔐 Erreur d'authentification: Vérifiez EMAIL_USER/EMAIL_PASS`);
+      this.logger.warn(`💡 Astuce Gmail: Utilisez un "mot de passe d'application" si 2FA est activé`);
+    } else if (errorMessage.includes('ECONNREFUSED')) {
+      this.logger.error(`🔌 Connexion refusée: Vérifiez host/port ou firewall`);
+    } else if (errorMessage.includes('self signed certificate')) {
+      this.logger.warn(`⚠️ Certificat auto-signé: Ajoutez "EMAIL_DISABLE_TLS_CHECK=true" temporairement`);
+    } else {
+      this.logger.error(`❌ Erreur de connexion SMTP: ${errorMessage}`);
     }
-
-    return this.transporter.verify()
-      .then(() => {
-        this.logger.log('Email service is connected');
-        return true;
-      })
-      .catch((error) => {
-        this.logger.error('Email service is not connected', error);
-        return false;
-      });
+    
+    // Log détaillé en debug
+    this.logger.debug(`Détails de l'erreur: ${JSON.stringify(error, null, 2)}`);
+    
+    return false;
   }
+}
 
   async sendEmail(to: string, template: EmailTemplate, context?: Record<string, any>): Promise<boolean> {
     if (!this.isServiceAvailable) {
