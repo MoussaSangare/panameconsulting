@@ -31,7 +31,7 @@ export class NotificationService {
       this.transporter = nodemailer.createTransport({
         host: this.configService.get<string>('EMAIL_HOST') || 'smtp.gmail.com',
         port: parseInt(this.configService.get<string>('EMAIL_PORT') || '587'),
-        secure: this.configService.get<string>('EMAIL_SECURE') === 'true',
+        secure: this.configService.get<string>('EMAIL_SECURE') === 'false',
         auth: {
           user: emailUser,
           pass: emailPass,
@@ -475,4 +475,5 @@ export class NotificationService {
         : 'Service email indisponible - vérifiez EMAIL_USER et EMAIL_PASS'
     };
   }
+
 }

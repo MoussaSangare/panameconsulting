@@ -36,7 +36,7 @@ export class MailService {
 
     const host = this.configService.get<string>('EMAIL_HOST') || 'smtp.gmail.com';
     const port = parseInt(this.configService.get<string>('EMAIL_PORT') || '587');
-    const secure = this.configService.get<string>('EMAIL_SECURE') === 'true';
+    const secure = this.configService.get<string>('EMAIL_SECURE') === 'false';
 
     this.transporter = nodemailer.createTransport({
       host,
