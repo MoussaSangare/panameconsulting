@@ -30,78 +30,45 @@ export class MailService {
 
   private initializeTransporter() {
     if (!this.isServiceAvailable) {
-      this.logger.warn('Service email non configuré');
+      this.logger.warn('Service email non configuré - transporter non initialisé');
       return;
     }
 
-    const isRailway = !!process.env.RAILWAY_ENVIRONMENT;
-    const emailHost = this.configService.get('EMAIL_HOST') || 'smtp.gmail.com';
-    
-    // Configuration adaptative pour Railway
-    const emailPort = isRailway ? 465 : parseInt(this.configService.get('EMAIL_PORT') || '587');
-    const isSecure = isRailway ? true : this.configService.get('EMAIL_SECURE') === 'true';
+    const host = this.configService.get<string>('EMAIL_HOST') || 'smtp.gmail.com';
+    const port = parseInt(this.configService.get<string>('EMAIL_PORT') || '587');
+    const secure = this.configService.get<string>('EMAIL_SECURE') === 'true';
 
-    this.logger.log(`📧 Configuration SMTP pour ${isRailway ? 'Railway' : 'local'}: ${emailHost}:${emailPort}`);
-
-    const smtpConfig: any = {
-      host: emailHost,
-      port: emailPort,
-      secure: isSecure,
+    this.transporter = nodemailer.createTransport({
+      host,
+      port,
+      secure,
       auth: {
         user: this.configService.get('EMAIL_USER'),
         pass: this.configService.get('EMAIL_PASS'),
       },
-      connectionTimeout: 10000,
-      socketTimeout: 10000,
-      // DÉSACTIVER la vérification TLS sur Railway
       tls: {
-        rejectUnauthorized: !isRailway // false sur Railway, true en local
-      }
-    };
+        rejectUnauthorized: this.configService.get<string>('NODE_ENV') === 'production',
+      },
+    });
 
-    this.transporter = nodemailer.createTransport(smtpConfig);
-    
-    // Ne pas vérifier la connexion au démarrage sur Railway
-    if (!isRailway) {
-      this.checkConnection().catch(() => {
-        this.logger.warn('La vérification SMTP a échoué, mais le service peut fonctionner');
-      });
-    } else {
-      this.logger.log('📧 Service email configuré (vérification différée sur Railway)');
-    }
+    this.logger.log(`MailService transport initialisé (host=${host}, port=${port}, secure=${secure})`);
   }
 
   async checkConnection(): Promise<boolean> {
     if (!this.isServiceAvailable) {
-      this.logger.warn('Service email non disponible');
+      this.logger.warn('Email service is not available');
       return false;
     }
 
-    if (!this.transporter) {
-      return false;
-    }
-
-    // EN PRODUCTION : Ne pas vérifier la connexion au démarrage
-    // La vérification peut échouer mais l'envoi fonctionnera
-    if (this.configService.get('NODE_ENV') === 'production') {
-      this.logger.log('📧 Service email configuré (vérification différée)');
-      return true; // Retourner true même sans vérification
-    }
-
-    // Vérification uniquement en développement
-    try {
-      const verifyPromise = this.transporter.verify();
-      const timeoutPromise = new Promise<never>((_, reject) => {
-        setTimeout(() => reject(new Error('Timeout')), 5000);
+    return this.transporter.verify()
+      .then(() => {
+        this.logger.log('Email service is connected');
+        return true;
+      })
+      .catch((error) => {
+        this.logger.error('Email service is not connected', error);
+        return false;
       });
-
-      await Promise.race([verifyPromise, timeoutPromise]);
-      this.logger.log('✅ Connexion SMTP vérifiée');
-      return true;
-    } catch {
-      this.logger.warn('⚠️ Connexion SMTP non vérifiée, mais le service peut fonctionner');
-      return true; // Retourner true quand même
-    }
   }
 
   async sendEmail(to: string, template: EmailTemplate, context?: Record<string, any>): Promise<boolean> {

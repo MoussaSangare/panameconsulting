@@ -18,85 +18,40 @@ export class NotificationService {
     this.initializeEmailService();
   }
 
-private initializeEmailService() {
-  const emailUser = this.configService.get<string>('EMAIL_USER');
-  const emailPass = this.configService.get<string>('EMAIL_PASS');
-  
-  if (emailUser && emailPass) {
-    this.emailServiceAvailable = true;
-    this.fromEmail = `"Paname Consulting" <${emailUser}>`;
-    this.frontendUrl = this.configService.get<string>('FRONTEND_URL') || this.frontendUrl;
+  private initializeEmailService() {
+    const emailUser = this.configService.get<string>('EMAIL_USER');
+    const emailPass = this.configService.get<string>('EMAIL_PASS');
     
-    // DÉTECTER si on est sur Railway
-    const isRailway = !!process.env.RAILWAY_ENVIRONMENT || !!process.env.RAILWAY_SERVICE_NAME;
-    
-    // Configuration SMTP adaptative pour Railway
-    const emailHost = this.configService.get<string>('EMAIL_HOST') || 'smtp.gmail.com';
-    const emailPort = isRailway ? 465 : parseInt(this.configService.get<string>('EMAIL_PORT') || '587');
-    const isSecure = isRailway ? true : this.configService.get<string>('EMAIL_SECURE') === 'true';
-    
-    this.logger.log(`📧 Configuration SMTP: ${emailHost}:${emailPort} (Railway: ${isRailway})`);
-    
-    const smtpConfig: any = {
-      host: emailHost,
-      port: emailPort,
-      secure: isSecure,
-      auth: {
-        user: emailUser,
-        pass: emailPass
-      },
-      connectionTimeout: 10000,
-      socketTimeout: 10000,
-      greetingTimeout: 5000,
-      // IMPORTANT: Désactiver TLS check sur Railway
-      tls: {
-        rejectUnauthorized: !isRailway // false sur Railway, true en local
-      }
-    };
-    
-    this.transporter = nodemailer.createTransport(smtpConfig);
-    
-    // NE PAS vérifier la connexion au démarrage sur Railway
-    if (!isRailway) {
-      // Vérification uniquement en local/dev
-      const verifyPromise = this.transporter.verify();
-      const timeoutPromise = new Promise((_, reject) => {
-        setTimeout(() => reject(new Error('Timeout de vérification SMTP')), 5000);
-      });
+    if (emailUser && emailPass) {
+      this.emailServiceAvailable = true;
+      this.fromEmail = `"Paname Consulting" <${emailUser}>`;
+      this.frontendUrl = this.configService.get<string>('FRONTEND_URL') || this.frontendUrl;
       
-      Promise.race([verifyPromise, timeoutPromise])
-        .then(() => this.logger.log('✅ Service email vérifié en local'))
+      // Configuration SMTP simplifiée
+      this.transporter = nodemailer.createTransport({
+        host: this.configService.get<string>('EMAIL_HOST') || 'smtp.gmail.com',
+        port: parseInt(this.configService.get<string>('EMAIL_PORT') || '587'),
+        secure: this.configService.get<string>('EMAIL_SECURE') === 'true',
+        auth: {
+          user: emailUser,
+          pass: emailPass,
+        },
+        tls: {
+          rejectUnauthorized: this.configService.get<string>('NODE_ENV') === 'production',
+        },
+      });
+
+      // Vérification de la connexion
+      this.transporter.verify()
+        .then(() => this.logger.log('Service email initialisé avec succès'))
         .catch(err => {
-          this.logger.warn(`⚠️ Connexion SMTP non vérifiée: ${err.message}`);
-          // Ne pas désactiver le service, il peut quand même fonctionner
+          this.logger.error('Erreur lors de l\'initialisation du service email:', err.message);
+          this.emailServiceAvailable = false;
         });
     } else {
-      this.logger.log('📧 Service email configuré (vérification différée sur Railway)');
-      // Tester la connexion de manière asynchrone sans bloquer
-      this.testConnectionSilently();
+      this.logger.warn('Service email désactivé - EMAIL_USER ou EMAIL_PASS manquant');
     }
-      
-  } else {
-    this.logger.warn('⚠️ Service email désactivé - EMAIL_USER ou EMAIL_PASS manquant');
-    this.emailServiceAvailable = false;
   }
-}
-
-// Méthode pour tester silencieusement la connexion
-private async testConnectionSilently(): Promise<void> {
-  if (!this.transporter) return;
-  
-  try {
-    // Test rapide sans bloquer l'application
-    await Promise.race([
-      this.transporter.verify(),
-      new Promise((_, reject) => setTimeout(() => reject(new Error('Silent timeout')), 3000))
-    ]);
-    this.logger.log('✅ Connexion SMTP établie');
-  } catch {
-    // Ne rien loguer - c'est normal sur Railway
-  }
-}
 
   private async sendEmail(
     to: string, 

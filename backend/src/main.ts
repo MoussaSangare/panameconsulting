@@ -34,7 +34,7 @@ const productionOrigins = [
   "https://panameconsulting.vercel.app",
   "https://vercel.live",
   "http://localhost:5713",
-  "https://panameconsulting.up.railway.app/"
+  "http://localhost:5173" // AJOUTÉ pour votre frontend Vite
 ];
 
 // Fonction pour vérifier si une origine correspond à un pattern avec wildcard
