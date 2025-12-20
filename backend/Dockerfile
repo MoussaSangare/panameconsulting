@@ -1,20 +1,21 @@
 # ============ ÉTAPE DE BUILD ============
 FROM node:18-alpine AS builder
 
-RUN npm install -g corepack@latest
-RUN corepack enable
-RUN corepack prepare pnpm@9.15.4 --activate
+# FORCER l'utilisation d'une version spécifique de pnpm SANS Corepack
+RUN npm install -g pnpm@9.15.4
 
 WORKDIR /app
 
-# Copie de tout le backend
+# Copie des fichiers nécessaires pour l'installation
+COPY backend/package.json backend/pnpm-lock.yaml* ./
+
+# Installation des dépendances
+RUN pnpm install --frozen-lockfile
+
+# Copie du reste du code source
 COPY backend/ ./
 
-# Installation
-RUN pnpm install --frozen-lockfile --prefer-offline
-
-# Construction forcée avec configuration modifiée
-RUN sed -i 's/"skipLibCheck": false/"skipLibCheck": true/g' tsconfig.json || true
+# Construction
 RUN pnpm build 
 
 # ============ ÉTAPE DE PRODUCTION ============
@@ -24,18 +25,21 @@ ARG NODE_ENV=production
 ENV NODE_ENV=${NODE_ENV}
 ENV PORT=10000
 
-RUN npm install -g corepack@latest
-RUN corepack enable
-RUN corepack prepare pnpm@9.15.4 --activate
+# Installation directe de pnpm (sans Corepack buggé)
+RUN npm install -g pnpm@9.15.4
 
 WORKDIR /app
 
+# Copie des fichiers de dépendances
 COPY backend/package.json backend/pnpm-lock.yaml* ./
 
-RUN pnpm install --prod --frozen-lockfile --prefer-offline
+# Installation des dépendances de production
+RUN pnpm install --prod --frozen-lockfile
 
+# Copie des fichiers construits
 COPY --from=builder /app/dist ./dist
 
+# Création des dossiers nécessaires
 RUN mkdir -p /app/uploads /app/logs && \
     chown -R node:node /app
 
