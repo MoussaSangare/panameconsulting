@@ -1,51 +1,35 @@
-# ============ ÉTAPE DE BUILD ============
+# ============ BUILD ============
 FROM node:18-alpine AS builder
 
-# 1. Installez PNPM 19.0.4 via npm
-RUN npm install -g pnpm@9.15.4
-
-RUN pnpm install -g corepack@latest
-
-RUN corepack prepare pnpm@latest --activate
-
 WORKDIR /app
 
-# Copie de tout le backend
+# Active pnpm via corepack (version fixée)
+RUN corepack enable && corepack prepare pnpm@9.15.4 --activate
+
 COPY backend/ ./
 
-# Installation
-RUN pnpm install --frozen-lockfile --prefer-offline
+RUN pnpm install --frozen-lockfile
+RUN pnpm build
 
-# Construction forcée avec configuration modifiée
-RUN sed -i 's/"skipLibCheck": false/"skipLibCheck": true/g' tsconfig.json || true
-RUN pnpm build 
+# ============ PRODUCTION ============
+FROM node:18-alpine
 
-# ============ ÉTAPE DE PRODUCTION ============
-FROM node:18-alpine AS production
-
-ARG NODE_ENV=production
-ENV NODE_ENV=${NODE_ENV}
+ENV NODE_ENV=production
 ENV PORT=10000
-
-# 1. Installez PNPM 19.0.4 via npm
-RUN npm install -g pnpm@9.15.4
-
-RUN pnpm install -g corepack@latest
-RUN corepack prepare pnpm@latest --activate
 
 WORKDIR /app
 
-COPY backend/package.json backend/pnpm-lock.yaml* ./
+RUN corepack enable && corepack prepare pnpm@9.15.4 --activate
 
-RUN pnpm install --prod --frozen-lockfile --prefer-offline
+COPY backend/package.json backend/pnpm-lock.yaml* ./
+RUN pnpm install --prod --frozen-lockfile
 
 COPY --from=builder /app/dist ./dist
 
-RUN mkdir -p /app/uploads /app/logs && \
-    chown -R node:node /app
+RUN mkdir -p uploads logs \
+ && chown -R node:node /app
 
 USER node
 
-EXPOSE $PORT
-
+EXPOSE 10000
 CMD ["node", "dist/main.js"]
