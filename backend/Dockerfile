@@ -1,6 +1,7 @@
 # ============ ÉTAPE DE BUILD ============
 FROM node:18-alpine AS builder
 
+RUN corepack enable && corepack prepare pnpm@9.15.4 --activate
 
 WORKDIR /app
 
@@ -21,6 +22,7 @@ ARG NODE_ENV=production
 ENV NODE_ENV=${NODE_ENV}
 ENV PORT=10000
 
+RUN corepack enable && corepack prepare pnpm@9.15.4 --activate
 
 WORKDIR /app
 
