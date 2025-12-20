@@ -27,9 +27,8 @@ services:
       - EMAIL_USER=${EMAIL_USER}
       - EMAIL_PASS=${EMAIL_PASS}
       - MONGODB_URI=${MONGODB_URI}
-      # Variables pour le développement local (simulent Railway)
       - RAILWAY_STATIC_URL=https://panameconsulting.up.railway.app
-      - FRONTEND_URL=http://panameconsulting.vercerl.app
+      - FRONTEND_URL=http://panameconsulting.vercel.app
       
       
     
