@@ -133,9 +133,6 @@ dependencies:
   typeorm:
     specifier: ^0.3.28
     version: 0.3.28(redis@5.10.0)(ts-node@10.9.2)
-  uuid:
-    specifier: 9.0.1
-    version: 9.0.1
   winston:
     specifier: ^3.19.0
     version: 3.19.0
@@ -10705,6 +10702,7 @@ packages:
     hasBin: true
     requiresBuild: true
     dev: false
+    optional: true
 
   /v8-compile-cache-lib@3.0.1:
     resolution: {integrity: sha512-wa7YjyUGfNZngI/vtK0UHAN+lgDCxBPCylVXGp0zu59Fz5aiGtNXaq3DhIov063MorB+VfufLh3JlF2KdTK3xg==}
