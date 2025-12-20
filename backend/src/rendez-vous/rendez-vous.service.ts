@@ -147,14 +147,27 @@ export class RendezvousService {
   }
 
   // ==================== CORE METHODS ====================
-
- async create(createDto: CreateRendezvousDto, userEmail: string, isAdmin: boolean = false): Promise<Rendezvous> {
+  async create(createDto: CreateRendezvousDto, userEmail: string, isAdmin: boolean = false): Promise<Rendezvous> {
   const maskedEmail = this.maskEmail(createDto.email);
   this.logger.log(`Création d'un nouveau rendez-vous pour: ${maskedEmail}`);
   this.logger.log(`Email utilisateur depuis token: ${this.maskEmail(userEmail)}, isAdmin: ${isAdmin}`);
 
+  // OPTIMISATION: Exécuter les vérifications en parallèle
+  const [user, confirmedCount, processedData] = await Promise.all([
+    // 1. Vérifier que l'utilisateur a un compte
+    this.usersService.findByEmail(createDto.email),
+    
+    // 2. Vérifier s'il y a déjà un rendez-vous confirmé
+    this.rendezvousModel.countDocuments({
+      email: createDto.email.toLowerCase().trim(),
+      status: RENDEZVOUS_STATUS.CONFIRMED,
+    }),
+    
+    // 3. Traiter et valider les données
+    Promise.resolve(this.processAndValidateRendezvousData(createDto))
+  ]);
+
   // VÉRIFICATION CRITIQUE : S'assurer que l'utilisateur a un compte
-  const user = await this.usersService.findByEmail(createDto.email);
   if (!user) {
     this.logger.warn(`Tentative de prise de rendez-vous sans compte: ${maskedEmail}`);
     throw new ForbiddenException("Vous devez avoir un compte pour prendre un rendez-vous. Veuillez vous inscrire d'abord.");
@@ -173,21 +186,12 @@ export class RendezvousService {
     }
   }
 
-  // Vérifier s'il y a déjà un rendez-vous confirmé pour cet email
-  const confirmedCount = await this.rendezvousModel.countDocuments({
-    email: createDto.email.toLowerCase().trim(),
-    status: RENDEZVOUS_STATUS.CONFIRMED,
-  });
-
   this.logger.log(`Nombre de rendez-vous confirmés pour ${maskedEmail}: ${confirmedCount}`);
 
   if (confirmedCount >= 1) {
     this.logger.warn(`Tentative de création d'un deuxième rendez-vous pour: ${maskedEmail}`);
     throw new BadRequestException("Vous avez déjà un rendez-vous confirmé");
   }
-
-  // Traitement des champs "Autre" et validation
-  const processedData = this.processAndValidateRendezvousData(createDto);
 
   // Validation spécifique pour les champs "Autre"
   if (processedData.destination === 'Autre' && (!processedData.destinationAutre || processedData.destinationAutre.trim() === '')) {
@@ -200,22 +204,22 @@ export class RendezvousService {
     throw new BadRequestException('La filière "Autre" nécessite une précision');
   }
 
-  // Vérifier la disponibilité
-  const isAvailable = await this.isSlotAvailable(
-    processedData.date,
-    processedData.time,
-  );
+  // OPTIMISATION: Exécuter les vérifications de disponibilité en parallèle
+  const [isAvailable, dayCount] = await Promise.all([
+    // Vérifier la disponibilité du créneau
+    this.isSlotAvailable(processedData.date, processedData.time),
+    
+    // Vérifier le nombre maximum de créneaux par jour
+    this.rendezvousModel.countDocuments({
+      date: processedData.date,
+      status: { $ne: RENDEZVOUS_STATUS.CANCELLED },
+    })
+  ]);
   
   if (!isAvailable) {
     this.logger.warn('Créneau non disponible');
     throw new BadRequestException("Ce créneau horaire n'est pas disponible");
   }
-
-  // Vérifier le nombre maximum de créneaux par jour
-  const dayCount = await this.rendezvousModel.countDocuments({
-    date: processedData.date,
-    status: { $ne: RENDEZVOUS_STATUS.CANCELLED },
-  });
 
   if (dayCount >= MAX_SLOTS_PER_DAY) {
     this.logger.warn('Date complète');
@@ -229,33 +233,6 @@ export class RendezvousService {
   
   // Validation de l'heure
   this.validateTimeSlot(processedData.time);
-
-  // Préparer les données pour l'enregistrement
-  const rendezvousData: any = {
-    firstName: processedData.firstName.trim(),
-    lastName: processedData.lastName.trim(),
-    email: processedData.email.toLowerCase().trim(),
-    telephone: processedData.telephone.trim(),
-    niveauEtude: processedData.niveauEtude,
-    date: processedData.date,
-    time: processedData.time,
-    status: RENDEZVOUS_STATUS.CONFIRMED, // Toujours confirmé automatiquement
-  };
-
-  // Gestion des champs "Autre" pour la base de données
-  if (processedData.destination === 'Autre' && processedData.destinationAutre) {
-    rendezvousData.destination = 'Autre';
-    rendezvousData.destinationAutre = processedData.destinationAutre.trim();
-  } else {
-    rendezvousData.destination = processedData.destination;
-  }
-
-  if (processedData.filiere === 'Autre' && processedData.filiereAutre) {
-    rendezvousData.filiere = 'Autre';
-    rendezvousData.filiereAutre = processedData.filiereAutre.trim();
-  } else {
-    rendezvousData.filiere = processedData.filiere;
-  }
 
   // Vérifier que la date n'est pas passée
   const today = new Date();
@@ -283,6 +260,35 @@ export class RendezvousService {
     }
   }
 
+  // Préparer les données pour l'enregistrement
+  const rendezvousData: any = {
+    firstName: processedData.firstName.trim(),
+    lastName: processedData.lastName.trim(),
+    email: processedData.email.toLowerCase().trim(),
+    telephone: processedData.telephone.trim(),
+    niveauEtude: processedData.niveauEtude,
+    date: processedData.date,
+    time: processedData.time,
+    status: RENDEZVOUS_STATUS.CONFIRMED, // Toujours confirmé automatiquement
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  };
+
+  // Gestion des champs "Autre" pour la base de données
+  if (processedData.destination === 'Autre' && processedData.destinationAutre) {
+    rendezvousData.destination = 'Autre';
+    rendezvousData.destinationAutre = processedData.destinationAutre.trim();
+  } else {
+    rendezvousData.destination = processedData.destination;
+  }
+
+  if (processedData.filiere === 'Autre' && processedData.filiereAutre) {
+    rendezvousData.filiere = 'Autre';
+    rendezvousData.filiereAutre = processedData.filiereAutre.trim();
+  } else {
+    rendezvousData.filiere = processedData.filiere;
+  }
+
   // LOG des données finales avant création
   this.logger.log('Données finales du rendez-vous:', {
     email: this.maskEmail(rendezvousData.email),
@@ -300,13 +306,10 @@ export class RendezvousService {
   this.logger.log(`Rendez-vous créé avec ID: ${saved._id} pour ${maskedEmail}`);
   this.logger.log(`Détails: ${saved.firstName} ${saved.lastName}, ${saved.date} à ${saved.time}, statut: ${saved.status}`);
 
-  // Notification
-  try {
-    await this.sendNotification(saved, "confirmation");
-    this.logger.log(`Notification envoyée pour ${maskedEmail}`);
-  } catch (notifError) {
+  // OPTIMISATION: Envoyer la notification sans attendre la réponse
+  this.sendNotification(saved, "confirmation").catch(notifError => {
     this.logger.error('Erreur notification, mais rendez-vous créé:', notifError);
-  }
+  });
 
   return saved;
 }

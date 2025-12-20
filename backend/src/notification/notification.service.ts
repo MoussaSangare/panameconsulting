@@ -12,36 +12,40 @@ export class NotificationService {
   private emailServiceAvailable: boolean = false;
   private fromEmail: string = '';
   private appName: string = 'Paname Consulting';
-  private frontendUrl: string = 'https://panameconsulting.vercel.app';
+  private frontendUrl: string = '';
 
   constructor(private configService: ConfigService) {
+    // CORRECTION: Récupérer l'URL du frontend depuis les variables d'environnement
+    this.frontendUrl = this.configService.get<string>('FRONTEND_URL') || 'https://panameconsulting.vercel.app';
     this.initializeEmailService();
   }
 
   private initializeEmailService() {
+    // CORRECTION: Utiliser EMAIL_PASS, pas EMAIL_PASSWORD
     const emailUser = this.configService.get<string>('EMAIL_USER');
     const emailPass = this.configService.get<string>('EMAIL_PASS');
     
     if (emailUser && emailPass) {
       this.emailServiceAvailable = true;
       this.fromEmail = `"Paname Consulting" <${emailUser}>`;
-      this.frontendUrl = this.configService.get<string>('FRONTEND_URL') || this.frontendUrl;
       
-      // Configuration SMTP simplifiée
+      // CORRECTION: Configuration cohérente avec mail.service.ts
       this.transporter = nodemailer.createTransport({
         host: this.configService.get<string>('EMAIL_HOST') || 'smtp.gmail.com',
         port: parseInt(this.configService.get<string>('EMAIL_PORT') || '587'),
-        secure: this.configService.get<string>('EMAIL_SECURE') === 'false',
+        secure: this.configService.get<string>('EMAIL_SECURE') === 'true', // CORRIGÉ: 'true'
         auth: {
           user: emailUser,
-          pass: emailPass,
+          pass: emailPass, 
         },
-        tls: {
-          rejectUnauthorized: this.configService.get<string>('NODE_ENV') === 'production',
-        },
+        // OPTIMISATION: Configuration de performance
+        pool: true,
+        maxConnections: 3,
+        socketTimeout: 10000,
+        connectionTimeout: 10000,
       });
 
-      // Vérification de la connexion
+      // Vérification asynchrone sans bloquer l'initialisation
       this.transporter.verify()
         .then(() => this.logger.log('Service email initialisé avec succès'))
         .catch(err => {
@@ -65,13 +69,19 @@ export class NotificationService {
     }
 
     try {
-      await this.transporter.sendMail({
+      // OPTIMISATION: Timeout pour éviter les blocages
+      const sendPromise = this.transporter.sendMail({
         from: this.fromEmail,
         to: to,
         subject: subject,
         html: html
       });
       
+      const timeoutPromise = new Promise<never>((_, reject) => 
+        setTimeout(() => reject(new Error('Email sending timeout')), 10000)
+      );
+      
+      await Promise.race([sendPromise, timeoutPromise]);
       this.logger.log(`Email envoyé (${context}) à: ${this.maskEmail(to)}`);
       return true;
       
@@ -475,5 +485,4 @@ export class NotificationService {
         : 'Service email indisponible - vérifiez EMAIL_USER et EMAIL_PASS'
     };
   }
-
 }

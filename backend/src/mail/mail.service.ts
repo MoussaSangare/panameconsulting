@@ -17,7 +17,7 @@ export class MailService {
   private readonly supportEmail: string;
 
   constructor(private readonly configService: ConfigService) {
-    // Initialisation des propriétés
+    // CORRECTION: Utiliser les bonnes variables d'environnement
     const emailUser = this.configService.get('EMAIL_USER');
     const emailPass = this.configService.get('EMAIL_PASS');
     
@@ -34,9 +34,10 @@ export class MailService {
       return;
     }
 
+    // CORRECTION: Variables correctes
     const host = this.configService.get<string>('EMAIL_HOST') || 'smtp.gmail.com';
     const port = parseInt(this.configService.get<string>('EMAIL_PORT') || '587');
-    const secure = this.configService.get<string>('EMAIL_SECURE') === 'false';
+    const secure = this.configService.get<string>('EMAIL_SECURE') === 'true'; // CORRIGÉ: 'true'
 
     this.transporter = nodemailer.createTransport({
       host,
@@ -44,11 +45,13 @@ export class MailService {
       secure,
       auth: {
         user: this.configService.get('EMAIL_USER'),
-        pass: this.configService.get('EMAIL_PASS'),
+        pass: this.configService.get('EMAIL_PASS'), 
       },
-      tls: {
-        rejectUnauthorized: this.configService.get<string>('NODE_ENV') === 'production',
-      },
+      // OPTIMISATION: Configuration pour éviter les timeout
+      pool: true,
+      maxConnections: 5,
+      socketTimeout: 10000,
+      connectionTimeout: 10000,
     });
 
     this.logger.log(`MailService transport initialisé (host=${host}, port=${port}, secure=${secure})`);
@@ -60,15 +63,14 @@ export class MailService {
       return false;
     }
 
-    return this.transporter.verify()
-      .then(() => {
-        this.logger.log('Email service is connected');
-        return true;
-      })
-      .catch((error) => {
-        this.logger.error('Email service is not connected', error);
-        return false;
-      });
+    try {
+      await this.transporter.verify();
+      this.logger.log('Email service is connected');
+      return true;
+    } catch (error) {
+      this.logger.error('Email service is not connected', error);
+      return false;
+    }
   }
 
   async sendEmail(to: string, template: EmailTemplate, context?: Record<string, any>): Promise<boolean> {
@@ -86,7 +88,13 @@ export class MailService {
     };
 
     try {
-      await this.transporter.sendMail(mailOptions);
+      // OPTIMISATION: Timeout pour éviter les blocages
+      const sendPromise = this.transporter.sendMail(mailOptions);
+      const timeoutPromise = new Promise<never>((_, reject) => 
+        setTimeout(() => reject(new Error('Email sending timeout')), 10000)
+      );
+      
+      await Promise.race([sendPromise, timeoutPromise]);
       this.logger.debug(`Email envoyé à: ${this.maskEmail(to)}`);
       return true;
     } catch (error) {
@@ -159,7 +167,7 @@ export class MailService {
   }
 
   private getWelcomeTemplate(firstName: string): EmailTemplate {
-    const appUrl = this.configService.get('APP_URL') || this.configService.get('FRONTEND_URL') || '#';
+    const appUrl = this.configService.get('FRONTEND_URL') || '#';
     
     return {
       subject: 'Bienvenue chez Paname Consulting',
