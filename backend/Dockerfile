@@ -1,6 +1,9 @@
 # ============ ÉTAPE DE BUILD ============
 FROM node:18-alpine AS builder
 
+# 1. Installez PNPM 19.0.4 via npm
+RUN npm install -g pnpm@9.15.4
+
 RUN pnpm install -g corepack@latest
 
 RUN corepack prepare pnpm@latest --activate
@@ -23,6 +26,9 @@ FROM node:18-alpine AS production
 ARG NODE_ENV=production
 ENV NODE_ENV=${NODE_ENV}
 ENV PORT=10000
+
+# 1. Installez PNPM 19.0.4 via npm
+RUN npm install -g pnpm@9.15.4
 
 RUN pnpm install -g corepack@latest
 RUN corepack prepare pnpm@latest --activate
