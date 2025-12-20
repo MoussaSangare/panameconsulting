@@ -7,7 +7,7 @@ import {
 } from "@nestjs/common";
 import { InjectModel } from "@nestjs/mongoose";
 import * as bcrypt from 'bcryptjs';
-import { Model, Types } from "mongoose";
+import { Model } from "mongoose";
 import { RegisterDto } from "../auth/dto/register.dto";
 import { UpdatePasswordDto } from "../auth/dto/update-password.dto";
 import { UpdateUserDto } from "../auth/dto/update-user.dto";
@@ -67,20 +67,24 @@ export class UsersService {
     return null;
   }
 
-  private clearUserCache(userId?: string): void {
-    if (userId) {
-      for (const key of this.cache.keys()) {
-        if (key.includes(userId)) {
-          this.cache.delete(key);
-        }
-      }
-    }
+ private clearUserCache(userId?: string): void {
+  if (userId) {
+    const patterns = [
+      `findOne:${userId}`,
+      `exists:${userId}`,
+      `checkUserAccess:${userId}`,
+      `findByEmail:*`, // Email pourrait changer
+    ];
+    
     for (const key of this.cache.keys()) {
-      if (key.startsWith("findAll:") || key.startsWith("getStats:")) {
+      if (patterns.some(pattern => 
+        pattern.includes('*') ? key.startsWith(pattern.replace('*', '')) : key === pattern
+      )) {
         this.cache.delete(key);
       }
     }
   }
+}
 
   async exists(userId: string): Promise<boolean> {
     const cacheKey = this.getCacheKey("exists", userId);

@@ -10,7 +10,7 @@ import { InjectModel } from "@nestjs/mongoose";
 import * as bcrypt from 'bcryptjs';
 import * as crypto from "crypto";
 import { Model, Types } from "mongoose";
-import { v4 as uuidv4 } from "uuid";
+import { randomUUID } from "crypto";
 import { MailService } from "../mail/mail.service";
 import { ResetToken } from "../schemas/reset-token.schema";
 import { Session } from "../schemas/session.schema";
@@ -155,9 +155,8 @@ export class AuthService {
 
     const newUser = await this.usersService.create(registerDto);
     const userId = this.convertObjectIdToString(newUser._id);
-
-    const jtiAccess = uuidv4();
-    const jtiRefresh = uuidv4();
+    const jtiAccess = randomUUID();
+    const jtiRefresh = randomUUID();
 
     const access_token = this.jwtService.sign(
       {
@@ -232,9 +231,8 @@ export class AuthService {
 }
 
   async login(user: User) {
-    const jtiAccess = uuidv4();
-    const jtiRefresh = uuidv4();
-
+  const jtiAccess = randomUUID();
+const jtiRefresh = randomUUID();
     const userId = this.convertObjectIdToString(user._id);
 
     const accessPayload = {
@@ -322,8 +320,8 @@ export class AuthService {
 
       const userId = this.convertObjectIdToString(user._id);
 
-      const jtiAccess = uuidv4();
-      const jtiRefresh = uuidv4();
+     const jtiAccess = randomUUID();
+const jtiRefresh = randomUUID();
 
       const new_access_token = this.jwtService.sign(
         {
