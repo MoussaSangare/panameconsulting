@@ -403,11 +403,7 @@ async function bootstrap() {
         },
         standardHeaders: true,
         legacyHeaders: false,
-        skipSuccessfulRequests: false,
-       keyGenerator: (req: { ip: any; socket: { remoteAddress: any; }; }) => {
-      // Utilise l'adresse IP par défaut
-      return req.ip || req.socket.remoteAddress || 'unknown';
-    },
+        skipSuccessfulRequests: false
       }),
     );
 
