@@ -15,7 +15,6 @@ import * as compression from "compression";
 import * as cookieParser from "cookie-parser";
 import { join } from "path";
 import { AppModule } from "./app.module";
-import rateLimit from 'express-rate-limit';
 
 // 📦 ÉTENDRE L'INTERFACE REQUEST D'EXPRESS
 declare global {
@@ -102,6 +101,9 @@ async function bootstrap() {
       bufferLogs: true,
     },
   );
+
+  app.set('trust proxy', 1); 
+
 
   // 🔐 CONFIGURATION DE SÉCURITÉ HELMET - APPLIQUÉE AVANT TOUTES LES ROUTES
   app.use(
