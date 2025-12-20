@@ -37,22 +37,24 @@ COPY backend/package.json backend/pnpm-lock.yaml* ./
 # Installer uniquement les dépendances de production
 RUN pnpm install --prod --frozen-lockfile
 
-# Créer l'utilisateur non-root
-RUN addgroup -g 1001 -S nodejs && \
-    adduser -S node -u 1001 && \
-    chown -R node:nodejs /app
+# L'utilisateur 'node' existe déjà dans l'image Node.js alpine
+# On ajuste juste les permissions
 
-# Créer les dossiers nécessaires
-RUN mkdir -p /app/uploads /app/logs && \
-    chown -R node:nodejs /app/uploads /app/logs
+# Créer les dossiers nécessaires AVANT de changer les permissions
+RUN mkdir -p /app/uploads /app/logs
 
-# Basculer vers l'utilisateur non-root
+# Définir les permissions appropriées
+RUN chown -R node:node /app && \
+    chmod -R 755 /app && \
+    chmod -R 775 /app/uploads /app/logs
+
+# Basculer vers l'utilisateur non-root existant
 USER node
 
 # Exposer le port
 EXPOSE 10000
 
-# Variable d'environnement pour le port
+# Variables d'environnement
 ENV PORT=10000
 ENV NODE_ENV=production
 
