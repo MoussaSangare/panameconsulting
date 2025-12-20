@@ -15,6 +15,7 @@ import * as compression from "compression";
 import * as cookieParser from "cookie-parser";
 import { join } from "path";
 import { AppModule } from "./app.module";
+import rateLimit from 'express-rate-limit';
 
 // 📦 ÉTENDRE L'INTERFACE REQUEST D'EXPRESS
 declare global {
@@ -403,9 +404,10 @@ async function bootstrap() {
         standardHeaders: true,
         legacyHeaders: false,
         skipSuccessfulRequests: false,
-        keyGenerator: (req: { ip: any; headers: { [x: string]: any; }; }) => {
-          return req.ip || req.headers['x-forwarded-for'] || 'unknown';
-        }
+       keyGenerator: (req) => {
+      // Utilise l'adresse IP par défaut
+      return req.ip || req.socket.remoteAddress || 'unknown';
+    },
       }),
     );
 
