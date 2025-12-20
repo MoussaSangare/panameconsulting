@@ -396,7 +396,7 @@ async function bootstrap() {
     app.use(
       rateLimit({
         windowMs: 30 * 60 * 1000,
-        max: 10000,
+        max: 1000,
         message: {
           status: 429,
           message: "Trop de requêtes, veuillez réessayer plus tard.",
