@@ -42,4 +42,4 @@ USER node
 
 EXPOSE $PORT
 
-CMD ["start", "dist/main.js"]
+CMD ["pnpm", "start"]
