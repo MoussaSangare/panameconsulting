@@ -6,7 +6,7 @@
   "type": "commonjs",
   "scripts": {
     "build": "nest build",
-    "start": "node dist/main.js",
+    "start": "nest start",
     "dev": "nest start --watch --debug --verbose"
   },
   "keywords": [
