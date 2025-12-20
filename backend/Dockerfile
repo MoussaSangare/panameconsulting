@@ -16,7 +16,7 @@ RUN pnpm install --frozen-lockfile
 COPY backend/ ./
 
 # Construction
-RUN pnpm build --verbose
+RUN pnpm build 
 
 # Pour vérifier que le fichier main.js est bien généré
 RUN ls -la dist/ && echo "=== Fichier main.js existe ? ===" && test -f dist/main.js && echo "OUI" || echo "NON"
