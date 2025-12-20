@@ -1,40 +1,43 @@
 # ============ ÉTAPE DE BUILD ============
 FROM node:18-alpine AS builder
 
-# Installez PNPM directement via npm
-RUN npm install -g pnpm@9.15.4
-
 WORKDIR /app
 
-# Copie de tout le backend
+# Copie des fichiers de dépendances
+COPY backend/package.json backend/pnpm-lock.yaml ./
+
+# Installation de pnpm globalement
+RUN npm install -g pnpm@9.15.4
+
+# Installation des dépendances
+RUN pnpm install --frozen-lockfile
+
+# Copie du code source
 COPY backend/ ./
 
-# Installation avec pnpm
-RUN pnpm install --frozen-lockfile --prefer-offline
-
 # Construction
-RUN sed -i 's/"skipLibCheck": false/"skipLibCheck": true/g' tsconfig.json || true
-RUN pnpm build 
+RUN pnpm build
 
 # ============ ÉTAPE DE PRODUCTION ============
-FROM node:18-alpine AS production
+FROM node:18-alpine
 
 ARG NODE_ENV=production
 ENV NODE_ENV=${NODE_ENV}
 ENV PORT=10000
 
-# Installez PNPM pour la production
-RUN npm install -g pnpm@9.15.4
-
 WORKDIR /app
 
-COPY backend/package.json backend/pnpm-lock.yaml* ./
+# Copie uniquement les fichiers nécessaires pour l'exécution
+COPY backend/package.json ./
 
 # Installation des dépendances de production
-RUN pnpm install --prod --frozen-lockfile --prefer-offline
+# Utilisez npm pour éviter d'installer pnpm en production
+RUN npm install --omit=dev --frozen-lockfile
 
+# Copie des fichiers construits
 COPY --from=builder /app/dist ./dist
 
+# Création des répertoires nécessaires
 RUN mkdir -p /app/uploads /app/logs && \
     chown -R node:node /app
 
@@ -42,4 +45,5 @@ USER node
 
 EXPOSE $PORT
 
-CMD ["pnpm", "start"]
+# Commande corrigée
+CMD ["node", "dist/main.js"]
