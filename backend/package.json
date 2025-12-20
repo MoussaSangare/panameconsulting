@@ -17,7 +17,7 @@
   ],
   "author": "Moussa Sangaré <moussa@example.com>",
   "license": "MIT",
-  "packageManager": "pnpm@8.15.0",
+  "packageManager": "pnpm@9.15.4",
   "dependencies": {
     "@nestjs-modules/mailer": "^2.0.2",
     "@nestjs/cache-manager": "^3.0.1",

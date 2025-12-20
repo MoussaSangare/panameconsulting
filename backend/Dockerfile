@@ -12,7 +12,6 @@ COPY backend/ ./
 
 # Installation
 RUN pnpm install --frozen-lockfile --prefer-offline
-RUN pnpm add @nestjs/common@^11 @nestjs/core@^11 @nestjs/platform-express@^11
 
 # Construction forcée avec configuration modifiée
 RUN sed -i 's/"skipLibCheck": false/"skipLibCheck": true/g' tsconfig.json || true
