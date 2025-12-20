@@ -21,7 +21,6 @@ export class NotificationService {
   }
 
   private initializeEmailService() {
-    // CORRECTION: Utiliser EMAIL_PASS, pas EMAIL_PASSWORD
     const emailUser = this.configService.get<string>('EMAIL_USER');
     const emailPass = this.configService.get<string>('EMAIL_PASS');
     
