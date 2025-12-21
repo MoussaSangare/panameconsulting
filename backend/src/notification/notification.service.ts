@@ -9,50 +9,67 @@ import { Contact } from '../schemas/contact.schema';
 export class NotificationService {
   private readonly logger = new Logger(NotificationService.name);
   private transporter: nodemailer.Transporter;
-  private emailServiceAvailable: boolean = false;
-  private fromEmail: string = '';
+  private readonly isServiceAvailable: boolean;
+  private readonly fromEmail: string;
+  private readonly supportEmail: string;
   private appName: string = 'Paname Consulting';
   private frontendUrl: string = '';
 
   constructor(private configService: ConfigService) {
-    // CORRECTION: Récupérer l'URL du frontend depuis les variables d'environnement
+    // Récupérer les variables d'environnement de la même manière que MailService
+    const emailUser = this.configService.get('EMAIL_USER');
+    const emailPass = this.configService.get('EMAIL_PASS');
+    
+    this.isServiceAvailable = !!(emailUser && emailPass);
+    this.fromEmail = `"Paname Consulting" <${emailUser}>`;
+    this.supportEmail = emailUser;
     this.frontendUrl = this.configService.get<string>('FRONTEND_URL') || 'https://panameconsulting.vercel.app';
-    this.initializeEmailService();
+    
+    this.initializeTransporter();
   }
 
-  private initializeEmailService() {
-    const emailUser = this.configService.get<string>('EMAIL_USER');
-    const emailPass = this.configService.get<string>('EMAIL_PASS');
-    
-    if (emailUser && emailPass) {
-      this.emailServiceAvailable = true;
-      this.fromEmail = `"Paname Consulting" <${emailUser}>`;
-      
-      // CORRECTION: Configuration cohérente avec mail.service.ts
-      this.transporter = nodemailer.createTransport({
-        host: this.configService.get<string>('EMAIL_HOST') || 'smtp.gmail.com',
-        port: parseInt(this.configService.get<string>('EMAIL_PORT') || '587'),
-        secure: this.configService.get<string>('EMAIL_SECURE') === 'true', // CORRIGÉ: 'true'
-        auth: {
-          user: emailUser,
-          pass: emailPass, 
-        },
-        // OPTIMISATION: Configuration de performance
-        pool: true,
-        maxConnections: 3,
-        socketTimeout: 10000,
-        connectionTimeout: 10000,
-      });
+  private initializeTransporter() {
+    if (!this.isServiceAvailable) {
+      this.logger.warn('NotificationService: Service email non configuré - transporter non initialisé');
+      return;
+    }
 
-      // Vérification asynchrone sans bloquer l'initialisation
-      this.transporter.verify()
-        .then(() => this.logger.log('Service email initialisé avec succès'))
-        .catch(err => {
-          this.logger.error('Erreur lors de l\'initialisation du service email:', err.message);
-          this.emailServiceAvailable = false;
-        });
-    } else {
-      this.logger.warn('Service email désactivé - EMAIL_USER ou EMAIL_PASS manquant');
+    // Configuration identique à MailService
+    const host = this.configService.get<string>('EMAIL_HOST') || 'smtp.gmail.com';
+    const port = parseInt(this.configService.get<string>('EMAIL_PORT') || '587');
+    const secure = this.configService.get<string>('EMAIL_SECURE') === 'true';
+
+    this.transporter = nodemailer.createTransport({
+      host,
+      port,
+      secure,
+      auth: {
+        user: this.configService.get('EMAIL_USER'),
+        pass: this.configService.get('EMAIL_PASS'), 
+      },
+      // Configuration pour éviter les timeout (identique à MailService)
+      pool: true,
+      maxConnections: 3, // Un peu moins que MailService car c'est pour les notifications
+      socketTimeout: 10000,
+      connectionTimeout: 10000,
+    });
+
+    this.logger.log(`NotificationService transport initialisé (host=${host}, port=${port}, secure=${secure})`);
+  }
+
+  async checkConnection(): Promise<boolean> {
+    if (!this.isServiceAvailable) {
+      this.logger.warn('NotificationService: Email service is not available');
+      return false;
+    }
+
+    try {
+      await this.transporter.verify();
+      this.logger.log('NotificationService: Email service is connected');
+      return true;
+    } catch (error) {
+      this.logger.error('NotificationService: Email service is not connected', error);
+      return false;
     }
   }
 
@@ -62,30 +79,31 @@ export class NotificationService {
     html: string, 
     context: string
   ): Promise<boolean> {
-    if (!this.emailServiceAvailable) {
-      this.logger.warn(`Notification "${context}" ignorée - service email indisponible`);
+    if (!this.isServiceAvailable) {
+      this.logger.warn(`Notification "${context}" ignorée - service indisponible`);
       return false;
     }
 
+    const mailOptions = {
+      from: this.fromEmail,
+      to: to,
+      replyTo: this.supportEmail,
+      subject: subject,
+      html: html,
+    };
+
     try {
-      // OPTIMISATION: Timeout pour éviter les blocages
-      const sendPromise = this.transporter.sendMail({
-        from: this.fromEmail,
-        to: to,
-        subject: subject,
-        html: html
-      });
-      
+      // OPTIMISATION: Timeout pour éviter les blocages (identique à MailService)
+      const sendPromise = this.transporter.sendMail(mailOptions);
       const timeoutPromise = new Promise<never>((_, reject) => 
         setTimeout(() => reject(new Error('Email sending timeout')), 10000)
       );
       
       await Promise.race([sendPromise, timeoutPromise]);
-      this.logger.log(`Email envoyé (${context}) à: ${this.maskEmail(to)}`);
+      this.logger.log(`Notification envoyée (${context}) à: ${this.maskEmail(to)}`);
       return true;
-      
     } catch (error) {
-      this.logger.error(`Erreur lors de l'envoi "${context}": ${error.message}`);
+      this.logger.error(`Erreur envoi notification "${context}": ${error.message}`);
       return false;
     }
   }
@@ -476,12 +494,10 @@ export class NotificationService {
     return `${maskedName}@${domain}`;
   }
 
-  getEmailStatus(): { available: boolean; message: string } {
+  getServiceStatus(): { available: boolean; reason?: string } {
     return {
-      available: this.emailServiceAvailable,
-      message: this.emailServiceAvailable 
-        ? 'Service email disponible' 
-        : 'Service email indisponible - vérifiez EMAIL_USER et EMAIL_PASS'
+      available: this.isServiceAvailable,
+      reason: this.isServiceAvailable ? undefined : 'Service email non configuré ou indisponible'
     };
   }
 }
