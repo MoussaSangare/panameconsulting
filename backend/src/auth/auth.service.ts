@@ -132,17 +132,23 @@ export class AuthService {
  async register(registerDto: RegisterDto) {
   try {
     const adminEmail = process.env.EMAIL_USER;
+    
+    // ✅ LOGIQUE SIMPLIFIÉE : TOUJOURS USER SAUF EMAIL_USER (premier seulement)
     const existingAdmin = await this.usersService.findByRole(UserRole.ADMIN);
     
     if (registerDto.email === adminEmail) {
+      // Email admin spécifique détecté
       if (existingAdmin) {
+        // Admin existe déjà → devient USER
         registerDto.role = UserRole.USER;
         this.logger.warn(`⚠️ Email admin utilisé pour créer un USER (admin existe déjà)`);
       } else {
+        // Premier admin → devient ADMIN
         registerDto.role = UserRole.ADMIN;
         this.logger.log(`✅ Création du SEUL et UNIQUE admin: ${this.maskEmail(adminEmail)}`);
       }
     } else {
+      // Tous les autres emails sont USER
       registerDto.role = UserRole.USER;
       this.logger.log(`✅ Création d'utilisateur standard: ${this.maskEmail(registerDto.email)}`);
     }
@@ -152,51 +158,53 @@ export class AuthService {
     const jtiAccess = randomUUID();
     const jtiRefresh = randomUUID();
 
-    // ✅ CALCULER LES EXPIRATIONS UNE FOIS
-    const accessTokenExpirationMs = AuthConstants.ACCESS_TOKEN_EXPIRATION_SECONDS * 1000;
-    const refreshTokenExpirationMs = AuthConstants.REFRESH_TOKEN_EXPIRATION_SECONDS * 1000;
-    
-    const sessionExpiresAt = new Date(Date.now() + accessTokenExpirationMs);
-    const refreshExpiresAt = new Date(Date.now() + refreshTokenExpirationMs);
+    // ✅ CRÉER UN PAYLOAD PROPRE SANS PROPRIÉTÉS D'EXPIRATION
+    const accessPayload = {
+      sub: userId,
+      email: newUser.email,
+      role: newUser.role,
+      jti: jtiAccess,
+      tokenType: "access",
+    };
 
-    // ✅ CRÉER LES TOKENS AVEC LES BONNES DURÉES
-    const access_token = this.jwtService.sign(
-      {
-        sub: userId,
-        email: newUser.email,
-        role: newUser.role,
-        jti: jtiAccess,
-        tokenType: "access",
-        exp: Math.floor(sessionExpiresAt.getTime() / 1000),
-      },
-      {
-        expiresIn: AuthConstants.JWT_EXPIRATION, // '15m'
-      },
+    const refreshPayload = {
+      sub: userId,
+      email: newUser.email,
+      role: newUser.role,
+      jti: jtiRefresh,
+      tokenType: "refresh",
+    };
+
+    // ✅ UTILISER expiresIn UNIQUEMENT DANS LES OPTIONS
+    const access_token = this.jwtService.sign(accessPayload, {
+      expiresIn: AuthConstants.JWT_EXPIRATION,
+    });
+
+    const refresh_token = this.jwtService.sign(refreshPayload, {
+      expiresIn: AuthConstants.REFRESH_TOKEN_EXPIRATION,
+      secret: process.env.JWT_REFRESH_SECRET,
+    });
+
+    await this.sessionService.create(
+      userId,
+      access_token,
+      new Date(Date.now() + AuthConstants.ACCESS_TOKEN_EXPIRATION_SECONDS * 1000),
     );
-
-    const refresh_token = this.jwtService.sign(
-      {
-        sub: userId,
-        email: newUser.email,
-        role: newUser.role,
-        jti: jtiRefresh,
-        tokenType: "refresh",
-        exp: Math.floor(refreshExpiresAt.getTime() / 1000),
-      },
-      {
-        expiresIn: AuthConstants.REFRESH_TOKEN_EXPIRATION, // '30m'
-        secret: process.env.JWT_REFRESH_SECRET,
-      },
-    );
-
-    // ✅ CRÉER LA SESSION AVEC LA MÊME EXPIRATION
-    await this.sessionService.create(userId, access_token, sessionExpiresAt);
 
     await this.refreshTokenService.deactivateAllForUser(userId);
-    await this.refreshTokenService.create(userId, refresh_token, refreshExpiresAt);
+    
+    // ✅ CALCULER L'EXPIRATION SANS DÉCODER LE TOKEN (évite le conflit)
+    const refreshExp = new Date(
+      Date.now() + AuthConstants.REFRESH_TOKEN_EXPIRATION_SECONDS * 1000,
+    );
+    
+    await this.refreshTokenService.create(userId, refresh_token, refreshExp);
 
     try {
-      await this.mailService.sendWelcomeEmail(newUser.email, newUser.firstName);
+      await this.mailService.sendWelcomeEmail(
+        newUser.email,
+        newUser.firstName,
+      );
     } catch (emailError) {
       this.logger.warn(`Échec envoi email bienvenue: ${emailError.message}`);
     }
