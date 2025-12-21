@@ -16,10 +16,10 @@ export class MailService {
   private readonly fromEmail: string;
   private readonly supportEmail: string;
 
-  constructor() {
+  constructor(private configService: ConfigService) {
     // Initialisation des propriétés
-    const emailUser = process.env.EMAIL_USER;
-    const emailPass = process.env.EMAIL_PASS;
+    const emailUser = this.configService.get<string>('EMAIL_USER') || process.env.EMAIL_USER;
+    const emailPass = this.configService.get<string>('EMAIL_PASS') || process.env.EMAIL_PASS;
     this.isServiceAvailable = !!(emailUser && emailPass);
     this.fromEmail = `"Paname Consulting" <${emailUser}>`;
     this.supportEmail = emailUser;
@@ -30,38 +30,55 @@ export class MailService {
   private initializeTransporter() {
     if (!this.isServiceAvailable) {
       this.logger.warn('Service email non configuré - transporter non initialisé');
+      this.logger.warn(`EMAIL_USER: ${process.env.EMAIL_USER ? 'défini' : 'indéfini'}`);
       return;
     }
 
-    const emailHost = process.env.EMAIL_HOST;
-    const emailPort = parseInt(process.env.EMAIL_PORT);
-    const emailSecure = process.env.EMAIL_SECURE?.toLowerCase() === 'true';
+    const emailUser = this.configService.get<string>('EMAIL_USER') || process.env.EMAIL_USER;
+    const emailPass = this.configService.get<string>('EMAIL_PASS') || process.env.EMAIL_PASS;
+    const emailHost = this.configService.get<string>('EMAIL_HOST') || process.env.EMAIL_HOST || 'smtp.gmail.com';
+    const emailPort = parseInt(this.configService.get<string>('EMAIL_PORT') || process.env.EMAIL_PORT || '587');
+    const emailSecure = (this.configService.get<string>('EMAIL_SECURE') || process.env.EMAIL_SECURE || 'false').toLowerCase() === 'true';
 
-    // Si on a un host spécifique, on utilise la configuration SMTP
-    if (emailHost) {
-      const transportConfig = {
-        host: emailHost,
-        port: emailPort || 587, // Default port if not specified
-        secure: emailSecure, // Now a boolean
-        auth: {
-          user: process.env.EMAIL_USER,
-          pass: process.env.EMAIL_PASS,
-        },
-        tls: {
-          rejectUnauthorized: process.env.NODE_ENV === 'production',
-        },
+    // Configuration avec timeout
+    const transportConfig: any = {
+      host: emailHost,
+      port: emailPort,
+      secure: emailSecure,
+      auth: {
+        user: emailUser,
+        pass: emailPass,
+      },
+      // Options pour éviter les timeouts
+      connectionTimeout: 30000, // 30 secondes
+      greetingTimeout: 30000,
+      socketTimeout: 30000,
+      logger: process.env.NODE_ENV !== 'production',
+      debug: process.env.NODE_ENV !== 'production',
+    };
+
+    // Configuration TLS
+    if (process.env.NODE_ENV === 'production') {
+      transportConfig.tls = {
+        rejectUnauthorized: true,
       };
-      
-      this.transporter = nodemailer.createTransport(transportConfig);
-    } else {
-      // Sinon on utilise un service prédéfini
-      this.transporter = nodemailer.createTransport({
-        service: 'gmail', 
-        auth: {
-          user: process.env.EMAIL_USER,
-          pass: process.env.EMAIL_PASS,
-        },
-      });
+    }
+
+    this.transporter = nodemailer.createTransport(transportConfig);
+    
+    // Test de la connexion
+    this.testConnection();
+  }
+
+  private async testConnection(): Promise<void> {
+    try {
+      await this.transporter.verify();
+      this.logger.log('✅ Connexion SMTP établie avec succès');
+    } catch (error) {
+      this.logger.error(`❌ Échec de la connexion SMTP: ${error.message}`);
+      if (error.code) {
+        this.logger.error(`Code d'erreur: ${error.code}`);
+      }
     }
   }
 
@@ -73,11 +90,11 @@ export class MailService {
 
     return this.transporter.verify()
       .then(() => {
-        this.logger.log('Email service is connected');
+        this.logger.log('✅ Email service is connected');
         return true;
       })
       .catch((error) => {
-        this.logger.error('Email service is not connected', error);
+        this.logger.error(`❌ Email service is not connected: ${error.message}`);
         return false;
       });
   }
@@ -98,10 +115,13 @@ export class MailService {
 
     try {
       await this.transporter.sendMail(mailOptions);
-      this.logger.debug(`Email envoyé à: ${this.maskEmail(to)}`);
+      this.logger.log(`✅ Email envoyé à: ${this.maskEmail(to)}`);
       return true;
     } catch (error) {
-      this.logger.error(`Erreur envoi email: ${error.message}`);
+      this.logger.error(`❌ Erreur envoi email: ${error.message}`);
+      if (error.responseCode) {
+        this.logger.error(`Code réponse SMTP: ${error.responseCode}`);
+      }
       return false;
     }
   }
@@ -111,7 +131,9 @@ export class MailService {
     const success = await this.sendEmail(email, template);
     
     if (success) {
-      this.logger.log(`Email de réinitialisation envoyé à: ${this.maskEmail(email)}`);
+      this.logger.log(`✅ Email de réinitialisation envoyé à: ${this.maskEmail(email)}`);
+    } else {
+      this.logger.error(`❌ Échec d'envoi d'email de réinitialisation à: ${this.maskEmail(email)}`);
     }
   }
 
@@ -120,7 +142,9 @@ export class MailService {
     const success = await this.sendEmail(email, template);
     
     if (success) {
-      this.logger.log(`Email de bienvenue envoyé à: ${this.maskEmail(email)}`);
+      this.logger.log(`✅ Email de bienvenue envoyé à: ${this.maskEmail(email)}`);
+    } else {
+      this.logger.error(`❌ Échec d'envoi d'email de bienvenue à: ${this.maskEmail(email)}`);
     }
   }
 
@@ -241,9 +265,12 @@ export class MailService {
   }
 
   getServiceStatus(): { available: boolean; reason?: string } {
+    const emailUser = this.configService.get<string>('EMAIL_USER') || process.env.EMAIL_USER;
+    const emailPass = this.configService.get<string>('EMAIL_PASS') || process.env.EMAIL_PASS;
+    
     return {
       available: this.isServiceAvailable,
-      reason: this.isServiceAvailable ? undefined : 'Service email non configuré ou indisponible'
+      reason: this.isServiceAvailable ? undefined : `Service email non configuré. EMAIL_USER: ${emailUser ? 'défini' : 'indéfini'}, EMAIL_PASS: ${emailPass ? 'défini' : 'indéfini'}`
     };
   }
 }
