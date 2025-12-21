@@ -1,13 +1,13 @@
 services:
   backend:
-    container_name: backend
+    container_name: panameconsultingbackend
     build:
       context: ./backend
       dockerfile: Dockerfile
       args:
         NODE_ENV: production
     
-    image: backend:latest
+    image: panameconsulting:latest
     
     # Ports exposés (host:container)
     ports:
@@ -27,8 +27,9 @@ services:
       - EMAIL_USER=${EMAIL_USER}
       - EMAIL_PASS=${EMAIL_PASS}
       - MONGODB_URI=${MONGODB_URI}
+      # Variables pour le développement local (simulent Railway)
       - RAILWAY_STATIC_URL=https://panameconsulting.up.railway.app
-      - FRONTEND_URL=http://panameconsulting.vercel.app
+      - FRONTEND_URL=http://panameconsulting.vercerl.app
       
       
     
@@ -64,6 +65,9 @@ services:
       # Mount des dossiers critiques
       - ./uploads:/app/uploads
       - ./logs:/app/logs
+      
+      # Volume pour les node_modules (évite les conflits avec l'hôte)
+      - node_modules:/app/node_modules
 
 # Déclaration des ressources partagées
 volumes:
