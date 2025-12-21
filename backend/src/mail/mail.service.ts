@@ -7,16 +7,15 @@ export class MailService {
   private readonly logger = new Logger(MailService.name);
   private transporter: nodemailer.Transporter;
   private readonly fromEmail: string;
+  private readonly appName = 'Paname Consulting';
 
   constructor(private readonly configService: ConfigService) {
-    // Configuration minimale
     const emailUser = this.configService.get('EMAIL_USER');
-    this.fromEmail = `"Paname Consulting" <${emailUser}>`;
+    this.fromEmail = `"${this.appName}" <${emailUser}>`;
+    // Pas d'initialisation automatique
   }
 
-  // Méthode pour obtenir le transporteur (lazy loading)
   private async getTransporter(): Promise<nodemailer.Transporter | null> {
-    // Si déjà initialisé, le retourner
     if (this.transporter) {
       return this.transporter;
     }
@@ -24,35 +23,31 @@ export class MailService {
     const emailUser = this.configService.get('EMAIL_USER');
     const emailPass = this.configService.get('EMAIL_PASS');
 
-    // Vérifier si les identifiants sont configurés
     if (!emailUser || !emailPass) {
-      this.logger.warn('Identifiants email non configurés');
+      this.logger.warn('Email non configuré - service désactivé');
       return null;
     }
 
     try {
-      // Configuration simplifiée pour Gmail
       this.transporter = nodemailer.createTransport({
         service: 'gmail',
         auth: {
           user: emailUser,
           pass: emailPass,
         },
-        // Timeouts courts pour éviter les blocages
-        connectionTimeout: 3000, // 3 secondes
+        connectionTimeout: 3000,
         greetingTimeout: 3000,
         socketTimeout: 5000,
       });
 
-      this.logger.log(`✅ Service email initialisé pour ${this.maskEmail(emailUser)}`);
+      this.logger.log(`Service email initialisé pour ${this.maskEmail(emailUser)}`);
       return this.transporter;
     } catch (error) {
-      this.logger.error(`❌ Impossible d'initialiser le service email: ${error.message}`);
+      this.logger.error(`Erreur initialisation email: ${error.message}`);
       return null;
     }
   }
 
-  // Méthode générique pour envoyer un email
   async sendEmail(to: string, subject: string, html: string): Promise<boolean> {
     const transporter = await this.getTransporter();
     if (!transporter) {
@@ -69,12 +64,12 @@ export class MailService {
 
     try {
       await transporter.sendMail(mailOptions);
-      this.logger.debug(`📧 Email envoyé à: ${this.maskEmail(to)}`);
+      this.logger.debug(`Email envoyé à: ${this.maskEmail(to)}`);
       return true;
     } catch (error) {
-      this.logger.error(`❌ Erreur lors de l'envoi à ${this.maskEmail(to)}: ${error.message}`);
+      this.logger.error(`Erreur envoi email à ${this.maskEmail(to)}: ${error.message}`);
       
-      // Si erreur de connexion, réinitialiser le transporteur
+      // Réinitialiser le transporteur en cas d'erreur de connexion
       if (error.code === 'ECONNECTION' || error.code === 'ETIMEDOUT') {
         this.logger.warn('Réinitialisation du transporteur...');
         this.transporter = null;
@@ -84,12 +79,11 @@ export class MailService {
     }
   }
 
-  // Email de réinitialisation de mot de passe
   async sendPasswordResetEmail(email: string, resetUrl: string): Promise<void> {
     const subject = 'Réinitialisation de votre mot de passe - Paname Consulting';
     const html = `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-        <h2 style="color: #2563eb;">Paname Consulting</h2>
+        <h2 style="color: #2563eb;">${this.appName}</h2>
         <p>Bonjour,</p>
         <p>Vous avez demandé à réinitialiser votre mot de passe.</p>
         <p>Cliquez sur le lien ci-dessous pour procéder :</p>
@@ -104,40 +98,39 @@ export class MailService {
         </p>
         <p style="margin-top: 30px;">
           Cordialement,<br>
-          L'équipe Paname Consulting
+          L'équipe ${this.appName}
         </p>
       </div>
     `;
 
     const success = await this.sendEmail(email, subject, html);
     if (success) {
-      this.logger.log(`✅ Email de réinitialisation envoyé à: ${this.maskEmail(email)}`);
+      this.logger.log(`Email de réinitialisation envoyé à: ${this.maskEmail(email)}`);
     }
   }
 
-  // Email de bienvenue
   async sendWelcomeEmail(email: string, firstName: string): Promise<void> {
     const subject = 'Bienvenue chez Paname Consulting';
     const html = `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-        <h2 style="color: #2563eb;">Paname Consulting</h2>
+        <h2 style="color: #2563eb;">${this.appName}</h2>
         <p>Bonjour ${firstName},</p>
-        <p>Bienvenue chez Paname Consulting !</p>
-        <p>Votre compte a été créé avec succès. Vous pouvez maintenant accéder à votre espace personnel.</p>
+        <p>Bienvenue chez ${this.appName} !</p>
+        <p>Votre compte a été créé avec succès.</p>
+        <p>Vous pouvez maintenant accéder à votre espace personnel et prendre rendez-vous avec nos conseillers.</p>
         <p style="margin-top: 30px;">
           Cordialement,<br>
-          L'équipe Paname Consulting
+          L'équipe ${this.appName}
         </p>
       </div>
     `;
 
     const success = await this.sendEmail(email, subject, html);
     if (success) {
-      this.logger.log(`✅ Email de bienvenue envoyé à: ${this.maskEmail(email)}`);
+      this.logger.log(`Email de bienvenue envoyé à: ${this.maskEmail(email)}`);
     }
   }
 
-  // Vérification rapide de la connexion
   async checkConnection(): Promise<boolean> {
     const transporter = await this.getTransporter();
     if (!transporter) {
@@ -145,21 +138,19 @@ export class MailService {
     }
 
     try {
-      // Vérification avec timeout
       const timeoutPromise = new Promise((_, reject) => 
         setTimeout(() => reject(new Error('Timeout')), 2000)
       );
       
       await Promise.race([transporter.verify(), timeoutPromise]);
-      this.logger.log('✅ Connexion email vérifiée');
+      this.logger.log('Connexion email vérifiée');
       return true;
     } catch (error) {
-      this.logger.error(`❌ Connexion email échouée: ${error.message}`);
+      this.logger.error(`Connexion email échouée: ${error.message}`);
       return false;
     }
   }
 
-  // Méthode utilitaire pour masquer les emails dans les logs
   private maskEmail(email: string): string {
     if (!email || typeof email !== 'string') return '***';
     if (!email.includes('@')) return '***@***';
@@ -174,7 +165,6 @@ export class MailService {
     return `${maskedName}@${domain}`;
   }
 
-  // Obtention du statut du service
   getStatus(): { available: boolean; configured: boolean; fromEmail: string } {
     const emailUser = this.configService.get('EMAIL_USER');
     const emailPass = this.configService.get('EMAIL_PASS');

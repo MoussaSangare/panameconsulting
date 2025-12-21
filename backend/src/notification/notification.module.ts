@@ -1,10 +1,9 @@
-import { Module } from "@nestjs/common";
-import { NotificationService } from "./notification.service";
-import { ConfigModule } from "@nestjs/config";
+import { Module } from '@nestjs/common';
+import { NotificationService } from './notification.service';
+import { MailService } from '../mail/mail.service'; // Utilisez MailService directement
 
 @Module({
-  imports: [ConfigModule],
-  providers: [NotificationService],
+  providers: [NotificationService, MailService],
   exports: [NotificationService],
 })
 export class NotificationModule {}
