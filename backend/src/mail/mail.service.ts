@@ -11,58 +11,51 @@ interface EmailTemplate {
 export class MailService {
   private readonly logger = new Logger(MailService.name);
   private transporter: nodemailer.Transporter;
-  private readonly isServiceAvailable: boolean;
   private readonly fromEmail: string;
   private readonly supportEmail: string;
 
   constructor(private configService: ConfigService) {
-    // Chargement des variables d'environnement
-    const emailUser = this.configService.get<string>('EMAIL_USER') || process.env.EMAIL_USER;
-    const emailPass = this.configService.get<string>('EMAIL_PASS') || process.env.EMAIL_PASS;
+    // Chargement des variables d'environnement obligatoires
+    const emailUser = this.configService.get<string>('EMAIL_USER');
+    const emailPass = this.configService.get<string>('EMAIL_PASS');
     
-    this.isServiceAvailable = !!(emailUser && emailPass);
     this.fromEmail = `"Paname Consulting" <${emailUser}>`;
     this.supportEmail = emailUser;
     
-    this.initializeTransporter();
+    this.initializeTransporter(emailUser, emailPass);
   }
 
-  private initializeTransporter() {
-    if (!this.isServiceAvailable) {
-      this.logger.warn('Service email non configuré - transporter non initialisé');
-      this.logger.warn(`EMAIL_USER: ${process.env.EMAIL_USER ? 'défini' : 'indéfini'}`);
+  private initializeTransporter(user: string, pass: string) {
+    // Vérification de la configuration minimale
+    if (!user || !pass) {
+      this.logger.error('Configuration SMTP incomplète. Variables manquantes:', {
+        user: user ? '✓' : '✗',
+        pass: pass ? '✗ (masqué)' : '✗',
+      });
+      this.transporter = null;
       return;
     }
 
     // Configuration simplifiée pour Gmail
-    const emailUser = this.configService.get<string>('EMAIL_USER');
-    const emailPass = this.configService.get<string>('EMAIL_PASS');
-    const emailSecure = this.configService.get<string>('EMAIL_SECURE') === 'true';
-
     this.transporter = nodemailer.createTransport({
-      service: 'gmail', // Utilisation directe du service Gmail
-      host: 'smtp.gmail.com',
-      port: emailSecure ? 465 : 587,
-      secure: emailSecure,
+      service: 'gmail', // Utilise la configuration prédéfinie de Gmail
       auth: {
-        user: emailUser,
-        pass: emailPass,
+        user: user,
+        pass: pass,
       },
-      // Configuration optimisée pour Gmail
-      pool: true, // Utilisation du pooling pour les connexions multiples
-      maxConnections: 5,
-      maxMessages: 100,
-      // Timeouts réduits pour éviter les blocages
-      connectionTimeout: 15000, // 15 secondes
-      greetingTimeout: 15000,
-      socketTimeout: 15000,
-      // Important pour Gmail
+      // Timeouts optimisés
+      connectionTimeout: 10000,
+      greetingTimeout: 5000,
+      socketTimeout: 10000,
+      
+      // Configuration TLS/SSL
       tls: {
-        rejectUnauthorized: false, // Désactiver la vérification pour éviter les problèmes de certificat
+        rejectUnauthorized: false, // Désactiver pour éviter les problèmes de certificat
       },
+      
       // Désactiver les logs en production
-      logger: process.env.NODE_ENV !== 'production',
-      debug: process.env.NODE_ENV !== 'production',
+      logger: process.env.NODE_ENV === 'development',
+      debug: process.env.NODE_ENV === 'development',
     });
 
     // Test de connexion asynchrone
@@ -70,42 +63,58 @@ export class MailService {
   }
 
   private async testConnection(): Promise<void> {
-    if (!this.transporter) return;
+    if (!this.transporter) {
+      this.logger.error('Transporter non initialisé - vérifiez les variables d\'environnement');
+      return;
+    }
 
     try {
       await this.transporter.verify();
-      this.logger.log('✅ Connexion SMTP à Gmail établie avec succès');
+      this.logger.log('✅ Connexion SMTP établie avec succès');
     } catch (error) {
       this.logger.error(`❌ Échec de la connexion SMTP: ${error.message}`);
-      if (error.code) {
-        this.logger.error(`Code d'erreur: ${error.code}`);
-      }
-      // Suggestions pour résoudre les problèmes courants avec Gmail
-      if (error.code === 'EAUTH' || error.code === 'EENVELOPE') {
-        this.logger.warn('Conseil: Vérifiez que votre compte Gmail a activé l\'accès aux applications moins sécurisées OU utilisez un mot de passe d\'application');
-        this.logger.warn('Lien: https://myaccount.google.com/security');
+      
+      // Suggestions spécifiques selon le type d'erreur
+      if (error.code === 'ETIMEDOUT') {
+        this.logger.error('Conseil: Le serveur SMTP ne répond pas. Vérifiez:');
+        this.logger.error('1. La connexion internet de votre serveur');
+        this.logger.error('2. Les firewalls autorisent les connexions sortantes SMTP');
+        this.logger.error('3. Gmail est accessible depuis votre localisation serveur');
+      } else if (error.code === 'EAUTH') {
+        this.logger.error('Conseil: Échec d\'authentification. Vérifiez:');
+        this.logger.error('1. EMAIL_USER et EMAIL_PASS sont corrects');
+        this.logger.error('2. Activez "Accès aux applications moins sécurisées"');
+        this.logger.error('3. OU utilisez un mot de passe d\'application Gmail');
+        this.logger.error('Lien: https://myaccount.google.com/security');
       }
     }
   }
 
   async checkConnection(): Promise<boolean> {
-    if (!this.isServiceAvailable) {
-      this.logger.warn('Email service is not available');
+    if (!this.transporter) {
+      this.logger.warn('Service email non configuré');
       return false;
     }
 
     try {
       await this.transporter.verify();
-      this.logger.log('✅ Email service is connected');
+      this.logger.log('✅ Service email connecté');
       return true;
     } catch (error) {
-      this.logger.error(`❌ Email service is not connected: ${error.message}`);
+      this.logger.error(`❌ Service email non connecté: ${error.message}`);
       return false;
     }
   }
+
   async sendEmail(to: string, template: EmailTemplate, context?: Record<string, any>): Promise<boolean> {
-    if (!this.isServiceAvailable) {
+    if (!this.transporter) {
       this.logger.warn(`Tentative d'envoi email - service indisponible`);
+      return false;
+    }
+
+    // Validation de l'adresse email
+    if (!to || !to.includes('@')) {
+      this.logger.error(`Adresse email invalide: ${to}`);
       return false;
     }
 
@@ -122,10 +131,7 @@ export class MailService {
       this.logger.log(`✅ Email envoyé à: ${this.maskEmail(to)}`);
       return true;
     } catch (error) {
-      this.logger.error(`❌ Erreur envoi email: ${error.message}`);
-      if (error.responseCode) {
-        this.logger.error(`Code réponse SMTP: ${error.responseCode}`);
-      }
+      this.logger.error(`❌ Erreur envoi email à ${this.maskEmail(to)}: ${error.message}`);
       return false;
     }
   }
@@ -164,7 +170,9 @@ export class MailService {
           <title>Réinitialisation de mot de passe</title>
         </head>
         <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
-          ${this.getEmailHeader('Réinitialisation de mot de passe')}
+          <div style="background: linear-gradient(135deg, #0ea5e9, #0369a1); color: white; padding: 30px 20px; text-align: center; border-radius: 8px 8px 0 0;">
+            <h1 style="margin: 0; font-size: 24px; font-weight: 600;">Réinitialisation de mot de passe</h1>
+          </div>
           
           <div style="background: #ffffff; padding: 30px; border-radius: 0 0 8px 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.05);">
             <p>Bonjour,</p>
@@ -189,7 +197,13 @@ export class MailService {
               <a href="mailto:${this.supportEmail}" style="color: #0ea5e9;">contacter notre support</a>.
             </p>
             
-            ${this.getEmailFooter()}
+            <div style="margin-top: 40px; padding-top: 20px; border-top: 1px solid #e2e8f0; text-align: center;">
+              <p style="color: #64748b; font-size: 12px; line-height: 1.4;">
+                Cordialement,<br>
+                <strong style="color: #0ea5e9;">L'équipe Paname Consulting</strong><br>
+                <a href="mailto:${this.supportEmail}" style="color: #64748b; text-decoration: none;">${this.supportEmail}</a>
+              </p>
+            </div>
           </div>
         </body>
         </html>
@@ -198,7 +212,6 @@ export class MailService {
   }
 
   private getWelcomeTemplate(firstName: string): EmailTemplate {
-    
     return {
       subject: 'Bienvenue chez Paname Consulting',
       html: `
@@ -210,7 +223,9 @@ export class MailService {
           <title>Bienvenue</title>
         </head>
         <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
-          ${this.getEmailHeader('Bienvenue chez Paname Consulting')}
+          <div style="background: linear-gradient(135deg, #0ea5e9, #0369a1); color: white; padding: 30px 20px; text-align: center; border-radius: 8px 8px 0 0;">
+            <h1 style="margin: 0; font-size: 24px; font-weight: 600;">Bienvenue chez Paname Consulting</h1>
+          </div>
           
           <div style="background: #ffffff; padding: 30px; border-radius: 0 0 8px 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.05);">
             <p>Bonjour <strong>${firstName}</strong>,</p>
@@ -223,32 +238,18 @@ export class MailService {
 
             <p>Nous sommes impatients de vous accompagner dans votre projet d'études à l'international.</p>
             
-            ${this.getEmailFooter()}
+            <div style="margin-top: 40px; padding-top: 20px; border-top: 1px solid #e2e8f0; text-align: center;">
+              <p style="color: #64748b; font-size: 12px; line-height: 1.4;">
+                Cordialement,<br>
+                <strong style="color: #0ea5e9;">L'équipe Paname Consulting</strong><br>
+                <a href="mailto:${this.supportEmail}" style="color: #64748b; text-decoration: none;">${this.supportEmail}</a>
+              </p>
+            </div>
           </div>
         </body>
         </html>
       `,
     };
-  }
-
-  private getEmailHeader(title: string): string {
-    return `
-      <div style="background: linear-gradient(135deg, #0ea5e9, #0369a1); color: white; padding: 30px 20px; text-align: center; border-radius: 8px 8px 0 0;">
-        <h1 style="margin: 0; font-size: 24px; font-weight: 600;">${title}</h1>
-      </div>
-    `;
-  }
-
-  private getEmailFooter(): string {
-    return `
-      <div style="margin-top: 40px; padding-top: 20px; border-top: 1px solid #e2e8f0; text-align: center;">
-        <p style="color: #64748b; font-size: 12px; line-height: 1.4;">
-          Cordialement,<br>
-          <strong style="color: #0ea5e9;">L'équipe Paname Consulting</strong><br>
-          <a href="mailto:${this.supportEmail}" style="color: #64748b; text-decoration: none;">${this.supportEmail}</a>
-        </p>
-      </div>
-    `;
   }
 
   private renderTemplate(html: string, context?: Record<string, any>): string {
@@ -268,13 +269,13 @@ export class MailService {
     return `${name.substring(0, 2)}***@${domain}`;
   }
 
-  getServiceStatus(): { available: boolean; reason?: string } {
-    const emailUser = this.configService.get<string>('EMAIL_USER') || process.env.EMAIL_USER;
-    const emailPass = this.configService.get<string>('EMAIL_PASS') || process.env.EMAIL_PASS;
-    
+  getServiceStatus(): { available: boolean; config: any } {
     return {
-      available: this.isServiceAvailable,
-      reason: this.isServiceAvailable ? undefined : `Service email non configuré. EMAIL_USER: ${emailUser ? 'défini' : 'indéfini'}, EMAIL_PASS: ${emailPass ? 'défini' : 'indéfini'}`
+      available: !!this.transporter,
+      config: {
+        user: process.env.EMAIL_USER,
+        fromEmail: this.fromEmail,
+      }
     };
   }
 }
