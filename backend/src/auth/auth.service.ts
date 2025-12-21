@@ -295,7 +295,7 @@ export class AuthService {
   };
 }
 
-  async refresh(refresh_token: string): Promise<{
+async refresh(refresh_token: string): Promise<{
   access_token: string;
   refresh_token?: string;
   sessionExpired?: boolean;
@@ -320,49 +320,48 @@ export class AuthService {
     }
 
     const userId = this.convertObjectIdToString(user._id);
+
     const jtiAccess = randomUUID();
     const jtiRefresh = randomUUID();
 
-    // ✅ CALCULER LES NOUVELLES EXPIRATIONS
-    const accessTokenExpirationMs = AuthConstants.ACCESS_TOKEN_EXPIRATION_SECONDS * 1000;
-    const refreshTokenExpirationMs = AuthConstants.REFRESH_TOKEN_EXPIRATION_SECONDS * 1000;
+    // ✅ CRÉER DES PAYLOADS PROPRES
+    const accessPayload = {
+      sub: userId,
+      email: user.email,
+      role: user.role,
+      jti: jtiAccess,
+      tokenType: "access",
+    };
+
+    const refreshPayload = {
+      sub: userId,
+      email: user.email,
+      role: user.role,
+      jti: jtiRefresh,
+      tokenType: "refresh",
+    };
+
+    const new_access_token = this.jwtService.sign(accessPayload, {
+      expiresIn: AuthConstants.JWT_EXPIRATION,
+    });
+
+    const new_refresh_token = this.jwtService.sign(refreshPayload, {
+      expiresIn: AuthConstants.REFRESH_TOKEN_EXPIRATION,
+      secret: process.env.JWT_REFRESH_SECRET,
+    });
+
+    await this.sessionService.create(
+      userId,
+      new_access_token,
+      new Date(Date.now() + AuthConstants.ACCESS_TOKEN_EXPIRATION_SECONDS * 1000),
+    );
+
+    // ✅ CALCUL DIRECT DE L'EXPIRATION
+    const newExp = new Date(
+      Date.now() + AuthConstants.REFRESH_TOKEN_EXPIRATION_SECONDS * 1000,
+    );
     
-    const sessionExpiresAt = new Date(Date.now() + accessTokenExpirationMs);
-    const refreshExpiresAt = new Date(Date.now() + refreshTokenExpirationMs);
-
-    const new_access_token = this.jwtService.sign(
-      {
-        sub: userId,
-        email: user.email,
-        role: user.role,
-        jti: jtiAccess,
-        tokenType: "access",
-        exp: Math.floor(sessionExpiresAt.getTime() / 1000),
-      },
-      {
-        expiresIn: AuthConstants.JWT_EXPIRATION, // '15m'
-      },
-    );
-
-    const new_refresh_token = this.jwtService.sign(
-      {
-        sub: userId,
-        email: user.email,
-        role: user.role,
-        jti: jtiRefresh,
-        tokenType: "refresh",
-        exp: Math.floor(refreshExpiresAt.getTime() / 1000),
-      },
-      {
-        expiresIn: AuthConstants.REFRESH_TOKEN_EXPIRATION, // '30m'
-        secret: process.env.JWT_REFRESH_SECRET,
-      },
-    );
-
-    // ✅ CRÉER LA NOUVELLE SESSION AVEC LA BONNE EXPIRATION
-    await this.sessionService.create(userId, new_access_token, sessionExpiresAt);
-
-    await this.refreshTokenService.create(userId, new_refresh_token, refreshExpiresAt);
+    await this.refreshTokenService.create(userId, new_refresh_token, newExp);
     await this.refreshTokenService.deactivateByToken(refresh_token);
 
     this.logger.log(`✅ Tokens rafraîchis pour l'utilisateur ${this.maskUserId(userId)}`);
@@ -374,11 +373,16 @@ export class AuthService {
   } catch (error: any) {
     this.logger.error(`❌ Erreur refresh token: ${error.message}`);
 
-    if (error.name === "JsonWebTokenError" || error.name === "TokenExpiredError") {
+    if (
+      error.name === "JsonWebTokenError" ||
+      error.name === "TokenExpiredError"
+    ) {
       try {
         await this.refreshTokenService.deactivateByToken(refresh_token);
       } catch (deactivateError) {
-        this.logger.warn(`Impossible de désactiver le refresh token invalide: ${deactivateError.message}`);
+        this.logger.warn(
+          `Impossible de désactiver le refresh token invalide: ${deactivateError.message}`,
+        );
       }
     }
 
