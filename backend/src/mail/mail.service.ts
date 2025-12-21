@@ -2,7 +2,6 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as nodemailer from 'nodemailer';
 
-// Définition de l'interface avant la classe
 interface EmailTemplate {
   subject: string;
   html: string;
@@ -17,9 +16,10 @@ export class MailService {
   private readonly supportEmail: string;
 
   constructor(private configService: ConfigService) {
-    // Initialisation des propriétés
+    // Chargement des variables d'environnement
     const emailUser = this.configService.get<string>('EMAIL_USER') || process.env.EMAIL_USER;
     const emailPass = this.configService.get<string>('EMAIL_PASS') || process.env.EMAIL_PASS;
+    
     this.isServiceAvailable = !!(emailUser && emailPass);
     this.fromEmail = `"Paname Consulting" <${emailUser}>`;
     this.supportEmail = emailUser;
@@ -34,50 +34,56 @@ export class MailService {
       return;
     }
 
-    const emailUser = this.configService.get<string>('EMAIL_USER') || process.env.EMAIL_USER;
-    const emailPass = this.configService.get<string>('EMAIL_PASS') || process.env.EMAIL_PASS;
-    const emailHost = this.configService.get<string>('EMAIL_HOST') || process.env.EMAIL_HOST || 'smtp.gmail.com';
-    const emailPort = parseInt(this.configService.get<string>('EMAIL_PORT') || process.env.EMAIL_PORT || '587');
-    const emailSecure = (this.configService.get<string>('EMAIL_SECURE') || process.env.EMAIL_SECURE || 'false').toLowerCase() === 'true';
+    // Configuration simplifiée pour Gmail
+    const emailUser = this.configService.get<string>('EMAIL_USER');
+    const emailPass = this.configService.get<string>('EMAIL_PASS');
+    const emailSecure = this.configService.get<string>('EMAIL_SECURE') === 'true';
 
-    // Configuration avec timeout
-    const transportConfig: any = {
-      host: emailHost,
-      port: emailPort,
+    this.transporter = nodemailer.createTransport({
+      service: 'gmail', // Utilisation directe du service Gmail
+      host: 'smtp.gmail.com',
+      port: emailSecure ? 465 : 587,
       secure: emailSecure,
       auth: {
         user: emailUser,
         pass: emailPass,
       },
-      // Options pour éviter les timeouts
-      connectionTimeout: 30000, // 30 secondes
-      greetingTimeout: 30000,
-      socketTimeout: 30000,
+      // Configuration optimisée pour Gmail
+      pool: true, // Utilisation du pooling pour les connexions multiples
+      maxConnections: 5,
+      maxMessages: 100,
+      // Timeouts réduits pour éviter les blocages
+      connectionTimeout: 15000, // 15 secondes
+      greetingTimeout: 15000,
+      socketTimeout: 15000,
+      // Important pour Gmail
+      tls: {
+        rejectUnauthorized: false, // Désactiver la vérification pour éviter les problèmes de certificat
+      },
+      // Désactiver les logs en production
       logger: process.env.NODE_ENV !== 'production',
       debug: process.env.NODE_ENV !== 'production',
-    };
+    });
 
-    // Configuration TLS
-    if (process.env.NODE_ENV === 'production') {
-      transportConfig.tls = {
-        rejectUnauthorized: true,
-      };
-    }
-
-    this.transporter = nodemailer.createTransport(transportConfig);
-    
-    // Test de la connexion
+    // Test de connexion asynchrone
     this.testConnection();
   }
 
   private async testConnection(): Promise<void> {
+    if (!this.transporter) return;
+
     try {
       await this.transporter.verify();
-      this.logger.log('✅ Connexion SMTP établie avec succès');
+      this.logger.log('✅ Connexion SMTP à Gmail établie avec succès');
     } catch (error) {
       this.logger.error(`❌ Échec de la connexion SMTP: ${error.message}`);
       if (error.code) {
         this.logger.error(`Code d'erreur: ${error.code}`);
+      }
+      // Suggestions pour résoudre les problèmes courants avec Gmail
+      if (error.code === 'EAUTH' || error.code === 'EENVELOPE') {
+        this.logger.warn('Conseil: Vérifiez que votre compte Gmail a activé l\'accès aux applications moins sécurisées OU utilisez un mot de passe d\'application');
+        this.logger.warn('Lien: https://myaccount.google.com/security');
       }
     }
   }
@@ -88,17 +94,15 @@ export class MailService {
       return false;
     }
 
-    return this.transporter.verify()
-      .then(() => {
-        this.logger.log('✅ Email service is connected');
-        return true;
-      })
-      .catch((error) => {
-        this.logger.error(`❌ Email service is not connected: ${error.message}`);
-        return false;
-      });
+    try {
+      await this.transporter.verify();
+      this.logger.log('✅ Email service is connected');
+      return true;
+    } catch (error) {
+      this.logger.error(`❌ Email service is not connected: ${error.message}`);
+      return false;
+    }
   }
-
   async sendEmail(to: string, template: EmailTemplate, context?: Record<string, any>): Promise<boolean> {
     if (!this.isServiceAvailable) {
       this.logger.warn(`Tentative d'envoi email - service indisponible`);
