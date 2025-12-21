@@ -49,7 +49,7 @@ export class EmailTransportService implements OnModuleInit {
       socketTimeout: 30000,
       connectionTimeout: 30000,
       greetingTimeout: 15000,
-      debug: process.env.NODE_ENV === 'development',
+      debug: process.env.NODE_ENV === 'production',
     });
 
     try {
@@ -109,7 +109,7 @@ export class EmailTransportService implements OnModuleInit {
   }
 
   getSupportEmail(): string {
-    return this.configService.get('EMAIL_USER') || '';
+    return this.configService.get('EMAIL_USER');
   }
 
   private maskEmail(email: string): string {

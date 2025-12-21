@@ -6,6 +6,12 @@ export default registerAs("app", () => ({
   jwtSecret: process.env.JWT_SECRET,
   jwtExpiresIn: process.env.JWT_EXPIRES_IN,
   adminEmail: process.env.EMAIL_USER,
+  emailUser: process.env.EMAIL_USER,
+  emailPass: process.env.EMAIL_PASS,
+  emailHost: process.env.EMAIL_HOST,
+  emailPort: process.env.EMAIL_PORT,
+  emailSecure: process.env.EMAIL_SECURE,
+  frontendUrl: process.env.FRONTEND_URL,
   uploadDir: process.env.UPLOAD_DIR,
   loadDir: process.env.LOAD_DIR,
 }));
