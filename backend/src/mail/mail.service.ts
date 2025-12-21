@@ -1,8 +1,8 @@
+// src/mail/mail.service.ts
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import * as nodemailer from 'nodemailer';
+import { EmailTransportService } from './email-transport.service';
 
-// Définition de l'interface avant la classe
 interface EmailTemplate {
   subject: string;
   html: string;
@@ -11,74 +11,19 @@ interface EmailTemplate {
 @Injectable()
 export class MailService {
   private readonly logger = new Logger(MailService.name);
-  private transporter: nodemailer.Transporter;
-  private readonly isServiceAvailable: boolean;
   private readonly fromEmail: string;
   private readonly supportEmail: string;
 
-  constructor(private readonly configService: ConfigService) {
-    // CORRECTION: Utiliser les bonnes variables d'environnement
+  constructor(
+    private readonly configService: ConfigService,
+    private readonly emailTransport: EmailTransportService
+  ) {
     const emailUser = this.configService.get('EMAIL_USER');
-    const emailPass = this.configService.get('EMAIL_PASS');
-    
-    this.isServiceAvailable = !!(emailUser && emailPass);
     this.fromEmail = `"Paname Consulting" <${emailUser}>`;
     this.supportEmail = emailUser;
-    
-    this.initializeTransporter();
-  }
-
-  private initializeTransporter() {
-    if (!this.isServiceAvailable) {
-      this.logger.warn('Service email non configuré - transporter non initialisé');
-      return;
-    }
-
-    // CORRECTION: Variables correctes
-    const host = this.configService.get<string>('EMAIL_HOST') || 'smtp.gmail.com';
-    const port = parseInt(this.configService.get<string>('EMAIL_PORT') || '587');
-    const secure = this.configService.get<string>('EMAIL_SECURE') === 'true'; // CORRIGÉ: 'true'
-
-    this.transporter = nodemailer.createTransport({
-      host,
-      port,
-      secure,
-      auth: {
-        user: this.configService.get('EMAIL_USER'),
-        pass: this.configService.get('EMAIL_PASS'), 
-      },
-      // OPTIMISATION: Configuration pour éviter les timeout
-      pool: true,
-      maxConnections: 5,
-      socketTimeout: 10000,
-      connectionTimeout: 10000,
-    });
-
-    this.logger.log(`MailService transport initialisé (host=${host}, port=${port}, secure=${secure})`);
-  }
-
-  async checkConnection(): Promise<boolean> {
-    if (!this.isServiceAvailable) {
-      this.logger.warn('Email service is not available');
-      return false;
-    }
-
-    try {
-      await this.transporter.verify();
-      this.logger.log('Email service is connected');
-      return true;
-    } catch (error) {
-      this.logger.error('Email service is not connected', error);
-      return false;
-    }
   }
 
   async sendEmail(to: string, template: EmailTemplate, context?: Record<string, any>): Promise<boolean> {
-    if (!this.isServiceAvailable) {
-      this.logger.warn(`Tentative d'envoi email - service indisponible`);
-      return false;
-    }
-
     const mailOptions = {
       from: this.fromEmail,
       to: to,
@@ -87,20 +32,13 @@ export class MailService {
       html: context ? this.renderTemplate(template.html, context) : template.html,
     };
 
-    try {
-      // OPTIMISATION: Timeout pour éviter les blocages
-      const sendPromise = this.transporter.sendMail(mailOptions);
-      const timeoutPromise = new Promise<never>((_, reject) => 
-        setTimeout(() => reject(new Error('Email sending timeout')), 10000)
-      );
-      
-      await Promise.race([sendPromise, timeoutPromise]);
+    const success = await this.emailTransport.sendEmail(mailOptions);
+    
+    if (success) {
       this.logger.debug(`Email envoyé à: ${this.maskEmail(to)}`);
-      return true;
-    } catch (error) {
-      this.logger.error(`Erreur envoi email: ${error.message}`);
-      return false;
     }
+    
+    return success;
   }
 
   async sendPasswordResetEmail(email: string, resetUrl: string): Promise<void> {
@@ -238,10 +176,14 @@ export class MailService {
     return `${name.substring(0, 2)}***@${domain}`;
   }
 
+  async checkConnection(): Promise<boolean> {
+    return await this.emailTransport.checkConnection();
+  }
+
   getServiceStatus(): { available: boolean; reason?: string } {
     return {
-      available: this.isServiceAvailable,
-      reason: this.isServiceAvailable ? undefined : 'Service email non configuré ou indisponible'
+      available: this.emailTransport.isServiceAvailable(),
+      reason: this.emailTransport.isServiceAvailable() ? undefined : 'Service email non configuré ou indisponible'
     };
   }
 }

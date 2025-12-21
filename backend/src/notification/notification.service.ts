@@ -1,76 +1,22 @@
+// src/notification/notification.service.ts
 import { Injectable, Logger } from '@nestjs/common';
-import * as nodemailer from 'nodemailer';
 import { Rendezvous } from '../schemas/rendezvous.schema';
 import { Procedure, ProcedureStatus, StepStatus } from '../schemas/procedure.schema';
 import { ConfigService } from '@nestjs/config';
 import { Contact } from '../schemas/contact.schema';
+import { EmailTransportService } from '../mail/email-transport.service';
 
 @Injectable()
 export class NotificationService {
   private readonly logger = new Logger(NotificationService.name);
-  private transporter: nodemailer.Transporter;
-  private readonly isServiceAvailable: boolean;
-  private readonly fromEmail: string;
-  private readonly supportEmail: string;
   private appName: string = 'Paname Consulting';
   private frontendUrl: string = '';
 
-  constructor(private configService: ConfigService) {
-    // Récupérer les variables d'environnement de la même manière que MailService
-    const emailUser = this.configService.get('EMAIL_USER');
-    const emailPass = this.configService.get('EMAIL_PASS');
-    
-    this.isServiceAvailable = !!(emailUser && emailPass);
-    this.fromEmail = `"Paname Consulting" <${emailUser}>`;
-    this.supportEmail = emailUser;
+  constructor(
+    private configService: ConfigService,
+    private emailTransport: EmailTransportService
+  ) {
     this.frontendUrl = this.configService.get<string>('FRONTEND_URL') || 'https://panameconsulting.vercel.app';
-    
-    this.initializeTransporter();
-  }
-
-  private initializeTransporter() {
-    if (!this.isServiceAvailable) {
-      this.logger.warn('NotificationService: Service email non configuré - transporter non initialisé');
-      return;
-    }
-
-    // Configuration identique à MailService
-    const host = this.configService.get<string>('EMAIL_HOST') || 'smtp.gmail.com';
-    const port = parseInt(this.configService.get<string>('EMAIL_PORT') || '587');
-    const secure = this.configService.get<string>('EMAIL_SECURE') === 'true';
-
-    this.transporter = nodemailer.createTransport({
-      host,
-      port,
-      secure,
-      auth: {
-        user: this.configService.get('EMAIL_USER'),
-        pass: this.configService.get('EMAIL_PASS'), 
-      },
-      // Configuration pour éviter les timeout (identique à MailService)
-      pool: true,
-      maxConnections: 3, // Un peu moins que MailService car c'est pour les notifications
-      socketTimeout: 10000,
-      connectionTimeout: 10000,
-    });
-
-    this.logger.log(`NotificationService transport initialisé (host=${host}, port=${port}, secure=${secure})`);
-  }
-
-  async checkConnection(): Promise<boolean> {
-    if (!this.isServiceAvailable) {
-      this.logger.warn('NotificationService: Email service is not available');
-      return false;
-    }
-
-    try {
-      await this.transporter.verify();
-      this.logger.log('NotificationService: Email service is connected');
-      return true;
-    } catch (error) {
-      this.logger.error('NotificationService: Email service is not connected', error);
-      return false;
-    }
   }
 
   private async sendEmail(
@@ -79,33 +25,26 @@ export class NotificationService {
     html: string, 
     context: string
   ): Promise<boolean> {
-    if (!this.isServiceAvailable) {
-      this.logger.warn(`Notification "${context}" ignorée - service indisponible`);
+    if (!this.emailTransport.isServiceAvailable()) {
+      this.logger.warn(`Notification "${context}" ignorée - service email indisponible`);
       return false;
     }
 
     const mailOptions = {
-      from: this.fromEmail,
       to: to,
-      replyTo: this.supportEmail,
       subject: subject,
       html: html,
     };
 
-    try {
-      // OPTIMISATION: Timeout pour éviter les blocages (identique à MailService)
-      const sendPromise = this.transporter.sendMail(mailOptions);
-      const timeoutPromise = new Promise<never>((_, reject) => 
-        setTimeout(() => reject(new Error('Email sending timeout')), 10000)
-      );
-      
-      await Promise.race([sendPromise, timeoutPromise]);
+    const success = await this.emailTransport.sendEmail(mailOptions);
+    
+    if (success) {
       this.logger.log(`Notification envoyée (${context}) à: ${this.maskEmail(to)}`);
-      return true;
-    } catch (error) {
-      this.logger.error(`Erreur envoi notification "${context}": ${error.message}`);
-      return false;
+    } else {
+      this.logger.error(`Échec d'envoi notification (${context}) à: ${this.maskEmail(to)}`);
     }
+    
+    return success;
   }
 
   private getBaseTemplate(header: string, content: string, firstName: string): string {
@@ -496,8 +435,8 @@ export class NotificationService {
 
   getServiceStatus(): { available: boolean; reason?: string } {
     return {
-      available: this.isServiceAvailable,
-      reason: this.isServiceAvailable ? undefined : 'Service email non configuré ou indisponible'
+      available: this.emailTransport.isServiceAvailable(),
+      reason: this.emailTransport.isServiceAvailable() ? undefined : 'Service email non configuré ou indisponible'
     };
   }
 }

@@ -34,7 +34,6 @@ const productionOrigins = [
   "https://panameconsulting.vercel.app",
   "https://vercel.live",
   "http://localhost:5713",
-  "http://localhost:5173" // AJOUTÉ pour votre frontend Vite
 ];
 
 // Fonction pour vérifier si une origine correspond à un pattern avec wildcard
@@ -395,7 +394,7 @@ async function bootstrap() {
     app.use(
       rateLimit({
         windowMs: 30 * 60 * 1000,
-        max: 10000,
+        max: 5000,
         message: {
           status: 429,
           message: "Trop de requêtes, veuillez réessayer plus tard.",
