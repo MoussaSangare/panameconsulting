@@ -5,50 +5,107 @@ import { AuthGuard } from "@nestjs/passport";
 export class JwtAuthGuard extends AuthGuard("jwt") {
   private readonly logger = new Logger(JwtAuthGuard.name);
 
-  async canActivate(context: ExecutionContext): Promise<boolean> {
-    try {
-      const request = context.switchToHttp().getRequest();
-      const token = request.headers.authorization?.split(" ")[1] || 
-                    request.cookies?.access_token;
+ async canActivate(context: ExecutionContext): Promise<boolean> {
+  try {
+    const request = context.switchToHttp().getRequest();
+    const token = request.headers.authorization?.split(" ")[1] || 
+                  request.cookies?.access_token;
+    
+    // ✅ PERMETTRE LE LOGOUT MÊME AVEC TOKEN EXPIRÉ
+    if (request.url.includes('/auth/logout')) {
+      this.logger.debug('Route logout détectée - validation spéciale');
       
+      // Si pas de token, c'est peut-être un logout sans session active
       if (!token) {
-        throw new UnauthorizedException({
-          message: "Authentification requise",
-          code: "AUTH_REQUIRED"
-        });
+        this.logger.log('Logout sans token - autorisé pour nettoyage');
+        return true;
       }
+      
+      // Si on a un token, essayer de le valider
+      try {
+        // Essayer la validation normale
+        const result = await super.canActivate(context);
+        return result as boolean;
+      } catch (validationError) {
+        // Si le token est expiré ou invalide, autoriser quand même le logout
+        this.logger.log(`Token invalide pour logout: ${validationError.message} - autorisé pour nettoyage`);
+        return true;
+      }
+    }
+    
+    // ✅ POUR LES AUTRES ROUTES, VALIDATION NORMALE
+    if (!token) {
+      throw new UnauthorizedException({
+        message: "Authentification requise",
+        code: "AUTH_REQUIRED"
+      });
+    }
 
-      const result = await super.canActivate(context);
-      return result as boolean;
-    } catch (error) {
-      this.logger.debug(`Erreur validation JWT: ${error.message}`);
+    const result = await super.canActivate(context);
+    return result as boolean;
+    
+  } catch (error) {
+    this.logger.debug(`Erreur validation JWT: ${error.message}`);
+    
+    // ✅ Gestion améliorée des erreurs sans logs sensibles
+    if (error instanceof UnauthorizedException) {
+      const errorResponse = error.getResponse();
       
-      // Gestion améliorée des erreurs sans logs sensibles
-      if (error instanceof UnauthorizedException) {
-        throw error; // Garder l'erreur originale si déjà Unauthorized
+      // Vérifier si c'est une route de logout
+      const request = context.switchToHttp().getRequest();
+      if (request.url.includes('/auth/logout')) {
+        this.logger.log('Logout avec token invalide - autorisé pour nettoyage');
+        return true;
       }
       
-      if (error.name === 'TokenExpiredError') {
+      throw error; // Garder l'erreur originale si déjà Unauthorized
+    }
+    
+    if (error.name === 'TokenExpiredError') {
+      // Pour les routes autres que logout, traiter normalement
+      const request = context.switchToHttp().getRequest();
+      if (!request.url.includes('/auth/logout')) {
         throw new UnauthorizedException({
           message: "Votre session a expiré. Veuillez vous reconnecter.",
           code: "SESSION_EXPIRED",
           requiresReauth: true
         });
+      } else {
+        // Pour logout, autoriser même avec token expiré
+        this.logger.log('Logout avec token expiré - autorisé');
+        return true;
       }
-      
-      if (error.name === 'JsonWebTokenError') {
+    }
+    
+    if (error.name === 'JsonWebTokenError') {
+      // Pour les routes autres que logout, traiter normalement
+      const request = context.switchToHttp().getRequest();
+      if (!request.url.includes('/auth/logout')) {
         throw new UnauthorizedException({
           message: "Authentification invalide",
           code: "INVALID_TOKEN"
         });
+      } else {
+        // Pour logout, autoriser même avec token invalide
+        this.logger.log('Logout avec token invalide - autorisé pour nettoyage');
+        return true;
       }
-      
-      throw new UnauthorizedException({
-        message: "Erreur d'authentification",
-        code: "AUTH_ERROR"
-      });
     }
+    
+    // Pour logout, toujours autoriser même en cas d'erreur inconnue
+    const request = context.switchToHttp().getRequest();
+    if (request.url.includes('/auth/logout')) {
+      this.logger.log(`Erreur inattendue pendant logout: ${error.message} - autorisé pour nettoyage`);
+      return true;
+    }
+    
+    // Pour les autres routes, erreur générique
+    throw new UnauthorizedException({
+      message: "Erreur d'authentification",
+      code: "AUTH_ERROR"
+    });
   }
+}
 
   handleRequest(err: any, user: any, info: any) {
     if (err || !user) {

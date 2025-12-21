@@ -27,43 +27,43 @@ export class MailService {
     this.initializeTransporter();
   }
 
-private initializeTransporter() {
-  if (!this.isServiceAvailable) {
-    this.logger.warn('Service email non configuré - transporter non initialisé');
-    return;
-  }
+  private initializeTransporter() {
+    if (!this.isServiceAvailable) {
+      this.logger.warn('Service email non configuré - transporter non initialisé');
+      return;
+    }
 
-  const emailHost = process.env.EMAIL_HOST;
-  const emailPort = parseInt(process.env.EMAIL_PORT);
-  const emailSecure = process.env.EMAIL_SECURE?.toLowerCase() === 'true';
+    const emailHost = process.env.EMAIL_HOST;
+    const emailPort = parseInt(process.env.EMAIL_PORT);
+    const emailSecure = process.env.EMAIL_SECURE?.toLowerCase() === 'true';
 
-  // Si on a un host spécifique, on utilise la configuration SMTP
-  if (emailHost) {
-    const transportConfig = {
-      host: emailHost,
-      port: emailPort || 587, // Default port if not specified
-      secure: emailSecure, // Now a boolean
-      auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS,
-      },
-      tls: {
-        rejectUnauthorized: process.env.NODE_ENV === 'production',
-      },
-    };
-    
-    this.transporter = nodemailer.createTransport(transportConfig);
-  } else {
-    // Sinon on utilise un service prédéfini
-    this.transporter = nodemailer.createTransport({
-      service: 'gmail', 
-      auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS,
-      },
-    });
+    // Si on a un host spécifique, on utilise la configuration SMTP
+    if (emailHost) {
+      const transportConfig = {
+        host: emailHost,
+        port: emailPort || 587, // Default port if not specified
+        secure: emailSecure, // Now a boolean
+        auth: {
+          user: process.env.EMAIL_USER,
+          pass: process.env.EMAIL_PASS,
+        },
+        tls: {
+          rejectUnauthorized: process.env.NODE_ENV === 'production',
+        },
+      };
+      
+      this.transporter = nodemailer.createTransport(transportConfig);
+    } else {
+      // Sinon on utilise un service prédéfini
+      this.transporter = nodemailer.createTransport({
+        service: 'gmail', 
+        auth: {
+          user: process.env.EMAIL_USER,
+          pass: process.env.EMAIL_PASS,
+        },
+      });
+    }
   }
-}
 
   async checkConnection(): Promise<boolean> {
     if (!this.isServiceAvailable) {

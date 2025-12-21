@@ -11,6 +11,7 @@ import {
   Logger,
 } from "@nestjs/common";
 import { Response } from "express";
+import { JwtService } from "@nestjs/jwt"; 
 import { ApiTags, ApiOperation, ApiResponse } from "@nestjs/swagger";
 import { JwtAuthGuard } from "../shared/guards/jwt-auth.guard";
 import { RolesGuard } from "../shared/guards/roles.guard";
@@ -42,6 +43,7 @@ export class AuthController {
   constructor(
     private authService: AuthService,
     private usersService: UsersService,
+    private jwtService: JwtService, 
   ) {}
 
   private getCookieOptions(): any {
@@ -216,25 +218,61 @@ export class AuthController {
     }
   }
 
-  @Post("logout")
-  @UseGuards(JwtAuthGuard)
-  @ApiOperation({ summary: "Déconnexion" })
-  async logout(@Request() req: any, @Res() res: Response) {
-    const userId = req.user?.id;
+@Post("logout")
+// ✅ SUPPRIMER @UseGuards(JwtAuthGuard) pour permettre le logout même avec token expiré
+@ApiOperation({ summary: "Déconnexion" })
+async logout(@Request() req: any, @Res() res: Response) {
+  try {
+    // ✅ ESSAYER DE RÉCUPÉRER LE TOKEN MÊME EXPIRÉ
     const token = req.headers.authorization?.split(" ")[1] || 
                   req.cookies?.access_token || "";
-
-    if (userId && token) {
-      await this.authService.logoutWithSessionDeletion(userId, token);
+    
+    let userId: string | null = null;
+    
+    // ✅ DÉCODER LE TOKEN MÊME S'IL EST EXPIRÉ
+    if (token) {
+      try {
+        const decoded = this.jwtService.decode(token) as any;
+        if (decoded && decoded.sub) {
+          userId = decoded.sub.toString();
+          this.logger.log(`Logout avec token (potentiellement expiré) pour utilisateur: ${this.maskUserId(userId)}`);
+        }
+      } catch (decodeError) {
+        this.logger.warn(`Token non décodable: ${decodeError.message}`);
+      }
     }
-
+    
+    // ✅ ESSAYER LE LOGOUT SI ON A USERID ET TOKEN
+    if (userId && token) {
+      try {
+        await this.authService.logoutWithSessionDeletion(userId, token);
+      } catch (logoutError) {
+        this.logger.warn(`Logout technique échoué: ${logoutError.message}. Nettoyage cookies seulement.`);
+      }
+    } else {
+      this.logger.log('Logout sans token valide - nettoyage cookies seulement');
+    }
+    
+    // ✅ TOUJOURS NETTOYER LES COOKIES
     this.clearAuthCookies(res);
 
     return res.json({ 
       message: "Déconnexion réussie",
       timestamp: new Date().toISOString()
     });
+
+  } catch (error) {
+    this.logger.error(`Erreur inattendue pendant logout: ${error.message}`);
+    
+    // ✅ NETTOYER LES COOKIES MÊME EN CAS D'ERREUR
+    this.clearAuthCookies(res);
+    
+    return res.status(200).json({ 
+      message: "Session nettoyée",
+      timestamp: new Date().toISOString()
+    });
   }
+}
 
   @Post("logout-all")
   @UseGuards(JwtAuthGuard, RolesGuard)
