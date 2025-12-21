@@ -3,11 +3,11 @@ FROM node:18-alpine AS builder
 
 WORKDIR /app
 
-# Copie des fichiers de dépendances
-COPY backend/package.json backend/pnpm-lock.yaml ./
-
-# Installation de pnpm globalement
+# Installation de pnpm
 RUN npm install -g pnpm@9.15.4
+
+# Copie des fichiers de dépendances
+COPY backend/package.json backend/pnpm-lock.yaml backend/tsconfig*.json ./
 
 # Installation des dépendances
 RUN pnpm install --frozen-lockfile
@@ -27,15 +27,21 @@ ENV PORT=10000
 
 WORKDIR /app
 
-# Copie uniquement les fichiers nécessaires pour l'exécution
-COPY backend/package.json ./
+# Installation de pnpm dans l'image finale (IMPORTANT pour Railway)
+RUN npm install -g pnpm@9.15.4
 
-# Installation des dépendances de production
-# Utilisez npm pour éviter d'installer pnpm en production
-RUN npm install --omit=dev --frozen-lockfile
+# Copie des fichiers de package
+COPY backend/package.json backend/pnpm-lock.yaml ./
 
-# Copie des fichiers construits
+# Installation des dépendances avec pnpm
+RUN pnpm install --prod --frozen-lockfile
+
+# Copie des fichiers construits depuis le builder
 COPY --from=builder /app/dist ./dist
+
+# Copie des fichiers de configuration si nécessaire
+COPY --from=builder /app/.env* ./
+COPY --from=builder /app/tsconfig*.json ./
 
 # Création des répertoires nécessaires
 RUN mkdir -p /app/uploads /app/logs && \
@@ -45,5 +51,5 @@ USER node
 
 EXPOSE $PORT
 
-# Commande corrigée
+# Railway utilise souvent pnpm start, assurez-vous que le script start fonctionne
 CMD ["node", "dist/main.js"]
