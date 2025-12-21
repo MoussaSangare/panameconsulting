@@ -11,17 +11,17 @@
     "outDir": "./dist",
     "baseUrl": "./",
     "incremental": true,
-    "skipLibCheck": true,  // <-- DÉJÀ PRÉSENT, c'est bon
+    "skipLibCheck": true,
     "strictNullChecks": false,
     "noImplicitAny": false,
     "strictBindCallApply": false,
     "forceConsistentCasingInFileNames": false,
     "noFallthroughCasesInSwitch": false,
-    "strict": false,
+    "strict": false, // <-- Ajoutez cette ligne
     "types": []
   },
   "exclude": [
-    "node_modules",  // <-- DÉJÀ PRÉSENT, ça devrait marcher
+    "node_modules",
     "dist",
     "**/*.test.ts",
     "**/*.spec.ts"

@@ -2,7 +2,7 @@ import { Injectable, Logger } from "@nestjs/common";
 import { InjectModel } from "@nestjs/mongoose";
 import { Model } from "mongoose";
 import { Session } from "../schemas/session.schema";
-import { AuthConstants } from "../auth/auth.constants";
+import { AuthConstants } from "./auth.constants";
 
 @Injectable()
 export class SessionService {
