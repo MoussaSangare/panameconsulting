@@ -27,7 +27,7 @@ export class MailService {
     this.initializeTransporter();
   }
 
- private initializeTransporter() {
+private initializeTransporter() {
   if (!this.isServiceAvailable) {
     this.logger.warn('Service email non configuré - transporter non initialisé');
     return;
@@ -35,14 +35,14 @@ export class MailService {
 
   const emailHost = process.env.EMAIL_HOST;
   const emailPort = parseInt(process.env.EMAIL_PORT);
-  const emailSecure = process.env.EMAIL_SECURE === 'true';
+  const emailSecure = process.env.EMAIL_SECURE?.toLowerCase() === 'true';
 
   // Si on a un host spécifique, on utilise la configuration SMTP
   if (emailHost) {
     const transportConfig = {
       host: emailHost,
-      port: emailPort || 587,
-      secure: emailSecure || false,
+      port: emailPort || 587, // Default port if not specified
+      secure: emailSecure, // Now a boolean
       auth: {
         user: process.env.EMAIL_USER,
         pass: process.env.EMAIL_PASS,
