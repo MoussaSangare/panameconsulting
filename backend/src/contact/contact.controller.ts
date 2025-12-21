@@ -31,7 +31,7 @@ export class ContactController {
     
     const contact = await this.contactService.create(createContactDto);
     
-    this.logger.log(`Message de contact créé avec succès - ID: ${contact.email}`);
+    this.logger.log(`Message de contact créé avec succès.`);
     
     return {
       message: "Message envoyé avec succès",
@@ -73,7 +73,7 @@ export class ContactController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.ADMIN)
   async findOne(@Param("id") id: string) {
-    this.logger.log(`Consultation du message de contact: ${id}`);
+    this.logger.log(`Consultation du message de contact .`);
     
     const contact = await this.contactService.findOne(id);
     
@@ -87,7 +87,7 @@ export class ContactController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.ADMIN)
   async markAsRead(@Param("id") id: string) {
-    this.logger.log(`Marquage comme lu du message: ${id}`);
+    this.logger.log(`Marquage comme lu du message .`);
     
     const message = await this.contactService.markAsRead(id);
     
@@ -108,7 +108,7 @@ export class ContactController {
     @Body() body: { reply: string },
     @Req() req: any,
   ) {
-    this.logger.log(`Envoi de réponse au message: ${id} par l'admin: ${req.user.userId}`);
+    this.logger.log(`Envoi de réponse au message .`);
     
     const message = await this.contactService.replyToMessage(
       id,
@@ -116,7 +116,7 @@ export class ContactController {
       req.user,
     );
     
-    this.logger.log(`Réponse envoyée avec succès au message: ${id}`);
+    this.logger.log(`Réponse envoyée avec succès au message: ${id}`); 
     
     return {
       message: "Réponse envoyée avec succès",
@@ -129,7 +129,7 @@ export class ContactController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.ADMIN)
   async deleteMessage(@Param("id") id: string) {
-    this.logger.log(`Suppression du message de contact: ${id}`);
+    this.logger.log(`Suppression du message de contact .`);
     
     await this.contactService.remove(id);
     
