@@ -28,15 +28,10 @@ export class MailService {
     this.initializeTransporter();
   }
 
-  private initializeTransporter() {
-    if (!this.isServiceAvailable) {
-      this.logger.warn('Service email non configuré - transporter non initialisé');
-      return;
-    }
-
+   private initializeTransporter() {
     this.transporter = nodemailer.createTransport({
       host: this.configService.get('EMAIL_HOST') || 'smtp.gmail.com',
-      port: parseInt(this.configService.get('EMAIL_PORT') || '587'),
+      port: this.configService.get('EMAIL_PORT') || 587,
       secure: this.configService.get('EMAIL_SECURE') === 'true',
       auth: {
         user: this.configService.get('EMAIL_USER'),
@@ -48,23 +43,17 @@ export class MailService {
     });
   }
 
-  async checkConnection(): Promise<boolean> {
-    if (!this.isServiceAvailable) {
-      this.logger.warn('Email service is not available');
-      return false;
-    }
-
-    return this.transporter.verify()
-      .then(() => {
-        this.logger.log('Email service is connected');
-        return true;
-      })
-      .catch((error) => {
-        this.logger.error('Email service is not connected', error);
-        return false;
-      });
+  checkConnection() {
+      return this.transporter.verify()
+        .then(() => {
+          this.logger.log('Email service is connected');
+          return true;
+        })
+        .catch((error) => {
+          this.logger.error('Email service is not connected', error);
+          return false;
+        });
   }
-
   async sendEmail(to: string, template: EmailTemplate, context?: Record<string, any>): Promise<boolean> {
     if (!this.isServiceAvailable) {
       this.logger.warn(`Tentative d'envoi email - service indisponible`);

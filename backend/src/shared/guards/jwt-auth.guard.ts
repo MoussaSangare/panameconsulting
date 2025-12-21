@@ -1,76 +1,9 @@
 import { Injectable, UnauthorizedException, Logger, ExecutionContext } from "@nestjs/common";
 import { AuthGuard } from "@nestjs/passport";
-import { AuthConstants } from "../../auth/auth.constants";
-import { request } from "express";
 
 @Injectable()
 export class JwtAuthGuard extends AuthGuard("jwt") {
   private readonly logger = new Logger(JwtAuthGuard.name);
-
-  handleRequest(err: any, user: any, _info: any, context: ExecutionContext) {
-    const request = context.switchToHttp().getRequest();
-    const token = request.headers.authorization?.split(" ")[1] || 
-                  request.cookies?.access_token;
-    
-    if (err || !user) {
-      this.logger.warn(
-        `Token JWT invalide ou expiré: ${this.maskToken(token)}`
-      );
-      
-      if (err?.name === 'TokenExpiredError') {
-        throw new UnauthorizedException({
-          message: "Token expiré",
-          code: "TOKEN_EXPIRED",
-          requiresRefresh: true
-        });
-      }
-      
-      if (err?.name === 'JsonWebTokenError') {
-        throw new UnauthorizedException({
-          message: "Token invalide",
-          code: "TOKEN_INVALID"
-        });
-      }
-      
-      throw new UnauthorizedException({
-        message: "Session invalide ou expirée",
-        code: "SESSION_INVALID"
-      });
-    }
-
-    // CORRECTION : Ne vérifier isActive que si le champ existe
-    // isActive peut être undefined si non inclus dans le token
-    if (user.isActive === false) {
-      this.logger.warn(
-        `Tentative d'accès avec compte inactif: ${this.maskUserId(user.sub)}`
-      );
-      throw new UnauthorizedException({
-        message: "Compte utilisateur inactif",
-        code: AuthConstants.ERROR_MESSAGES.COMPTE_DESACTIVE,
-        requiresAdmin: true
-      });
-    }
-
-    // Alternative : considérer undefined comme actif
-    // const isActive = user.isActive !== undefined ? user.isActive : true;
-    // if (!isActive) { ... }
-
-    if (user.tokenType && user.tokenType !== "access") {
-      this.logger.warn(
-        `Tentative d'accès avec mauvais type de token: ${user.tokenType}`
-      );
-      throw new UnauthorizedException({
-        message: "Type de token invalide",
-        code: "INVALID_TOKEN_TYPE"
-      });
-    }
-
-    this.logger.debug(
-      `Utilisateur authentifié: ${this.maskUserId(user.sub)} (role: ${user.role})`
-    );
-
-    return user;
-  }
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     try {
@@ -79,47 +12,123 @@ export class JwtAuthGuard extends AuthGuard("jwt") {
                     request.cookies?.access_token;
       
       if (!token) {
-        this.logger.warn("Tentative d'accès sans token JWT");
-        throw new UnauthorizedException("Token d'authentification manquant");
+        throw new UnauthorizedException({
+          message: "Authentification requise",
+          code: "AUTH_REQUIRED"
+        });
       }
 
-      this.logger.debug(`Validation du token JWT: ${this.maskToken(token)}`);
-      
-      // CORRECTION : Ajouter un log pour voir le contenu du token décodé
-      if (process.env.NODE_ENV === 'development') {
-        const jwt = require('jsonwebtoken');
-        try {
-          const decoded = jwt.decode(token);
-          this.logger.debug(`Token décodé: ${JSON.stringify(decoded, null, 2)}`);
-        } catch (decodeErr) {
-          this.logger.debug(`Impossible de décoder le token: ${decodeErr.message}`);
-        }
-      }
-      
       const result = await super.canActivate(context);
-      
       return result as boolean;
     } catch (error) {
-      this.logger.error(
-        `Erreur lors de la validation JWT: ${error.message}`,
-        error.stack
-      );
+      this.logger.debug(`Erreur validation JWT: ${error.message}`);
       
-      // Ajouter plus d'informations pour le débogage
-      if (error.message === "Compte utilisateur inactif") {
-        this.logger.error(`Détails erreur isActive:`, {
-          token: this.maskToken(request.headers.authorization?.split(" ")[1]),
-          user: error.user || 'non disponible'
+      // Gestion améliorée des erreurs sans logs sensibles
+      if (error instanceof UnauthorizedException) {
+        throw error; // Garder l'erreur originale si déjà Unauthorized
+      }
+      
+      if (error.name === 'TokenExpiredError') {
+        throw new UnauthorizedException({
+          message: "Votre session a expiré. Veuillez vous reconnecter.",
+          code: "SESSION_EXPIRED",
+          requiresReauth: true
         });
       }
       
-      throw error;
+      if (error.name === 'JsonWebTokenError') {
+        throw new UnauthorizedException({
+          message: "Authentification invalide",
+          code: "INVALID_TOKEN"
+        });
+      }
+      
+      throw new UnauthorizedException({
+        message: "Erreur d'authentification",
+        code: "AUTH_ERROR"
+      });
     }
   }
 
-  private maskToken(token: string): string {
-    if (!token || token.length < 10) return '***';
-    return `${token.substring(0, 6)}...${token.substring(token.length - 4)}`;
+  handleRequest(err: any, user: any, info: any) {
+    if (err || !user) {
+      // Gestion des erreurs JWT spécifiques
+      if (info?.name === 'TokenExpiredError') {
+        throw new UnauthorizedException({
+          message: "Votre session a expiré. Veuillez vous reconnecter.",
+          code: "SESSION_EXPIRED",
+          requiresReauth: true
+        });
+      }
+      
+      if (info?.name === 'JsonWebTokenError') {
+        throw new UnauthorizedException({
+          message: "Authentification invalide",
+          code: "INVALID_TOKEN"
+        });
+      }
+      
+      if (err?.message?.includes('Compte désactivé')) {
+        throw new UnauthorizedException({
+          message: "Compte désactivé",
+          code: "ACCOUNT_DISABLED",
+          requiresAdmin: true
+        });
+      }
+      
+      if (err?.message?.includes('Mode maintenance')) {
+        throw new UnauthorizedException({
+          message: "Système en maintenance",
+          code: "MAINTENANCE_MODE"
+        });
+      }
+      
+      if (err?.message?.includes('Déconnecté temporairement')) {
+        const hoursMatch = err.message.match(/:(\d+)/);
+        const hours = hoursMatch ? hoursMatch[1] : "24";
+        
+        throw new UnauthorizedException({
+          message: `Déconnexion temporaire (${hours}h restantes)`,
+          code: "TEMPORARY_LOGOUT",
+          remainingHours: parseInt(hours)
+        });
+      }
+      
+      // Erreur générique pour les sessions invalides/expirées
+      if (info?.message?.includes('invalid') || info?.message?.includes('expired')) {
+        throw new UnauthorizedException({
+          message: "Session expirée ou invalide",
+          code: "SESSION_INVALID",
+          requiresReauth: true
+        });
+      }
+      
+      // Message par défaut
+      throw new UnauthorizedException({
+        message: "Accès non autorisé",
+        code: "UNAUTHORIZED"
+      });
+    }
+
+    // Vérification simple si isActive existe et est faux
+    if (user.isActive === false) {
+      throw new UnauthorizedException({
+        message: "Compte désactivé",
+        code: "ACCOUNT_DISABLED",
+        requiresAdmin: true
+      });
+    }
+
+    // Vérification du type de token
+    if (user.tokenType && user.tokenType !== "access") {
+      throw new UnauthorizedException({
+        message: "Type de token invalide",
+        code: "INVALID_TOKEN_TYPE"
+      });
+    }
+
+    this.logger.debug(`Utilisateur authentifié: ${this.maskUserId(user.id)} (role: ${user.role})`);
+    return user;
   }
 
   private maskUserId(userId: string): string {

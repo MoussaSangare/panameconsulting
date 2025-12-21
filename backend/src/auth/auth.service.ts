@@ -132,23 +132,17 @@ export class AuthService {
  async register(registerDto: RegisterDto) {
   try {
     const adminEmail = process.env.EMAIL_USER;
-    
-    // ✅ LOGIQUE SIMPLIFIÉE : TOUJOURS USER SAUF EMAIL_USER (premier seulement)
     const existingAdmin = await this.usersService.findByRole(UserRole.ADMIN);
     
     if (registerDto.email === adminEmail) {
-      // Email admin spécifique détecté
       if (existingAdmin) {
-        // Admin existe déjà → devient USER
         registerDto.role = UserRole.USER;
         this.logger.warn(`⚠️ Email admin utilisé pour créer un USER (admin existe déjà)`);
       } else {
-        // Premier admin → devient ADMIN
         registerDto.role = UserRole.ADMIN;
         this.logger.log(`✅ Création du SEUL et UNIQUE admin: ${this.maskEmail(adminEmail)}`);
       }
     } else {
-      // Tous les autres emails sont USER
       registerDto.role = UserRole.USER;
       this.logger.log(`✅ Création d'utilisateur standard: ${this.maskEmail(registerDto.email)}`);
     }
@@ -158,6 +152,14 @@ export class AuthService {
     const jtiAccess = randomUUID();
     const jtiRefresh = randomUUID();
 
+    // ✅ CALCULER LES EXPIRATIONS UNE FOIS
+    const accessTokenExpirationMs = AuthConstants.ACCESS_TOKEN_EXPIRATION_SECONDS * 1000;
+    const refreshTokenExpirationMs = AuthConstants.REFRESH_TOKEN_EXPIRATION_SECONDS * 1000;
+    
+    const sessionExpiresAt = new Date(Date.now() + accessTokenExpirationMs);
+    const refreshExpiresAt = new Date(Date.now() + refreshTokenExpirationMs);
+
+    // ✅ CRÉER LES TOKENS AVEC LES BONNES DURÉES
     const access_token = this.jwtService.sign(
       {
         sub: userId,
@@ -165,9 +167,10 @@ export class AuthService {
         role: newUser.role,
         jti: jtiAccess,
         tokenType: "access",
+        exp: Math.floor(sessionExpiresAt.getTime() / 1000),
       },
       {
-        expiresIn: AuthConstants.JWT_EXPIRATION,
+        expiresIn: AuthConstants.JWT_EXPIRATION, // '15m'
       },
     );
 
@@ -178,31 +181,22 @@ export class AuthService {
         role: newUser.role,
         jti: jtiRefresh,
         tokenType: "refresh",
+        exp: Math.floor(refreshExpiresAt.getTime() / 1000),
       },
       {
-        expiresIn: AuthConstants.REFRESH_TOKEN_EXPIRATION,
+        expiresIn: AuthConstants.REFRESH_TOKEN_EXPIRATION, // '30m'
         secret: process.env.JWT_REFRESH_SECRET,
       },
     );
 
-    await this.sessionService.create(
-      userId,
-      access_token,
-      new Date(Date.now() + AuthConstants.ACCESS_TOKEN_EXPIRATION_SECONDS * 1000),
-    );
+    // ✅ CRÉER LA SESSION AVEC LA MÊME EXPIRATION
+    await this.sessionService.create(userId, access_token, sessionExpiresAt);
 
     await this.refreshTokenService.deactivateAllForUser(userId);
-    const decodedRefresh = this.jwtService.decode(refresh_token) as any;
-    const refreshExp = new Date(
-      (decodedRefresh?.exp || 0) * 1000 || Date.now() + AuthConstants.REFRESH_TOKEN_EXPIRATION_SECONDS * 1000,
-    );
-    await this.refreshTokenService.create(userId, refresh_token, refreshExp);
+    await this.refreshTokenService.create(userId, refresh_token, refreshExpiresAt);
 
     try {
-      await this.mailService.sendWelcomeEmail(
-        newUser.email,
-        newUser.firstName,
-      );
+      await this.mailService.sendWelcomeEmail(newUser.email, newUser.firstName);
     } catch (emailError) {
       this.logger.warn(`Échec envoi email bienvenue: ${emailError.message}`);
     }
@@ -230,165 +224,159 @@ export class AuthService {
   }
 }
 
-  async login(user: User) {
+ async login(user: User) {
   const jtiAccess = randomUUID();
-const jtiRefresh = randomUUID();
-    const userId = this.convertObjectIdToString(user._id);
+  const jtiRefresh = randomUUID();
+  const userId = this.convertObjectIdToString(user._id);
 
-    const accessPayload = {
-      sub: userId,
+  // ✅ CALCULER L'EXPIRATION UNE SEULE FOIS
+  const accessTokenExpirationMs = AuthConstants.ACCESS_TOKEN_EXPIRATION_SECONDS * 1000;
+  const sessionExpiresAt = new Date(Date.now() + accessTokenExpirationMs);
+  const refreshExpiresAt = new Date(Date.now() + AuthConstants.REFRESH_TOKEN_EXPIRATION_SECONDS * 1000);
+
+  const accessPayload = {
+    sub: userId,
+    email: user.email,
+    role: user.role,
+    jti: jtiAccess,
+    tokenType: "access",
+    exp: Math.floor(sessionExpiresAt.getTime() / 1000), // Timestamp Unix
+  };
+
+  const refreshPayload = {
+    sub: userId,
+    email: user.email,
+    role: user.role,
+    jti: jtiRefresh,
+    tokenType: "refresh",
+    exp: Math.floor(refreshExpiresAt.getTime() / 1000),
+  };
+
+  // ✅ CRÉER LE TOKEN ACCESS AVEC LA MÊME DURÉE
+  const access_token = this.jwtService.sign(accessPayload, {
+    expiresIn: AuthConstants.JWT_EXPIRATION, // '15m'
+  });
+
+  // ✅ CRÉER LE TOKEN REFRESH
+  const refresh_token = this.jwtService.sign(refreshPayload, {
+    expiresIn: AuthConstants.REFRESH_TOKEN_EXPIRATION, // '30m'
+    secret: process.env.JWT_REFRESH_SECRET,
+  });
+
+  // ✅ CRÉER LA SESSION AVEC LA MÊME DATE D'EXPIRATION
+  await this.sessionService.create(userId, access_token, sessionExpiresAt);
+
+  try {
+    await this.refreshTokenService.deactivateAllForUser(userId);
+    await this.refreshTokenService.create(userId, refresh_token, refreshExpiresAt);
+  } catch (error) {
+    this.logger.warn(`Impossible d'enregistrer le refresh token: ${error.message}`);
+  }
+
+  return {
+    access_token,
+    refresh_token,
+    user: {
+      id: userId,
       email: user.email,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      telephone: user.telephone, 
       role: user.role,
-      jti: jtiAccess,
-      tokenType: "access",
-    };
+    },
+  };
+}
 
-    const refreshPayload = {
-      sub: userId,
-      email: user.email,
-      role: user.role,
-      jti: jtiRefresh,
-      tokenType: "refresh",
-    };
+  async refresh(refresh_token: string): Promise<{
+  access_token: string;
+  refresh_token?: string;
+  sessionExpired?: boolean;
+}> {
+  if (!refresh_token) {
+    throw new UnauthorizedException("Refresh token manquant");
+  }
 
-    const access_token = this.jwtService.sign(accessPayload, {
-      expiresIn: AuthConstants.JWT_EXPIRATION,
-    });
+  try {
+    const isWhitelisted = await this.refreshTokenService.isValid(refresh_token);
+    if (!isWhitelisted) {
+      throw new UnauthorizedException("Refresh token non autorisé");
+    }
 
-    const refresh_token = this.jwtService.sign(refreshPayload, {
-      expiresIn: AuthConstants.REFRESH_TOKEN_EXPIRATION,
+    const payload = this.jwtService.verify(refresh_token, {
       secret: process.env.JWT_REFRESH_SECRET,
     });
 
-    await this.sessionService.create(
-      userId,
-      access_token,
-      new Date(Date.now() + AuthConstants.ACCESS_TOKEN_EXPIRATION_SECONDS * 1000),
+    const user = await this.usersService.findById(payload.sub);
+    if (!user) {
+      throw new UnauthorizedException("Utilisateur non trouvé");
+    }
+
+    const userId = this.convertObjectIdToString(user._id);
+    const jtiAccess = randomUUID();
+    const jtiRefresh = randomUUID();
+
+    // ✅ CALCULER LES NOUVELLES EXPIRATIONS
+    const accessTokenExpirationMs = AuthConstants.ACCESS_TOKEN_EXPIRATION_SECONDS * 1000;
+    const refreshTokenExpirationMs = AuthConstants.REFRESH_TOKEN_EXPIRATION_SECONDS * 1000;
+    
+    const sessionExpiresAt = new Date(Date.now() + accessTokenExpirationMs);
+    const refreshExpiresAt = new Date(Date.now() + refreshTokenExpirationMs);
+
+    const new_access_token = this.jwtService.sign(
+      {
+        sub: userId,
+        email: user.email,
+        role: user.role,
+        jti: jtiAccess,
+        tokenType: "access",
+        exp: Math.floor(sessionExpiresAt.getTime() / 1000),
+      },
+      {
+        expiresIn: AuthConstants.JWT_EXPIRATION, // '15m'
+      },
     );
 
-    try {
-      await this.refreshTokenService.deactivateAllForUser(userId);
-      const decodedRefresh = this.jwtService.decode(refresh_token) as any;
-      const refreshExp = new Date(
-        (decodedRefresh?.exp || 0) * 1000 ||
-          Date.now() + AuthConstants.REFRESH_TOKEN_EXPIRATION_SECONDS * 1000,
-      );
-      await this.refreshTokenService.create(userId, refresh_token, refreshExp);
-    } catch (error) {
-      this.logger.warn(
-        `Impossible d'enregistrer le refresh token: ${error.message}`,
-      );
-    }
+    const new_refresh_token = this.jwtService.sign(
+      {
+        sub: userId,
+        email: user.email,
+        role: user.role,
+        jti: jtiRefresh,
+        tokenType: "refresh",
+        exp: Math.floor(refreshExpiresAt.getTime() / 1000),
+      },
+      {
+        expiresIn: AuthConstants.REFRESH_TOKEN_EXPIRATION, // '30m'
+        secret: process.env.JWT_REFRESH_SECRET,
+      },
+    );
+
+    // ✅ CRÉER LA NOUVELLE SESSION AVEC LA BONNE EXPIRATION
+    await this.sessionService.create(userId, new_access_token, sessionExpiresAt);
+
+    await this.refreshTokenService.create(userId, new_refresh_token, refreshExpiresAt);
+    await this.refreshTokenService.deactivateByToken(refresh_token);
+
+    this.logger.log(`✅ Tokens rafraîchis pour l'utilisateur ${this.maskUserId(userId)}`);
 
     return {
-      access_token,
-      refresh_token,
-      user: {
-        id: userId,
-        email: user.email,
-        firstName: user.firstName,
-        lastName: user.lastName,
-        telephone: user.telephone, 
-        role: user.role,
-      },
+      access_token: new_access_token,
+      refresh_token: new_refresh_token,
     };
-  }
+  } catch (error: any) {
+    this.logger.error(`❌ Erreur refresh token: ${error.message}`);
 
-  async refresh(refresh_token: string): Promise<{
-    access_token: string;
-    refresh_token?: string;
-    sessionExpired?: boolean;
-  }> {
-    if (!refresh_token) {
-      throw new UnauthorizedException("Refresh token manquant");
+    if (error.name === "JsonWebTokenError" || error.name === "TokenExpiredError") {
+      try {
+        await this.refreshTokenService.deactivateByToken(refresh_token);
+      } catch (deactivateError) {
+        this.logger.warn(`Impossible de désactiver le refresh token invalide: ${deactivateError.message}`);
+      }
     }
 
-    try {
-      const isWhitelisted = await this.refreshTokenService.isValid(refresh_token);
-      if (!isWhitelisted) {
-        throw new UnauthorizedException("Refresh token non autorisé");
-      }
-
-      const payload = this.jwtService.verify(refresh_token, {
-        secret: process.env.JWT_REFRESH_SECRET,
-      });
-
-      const user = await this.usersService.findById(payload.sub);
-      if (!user) {
-        throw new UnauthorizedException("Utilisateur non trouvé");
-      }
-
-      const userId = this.convertObjectIdToString(user._id);
-
-     const jtiAccess = randomUUID();
-const jtiRefresh = randomUUID();
-
-      const new_access_token = this.jwtService.sign(
-        {
-          sub: userId,
-          email: user.email,
-          role: user.role,
-          jti: jtiAccess,
-          tokenType: "access",
-        },
-        {
-          expiresIn: AuthConstants.JWT_EXPIRATION,
-        },
-      );
-
-      const new_refresh_token = this.jwtService.sign(
-        {
-          sub: userId,
-          email: user.email,
-          role: user.role,
-          jti: jtiRefresh,
-          tokenType: "refresh",
-        },
-        {
-          expiresIn: AuthConstants.REFRESH_TOKEN_EXPIRATION,
-          secret: process.env.JWT_REFRESH_SECRET,
-        },
-      );
-
-      await this.sessionService.create(
-        userId,
-        new_access_token,
-        new Date(Date.now() + AuthConstants.ACCESS_TOKEN_EXPIRATION_SECONDS * 1000),
-      );
-
-      const decodedNewRefresh = this.jwtService.decode(new_refresh_token) as any;
-      const newExp = new Date(
-        (decodedNewRefresh?.exp || 0) * 1000 || Date.now() + AuthConstants.REFRESH_TOKEN_EXPIRATION_SECONDS * 1000,
-      );
-      await this.refreshTokenService.create(userId, new_refresh_token, newExp);
-
-      await this.refreshTokenService.deactivateByToken(refresh_token);
-
-      this.logger.log(`✅ Tokens rafraîchis pour l'utilisateur ${this.maskUserId(userId)}`);
-
-      return {
-        access_token: new_access_token,
-        refresh_token: new_refresh_token,
-      };
-    } catch (error: any) {
-      this.logger.error(`❌ Erreur refresh token: ${error.message}`);
-
-      if (
-        error.name === "JsonWebTokenError" ||
-        error.name === "TokenExpiredError"
-      ) {
-        try {
-          await this.refreshTokenService.deactivateByToken(refresh_token);
-        } catch (deactivateError) {
-          this.logger.warn(
-            `Impossible de désactiver le refresh token invalide: ${deactivateError.message}`,
-          );
-        }
-      }
-
-      throw new UnauthorizedException("Refresh token invalide");
-    }
+    throw new UnauthorizedException("Refresh token invalide");
   }
+}
 
  
 

@@ -1,4 +1,3 @@
-// strategies/jwt.strategy.ts
 import { ExtractJwt, Strategy } from 'passport-jwt';
 import { PassportStrategy } from '@nestjs/passport';
 import { Injectable, UnauthorizedException } from '@nestjs/common';
@@ -14,64 +13,64 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
   ) {
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
-      ignoreExpiration: false,
+      ignoreExpiration: false, // IMPORTANT: JWT vérifie déjà l'expiration
       secretOrKey: configService.get('JWT_SECRET'),
+      passReqToCallback: false, // Pas besoin de la requête
     });
   }
 
   async validate(payload: any) {
     try {
-      // ✅ Vérifier que le payload contient un ID utilisateur valide
-      if (!payload.sub) {
-        throw new UnauthorizedException('Token invalide: ID utilisateur manquant');
+      // ✅ Vérification minimaliste - seulement l'ID utilisateur
+      if (!payload.sub || typeof payload.sub !== 'string') {
+        throw new UnauthorizedException('Token invalide');
       }
 
-      // ✅ Vérifier d'abord l'accès avec la méthode complète
-      const accessCheck = await this.usersService.checkUserAccess(payload.sub);
+      // ✅ Récupérer l'utilisateur SANS vérifier la session ici
+      // La vérification de session se fait dans le guard/session.service
+      const user = await this.usersService.findById(payload.sub);
       
-      if (!accessCheck.canAccess) {
-        // Gérer les différents types d'erreurs d'accès
-        if (accessCheck.reason?.includes('Compte désactivé')) {
-          throw new UnauthorizedException(AuthConstants.ERROR_MESSAGES.COMPTE_DESACTIVE);
-        } else if (accessCheck.reason?.includes('Mode maintenance')) {
-          throw new UnauthorizedException(AuthConstants.ERROR_MESSAGES.MAINTENANCE_MODE);
-        } else if (accessCheck.reason?.includes('Déconnecté temporairement')) {
-          // Extraire les heures restantes si disponibles
-          const remainingHours = accessCheck.details?.remainingHours || 24;
-          throw new UnauthorizedException(
-            `${AuthConstants.ERROR_MESSAGES.COMPTE_TEMPORAIREMENT_DECONNECTE}:${remainingHours}`
-          );
-        } else {
-          throw new UnauthorizedException(accessCheck.reason || "Accès refusé");
+      if (!user) {
+        throw new UnauthorizedException('Utilisateur non trouvé');
+      }
+
+      // ✅ Vérifications simples de base (sans accès à la session)
+      if (!user.isActive) {
+        throw new UnauthorizedException(AuthConstants.ERROR_MESSAGES.COMPTE_DESACTIVE);
+      }
+
+      // ✅ Vérification de l'email admin (optionnel, si nécessaire)
+      if (user.role === 'admin') {
+        const adminEmail = process.env.EMAIL_USER;
+        if (adminEmail && user.email !== adminEmail) {
+          throw new UnauthorizedException('Accès admin non autorisé');
         }
       }
 
-      // ✅ Retourner les informations utilisateur formatées avec id comme propriété principale
+      // ✅ Retourner l'utilisateur avec les informations nécessaires
       return {
-        id: payload.sub,               // ID MongoDB (propriété principale)
-        sub: payload.sub,               // Pour compatibilité JWT standard
-        userId: payload.sub,           // Alias supplémentaire
-        email: accessCheck.user.email,
-        role: accessCheck.user.role,
-        firstName: accessCheck.user.firstName,
-        lastName: accessCheck.user.lastName,
-        isActive: accessCheck.user.isActive,
-        telephone: accessCheck.user.telephone, 
-        // Ajouter les timestamps JWT si disponibles
-        iat: payload.iat,
-        exp: payload.exp,
+        id: payload.sub,           // ID principal
+        userId: payload.sub,       // Alias pour compatibilité
+        sub: payload.sub,          // Standard JWT
+        email: user.email,
+        role: user.role,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        telephone: user.telephone,
+        isActive: user.isActive,
+        // Transmettre le jti pour le tracking
+        jti: payload.jti,
+        tokenType: payload.tokenType || 'access'
       };
-    } catch (error) {
-      // ✅ Log détaillé des erreurs
-      console.error(`JWT Validation Error: ${error.message}`, {
-        userId: payload?.sub || 'unknown',
-        error: error.stack
-      });
       
+    } catch (error) {
+      // ✅ Log minimal sans informations sensibles
       if (error instanceof UnauthorizedException) {
         throw error;
       }
-      throw new UnauthorizedException('Token invalide ou expiré');
+      
+      // Erreur générique pour tout problème technique
+      throw new UnauthorizedException('Échec de validation du token');
     }
   }
 }

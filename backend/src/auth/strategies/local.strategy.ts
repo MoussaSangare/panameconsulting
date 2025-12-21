@@ -1,4 +1,3 @@
-// local.strategy.ts - CORRIGÉ
 import { Strategy } from "passport-local";
 import { PassportStrategy } from "@nestjs/passport";
 import { Injectable, UnauthorizedException, Logger } from "@nestjs/common";
@@ -18,47 +17,47 @@ export class LocalStrategy extends PassportStrategy(Strategy) {
 
   async validate(email: string, password: string): Promise<any> {
     try {
-      this.logger.log(`Attempting local authentication for email: ${this.maskEmail(email)}`);
+      this.logger.debug(`Tentative d'authentification pour: ${this.maskEmail(email)}`);
 
-      // ✅ Normaliser l'email
       const normalizedEmail = email.toLowerCase().trim();
-      
-      // ✅ Appeler validateUser qui peut lancer des exceptions spécifiques
       const user = await this.authService.validateUser(normalizedEmail, password);
 
       if (!user) {
-        // ✅ C'est le cas où validateUser retourne null (credentials invalides)
-        this.logger.warn(`Invalid credentials for: ${this.maskEmail(email)}`);
+        this.logger.warn(`Identifiants incorrects pour: ${this.maskEmail(email)}`);
         throw new UnauthorizedException({
           message: "Email ou mot de passe incorrect",
-          code: "INVALID_CREDENTIALS"
+          code: "INVALID_CREDENTIALS",
+          timestamp: new Date().toISOString()
         });
       }
 
-      this.logger.log(`Local authentication successful for user: ${this.maskEmail(email)}`);
+      this.logger.log(`Authentification réussie pour: ${this.maskEmail(email)}`);
       return user;
 
     } catch (error) {
-      // ✅ PROPAGER DIRECTEMENT si c'est déjà une UnauthorizedException
       if (error instanceof UnauthorizedException) {
-        // ✅ Distinguer les différents types d'erreurs
+        // ✅ Transmettre directement l'erreur sans modification excessive
+        const errorData = error.getResponse();
+        
+        if (typeof errorData === 'object' && errorData['code']) {
+          // Erreur déjà formatée, la propager
+          this.logger.debug(`Erreur d'authentification formatée: ${errorData['code']}`);
+          throw error;
+        }
+        
         const errorMessage = error.message;
         
-        // ✅ PASSWORD_RESET_REQUIRED est un cas spécial, pas une erreur d'authentification
         if (errorMessage === AuthConstants.ERROR_MESSAGES.PASSWORD_RESET_REQUIRED) {
-          this.logger.log(`Password reset required for user: ${this.maskEmail(email)}`);
-          // ⚠️ IMPORTANT : Lancer une nouvelle exception avec plus de contexte
+          this.logger.log(`Réinitialisation de mot de passe requise: ${this.maskEmail(email)}`);
           throw new UnauthorizedException({
             message: "Un mot de passe doit être défini pour ce compte",
             code: AuthConstants.ERROR_MESSAGES.PASSWORD_RESET_REQUIRED,
-            requiresPasswordReset: true,
-            email: email // On peut envoyer l'email pour faciliter la récupération
+            requiresPasswordReset: true
           });
         }
         
-        // ✅ Les autres erreurs spécifiques
         if (errorMessage === AuthConstants.ERROR_MESSAGES.COMPTE_DESACTIVE) {
-          this.logger.warn(`Account disabled for: ${this.maskEmail(email)}`);
+          this.logger.warn(`Compte désactivé: ${this.maskEmail(email)}`);
           throw new UnauthorizedException({
             message: "Votre compte a été désactivé",
             code: AuthConstants.ERROR_MESSAGES.COMPTE_DESACTIVE,
@@ -66,33 +65,40 @@ export class LocalStrategy extends PassportStrategy(Strategy) {
           });
         }
         
-        if (errorMessage === AuthConstants.ERROR_MESSAGES.COMPTE_TEMPORAIREMENT_DECONNECTE) {
-          this.logger.warn(`Account temporarily disconnected for: ${this.maskEmail(email)}`);
+        if (errorMessage.includes(AuthConstants.ERROR_MESSAGES.COMPTE_TEMPORAIREMENT_DECONNECTE)) {
+          const hoursMatch = errorMessage.match(/:(\d+)/);
+          const hours = hoursMatch ? hoursMatch[1] : "24";
+          
+          this.logger.warn(`Compte déconnecté temporairement: ${this.maskEmail(email)} (${hours}h)`);
           throw new UnauthorizedException({
-            message: "Votre compte est temporairement déconnecté",
+            message: `Votre compte est temporairement déconnecté (${hours}h restantes)`,
             code: AuthConstants.ERROR_MESSAGES.COMPTE_TEMPORAIREMENT_DECONNECTE,
-            duration: AuthConstants.GLOBAL_LOGOUT_DURATION
+            remainingHours: parseInt(hours)
           });
         }
         
         if (errorMessage === AuthConstants.ERROR_MESSAGES.MAINTENANCE_MODE) {
-          this.logger.warn(`Maintenance mode for: ${this.maskEmail(email)}`);
+          this.logger.warn(`Mode maintenance: ${this.maskEmail(email)}`);
           throw new UnauthorizedException({
             message: "Système en maintenance",
             code: AuthConstants.ERROR_MESSAGES.MAINTENANCE_MODE
           });
         }
         
-        // ✅ Pour les autres UnauthorizedException, propager telles quelles
-        this.logger.warn(`Authentication error for ${this.maskEmail(email)}: ${errorMessage}`);
-        throw error;
+        // Pour les autres messages, créer une erreur formatée
+        throw new UnauthorizedException({
+          message: errorMessage,
+          code: "AUTHENTICATION_ERROR",
+          timestamp: new Date().toISOString()
+        });
       }
 
-      // ✅ Pour les autres erreurs, logger et retourner une erreur générique
-      this.logger.error(`LocalStrategy unexpected error for ${this.maskEmail(email)}: ${error.message}`, error.stack);
+      // Erreur inattendue
+      this.logger.error(`Erreur inattendue dans LocalStrategy: ${error.message}`, error.stack);
       throw new UnauthorizedException({
-        message: "Email ou mot de passe incorrect",
-        code: "AUTH_ERROR"
+        message: "Erreur d'authentification",
+        code: "AUTH_SYSTEM_ERROR",
+        timestamp: new Date().toISOString()
       });
     }
   }
