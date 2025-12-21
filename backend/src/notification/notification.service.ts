@@ -18,43 +18,54 @@ export class NotificationService {
     this.initializeTransporter();
   }
 
- private initializeTransporter() {
-  if (!this.emailServiceAvailable) {
-    this.logger.warn('Service email non configuré - transporter non initialisé');
-    return;
-  }
-
-  const emailHost = process.env.EMAIL_HOST;
-  const emailPort = parseInt(process.env.EMAIL_PORT);
-  const emailSecure = process.env.EMAIL_SECURE === 'false';
-
-  // Si on a un host spécifique, on utilise la configuration SMTP
-  if (emailHost) {
-    const transportConfig = {
-      host: emailHost,
-      port: emailPort,
-      secure: emailSecure,
-      auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS,
-      },
-      tls: {
-        rejectUnauthorized: process.env.NODE_ENV === 'production',
-      },
-    };
+  private initializeTransporter() {
+    const emailUser = this.configService.get<string>('EMAIL_USER') || process.env.EMAIL_USER;
+    const emailPass = this.configService.get<string>('EMAIL_PASS') || process.env.EMAIL_PASS;
     
-    this.transporter = nodemailer.createTransport(transportConfig);
-  } else {
-    // Sinon on utilise un service prédéfini
-    this.transporter = nodemailer.createTransport({
-      service: 'gmail', 
-      auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS,
-      },
-    });
+    // Check if email credentials are available
+    this.emailServiceAvailable = !!(emailUser && emailPass);
+    
+    if (!this.emailServiceAvailable) {
+      this.logger.warn('Service email non configuré - transporter non initialisé');
+      this.logger.warn(`EMAIL_USER: ${emailUser ? 'défini' : 'non défini'}, EMAIL_PASS: ${emailPass ? 'défini' : 'non défini'}`);
+      return;
+    }
+
+    this.fromEmail = `"${this.appName}" <${emailUser}>`;
+    
+    const emailHost = this.configService.get<string>('EMAIL_HOST') || process.env.EMAIL_HOST;
+    const emailPort = parseInt(this.configService.get<string>('EMAIL_PORT') || process.env.EMAIL_PORT || '587');
+    const emailSecure = (this.configService.get<string>('EMAIL_SECURE') || process.env.EMAIL_SECURE || 'false').toLowerCase() === 'true';
+
+    // Si on a un host spécifique, on utilise la configuration SMTP
+    if (emailHost) {
+      const transportConfig = {
+        host: emailHost,
+        port: emailPort,
+        secure: emailSecure,
+        auth: {
+          user: emailUser,
+          pass: emailPass,
+        },
+        tls: {
+          rejectUnauthorized: process.env.NODE_ENV === 'production',
+        },
+      };
+      
+      this.transporter = nodemailer.createTransport(transportConfig);
+    } else {
+      // Sinon on utilise un service prédéfini
+      this.transporter = nodemailer.createTransport({
+        service: 'gmail', 
+        auth: {
+          user: emailUser,
+          pass: emailPass,
+        },
+      });
+    }
+    
+    this.logger.log('Transporter email initialisé avec succès');
   }
-}
 
   private async sendEmail(
     to: string, 
@@ -64,6 +75,7 @@ export class NotificationService {
   ): Promise<boolean> {
     if (!this.emailServiceAvailable) {
       this.logger.warn(`Notification "${context}" ignorée - service email indisponible`);
+      this.logger.warn(`Vérifiez les variables d'environnement EMAIL_USER et EMAIL_PASS`);
       return false;
     }
 
@@ -408,7 +420,7 @@ export class NotificationService {
   }
 
   async sendContactNotification(contact: Contact): Promise<boolean> {
-    const adminEmail = this.configService.get<string>('EMAIL_USER');
+    const adminEmail = this.configService.get<string>('EMAIL_USER') || process.env.EMAIL_USER;
     if (!adminEmail) {
       this.logger.warn("Email admin non configuré - notification contact ignorée");
       return false;
