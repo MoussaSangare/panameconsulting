@@ -35,15 +35,10 @@ export class MailService {
     }
 
     this.transporter = nodemailer.createTransport({
-      host: this.configService.get('EMAIL_HOST') || 'smtp.gmail.com',
-      port: parseInt(this.configService.get('EMAIL_PORT') || '587'),
-      secure: this.configService.get('EMAIL_SECURE') === 'true',
+      service: 'gmail',
       auth: {
-        user: this.configService.get('EMAIL_USER'),
-        pass: this.configService.get('EMAIL_PASS'),
-      },
-      tls: {
-        rejectUnauthorized: this.configService.get('NODE_ENV') === 'production',
+        user: this.configService.get('EMAIL_USER') || process.env.EMAIL_USER,
+        pass: this.configService.get('EMAIL_PASS') || process.env.EMAIL_PASS,
       },
     });
   }

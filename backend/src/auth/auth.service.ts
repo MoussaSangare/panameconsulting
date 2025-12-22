@@ -545,40 +545,36 @@ const jtiRefresh = randomUUID();
     };
   }
 
-async logoutWithSessionDeletion(
-  userId: string,
-  token: string,
-): Promise<void> {
-  try {
-    // ✅ NE PAS VÉRIFIER LA VALIDITÉ DU TOKEN (peut être expiré)
-    // Désactiver la session même si le token est expiré
-    await this.sessionModel.updateOne(
-      { token, user: userId },
-      { 
-        isActive: false, 
-        deactivatedAt: new Date(),
-        revocationReason: "user_logout_expired_token"
-      },
-    );
-    
-    // ✅ ESSAYER DE RÉVOQUER LE TOKEN SANS VÉRIFIER SA VALIDITÉ
+  async logoutWithSessionDeletion(
+    userId: string,
+    token: string,
+  ): Promise<void> {
     try {
-      // Décoder sans vérifier l'expiration
-      const decoded = this.jwtService.decode(token) as any;
-      if (decoded && decoded.exp) {
-        await this.revokeToken(token, new Date(decoded.exp * 1000));
+      await this.sessionModel.updateOne(
+        { token, user: userId },
+        { 
+          isActive: false, 
+          deactivatedAt: new Date(),
+          revocationReason: "user_logout"
+        },
+      );
+      
+      try {
+        const decoded = this.jwtService.decode(token) as any;
+        if (decoded && decoded.exp) {
+          await this.revokeToken(token, new Date(decoded.exp * 1000));
+        }
+      } catch (error) {
+        this.logger.warn(`Erreur lors de la révocation du token: ${error.message}`);
       }
+      
+      this.loginAttempts.delete(userId);
+      this.logger.log(`Déconnexion avec désactivation de session pour l'utilisateur ${this.maskUserId(userId)}`);
     } catch (error) {
-      this.logger.warn(`Token non valide pendant logout (normal si expiré): ${error.message}`);
+      this.logger.error(`Erreur lors de la déconnexion: ${error.message}`);
+      throw error;
     }
-    
-    this.loginAttempts.delete(userId);
-    this.logger.log(`Déconnexion réussie pour utilisateur ${this.maskUserId(userId)} (token peut être expiré)`);
-  } catch (error) {
-    this.logger.error(`Erreur lors de la déconnexion: ${error.message}`);
-    // Ne pas throw - on veut que le logout réussisse même en cas d'erreur
   }
-}
 
  async validateUser(email: string, password: string): Promise<User | null> {
   try {

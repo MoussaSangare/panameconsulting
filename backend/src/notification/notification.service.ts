@@ -18,37 +18,35 @@ export class NotificationService {
     this.initializeEmailService();
   }
 
-  private initializeEmailService() {
-    const emailUser = this.configService.get<string>('EMAIL_USER');
-    const emailPass = this.configService.get<string>('EMAIL_PASS');
+ private initializeEmailService() {
+  const emailUser = this.configService.get<string>('EMAIL_USER') || process.env.EMAIL_USER;
+  const emailPass = this.configService.get<string>('EMAIL_PASS') || process.env.EMAIL_PASS;
+  
+  if (emailUser && emailPass) {
+    this.emailServiceAvailable = true;
+    this.fromEmail = `"Paname Consulting" <${emailUser}>`;
+    this.frontendUrl = this.configService.get<string>('FRONTEND_URL') || this.frontendUrl;
     
-    if (emailUser && emailPass) {
-      this.emailServiceAvailable = true;
-      this.fromEmail = `"Paname Consulting" <${emailUser}>`;
-      this.frontendUrl = this.configService.get<string>('FRONTEND_URL') || this.frontendUrl;
-      
-      // Configuration SMTP simplifiée
-      this.transporter = nodemailer.createTransport({
-        host: 'smtp.gmail.com',
-        port: parseInt(this.configService.get<string>('EMAIL_PORT') || '587'),
-        secure: this.configService.get<string>('EMAIL_SECURE') === 'true',
-        auth: {
-          user: emailUser,
-          pass: emailPass
-        }
-      });
+    // Méthode éprouvée en production
+    this.transporter = nodemailer.createTransport({
+      service: 'gmail', // Utilise directement le service Gmail
+      auth: {
+        user: emailUser,
+        pass: emailPass
+      }
+    });
 
-      // Vérification de la connexion
-      this.transporter.verify()
-        .then(() => this.logger.log('Service email initialisé avec succès'))
-        .catch(err => {
-          this.logger.error('Erreur lors de l\'initialisation du service email:', err.message);
-          this.emailServiceAvailable = false;
-        });
-    } else {
-      this.logger.warn('Service email désactivé - EMAIL_USER ou EMAIL_PASS manquant');
-    }
+    // Vérification de la connexion
+    this.transporter.verify()
+      .then(() => this.logger.log('Service email initialisé avec succès'))
+      .catch(err => {
+        this.logger.error('Erreur lors de l\'initialisation du service email:', err.message);
+        this.emailServiceAvailable = false;
+      });
+  } else {
+    this.logger.warn('Service email désactivé - EMAIL_USER ou EMAIL_PASS manquant');
   }
+}
 
   private async sendEmail(
     to: string, 

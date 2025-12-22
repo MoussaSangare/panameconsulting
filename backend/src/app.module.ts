@@ -21,16 +21,17 @@ import { ProcedureModule } from "./procedure/procedure.module";
     ConfigModule.forRoot({
       load: [configuration],
       isGlobal: true,
-      envFilePath: '.env',
+      envFilePath: '.env', // ← AJOUTÉ
     }),
 
-    // 2. Base de données
+    // 2. Base de données - CONFIGURATION AMÉLIORÉE
     MongooseModule.forRootAsync({
       imports: [ConfigModule],
       useFactory: async (configService: ConfigService) => {
         const logger = new Logger('MongooseModule');
         const uri = configService.get<string>("MONGODB_URI");
 
+        // Logs détaillés pour le débogage
         logger.log(`🔗 Configuration MongoDB...`);
         logger.log(`📊 MONGODB_URI: ${uri ? 'Définie' : 'NON DÉFINIE'}`);
         
@@ -40,14 +41,16 @@ import { ProcedureModule } from "./procedure/procedure.module";
           throw new Error('MONGODB_URI is not defined in environment variables');
         }
 
+        
         return {
           uri,
-          retryAttempts: 5,
-          retryDelay: 3000,
-          serverSelectionTimeoutMS: 30000,
-          socketTimeoutMS: 45000,
-          bufferCommands: false,
-          connectTimeoutMS: 30000,
+          retryAttempts: 5, // ← AJOUTÉ
+          retryDelay: 3000, // ← AJOUTÉ
+          serverSelectionTimeoutMS: 30000, // ← AJOUTÉ
+          socketTimeoutMS: 45000, // ← AJOUTÉ
+          bufferCommands: false, // ← AJOUTÉ
+          connectTimeoutMS: 30000, // ← AJOUTÉ
+          // Options supplémentaires pour la stabilité
           maxPoolSize: 10,
           minPoolSize: 1,
           heartbeatFrequencyMS: 10000,
@@ -61,22 +64,22 @@ import { ProcedureModule } from "./procedure/procedure.module";
       rootPath: join(__dirname, "..", "uploads"),
       serveRoot: "/uploads",
       serveStaticOptions: {
-        index: false,
-        dotfiles: 'deny',
+        index: false,           // Désactive l'indexation
+        dotfiles: 'deny',       // Bloque les fichiers cachés (.env, etc.)
         cacheControl: true,
-        maxAge: 2592000000,
+        maxAge: 2592000000, // 30 jours en ms
       },
     }),
 
     // 4. Modules fonctionnels
-    AuthModule,
-    UsersModule,
-    DestinationModule,
-    ContactModule,
-    MailModule,
-    ProcedureModule,
-    RendezvousModule,
-    NotificationModule,
+    AuthModule, // Module d'authentification (doit être avant les modules protégés)
+    UsersModule, // Gestion des utilisateurs
+    DestinationModule, // Destinations phares
+    ContactModule, // Formulaire de contact
+    MailModule, // Envoi d'emails
+    ProcedureModule, // Gestion des procédures
+    RendezvousModule, // Gestion des rendez-vous
+    NotificationModule, // Notifications
   ],
   controllers: [],
   providers: [
@@ -91,41 +94,6 @@ import { ProcedureModule } from "./procedure/procedure.module";
         } else {
           logger.log('✅ Configuration MongoDB chargée');
         }
-      },
-      inject: [ConfigService],
-    },
-    {
-      provide: 'VERIFY_EMAIL_CONFIG',
-      useFactory: async (configService: ConfigService) => {
-        const logger = new Logger('EmailConfig');
-        
-        // Vérification directe des variables d'environnement
-        const emailUser = configService.get<string>('EMAIL_USER');
-        const emailPass = configService.get<string>('EMAIL_PASS');
-        const emailHost = configService.get<string>('EMAIL_HOST');
-        const emailSecure = configService.get<string>('EMAIL_SECURE');
-        const emailPort = configService.get<string>('EMAIL_PORT') || '465';
-        
-        logger.log('📧 VÉRIFICATION CONFIGURATION EMAIL');
-        logger.log('====================================');
-        logger.log(`EMAIL_HOST: ${emailHost || '❌ NON DÉFINI'}`);
-        logger.log(`EMAIL_USER: ${emailUser ? '✓ Défini' : '❌ NON DÉFINI'}`);
-        logger.log(`EMAIL_PASS: ${emailPass ? '✓ Défini' : '❌ NON DÉFINI'}`);
-        logger.log(`EMAIL_SECURE: ${emailSecure || 'true'} (recommandé: true)`);
-        logger.log(`EMAIL_PORT: ${emailPort} (recommandé: 465)`);
-        
-        // Configuration recommandée pour Gmail/OVH/etc.
-        if (emailPort === '465' && emailSecure === 'true') {
-          logger.log('✅ Configuration email optimale pour TLS');
-        }
-        
-        if (!emailUser || !emailPass || !emailHost) {
-          logger.warn('⚠️  Configuration email incomplète - L\'envoi d\'emails sera désactivé');
-        } else {
-          logger.log('✅ Configuration email prête');
-        }
-        
-        logger.log('====================================\n');
       },
       inject: [ConfigService],
     },
