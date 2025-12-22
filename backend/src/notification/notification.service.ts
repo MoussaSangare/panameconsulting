@@ -1,71 +1,77 @@
-import { Injectable, Logger } from '@nestjs/common';
-import * as nodemailer from 'nodemailer';
-import { Rendezvous } from '../schemas/rendezvous.schema';
-import { Procedure, ProcedureStatus, StepStatus } from '../schemas/procedure.schema';
-import { ConfigService } from '@nestjs/config';
-import { Contact } from '../schemas/contact.schema';
+import { Injectable, Logger, OnModuleInit } from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
+import * as nodemailer from "nodemailer";
+import { Rendezvous } from "../schemas/rendezvous.schema";
+import { Procedure, ProcedureStatus, StepStatus } from "../schemas/procedure.schema";
+import { Contact } from "../schemas/contact.schema";
+
 
 @Injectable()
-export class NotificationService {
+export class NotificationService implements OnModuleInit {
   private readonly logger = new Logger(NotificationService.name);
   private transporter: nodemailer.Transporter;
   private emailServiceAvailable: boolean = false;
-  private fromEmail: string = '';
-  private appName: string = 'Paname Consulting';
-  private frontendUrl: string = 'https://panameconsulting.vercel.app';
+  private readonly appName = "Paname Consulting";
+  private fromEmail: string;
 
-  constructor(private configService: ConfigService) {
-    this.initializeTransporter();
+  constructor(private configService: ConfigService) {}
+
+  async onModuleInit() {
+    await this.initializeTransporter();
   }
 
-  private initializeTransporter() {
-    const emailUser = this.configService.get<string>('EMAIL_USER') || process.env.EMAIL_USER;
-    const emailPass = this.configService.get<string>('EMAIL_PASS') || process.env.EMAIL_PASS;
-    
-    // Check if email credentials are available
-    this.emailServiceAvailable = !!(emailUser && emailPass);
-    
-    if (!this.emailServiceAvailable) {
-      this.logger.warn('Service email non configuré - transporter non initialisé');
-      this.logger.warn(`EMAIL_USER: ${emailUser ? 'défini' : 'non défini'}, EMAIL_PASS: ${emailPass ? 'défini' : 'non défini'}`);
-      return;
-    }
+private async initializeTransporter(): Promise<void> {
+  const emailUser = this.configService.get("EMAIL_USER");
+  
+  if (!this.configService.get("EMAIL_HOST") || !emailUser || !this.configService.get("EMAIL_PASS")) {
+    this.logger.warn('Configuration email incomplète - notifications désactivées');
+    this.emailServiceAvailable = false;
+    return;
+  }
 
+  try {
     this.fromEmail = `"${this.appName}" <${emailUser}>`;
     
-    const emailHost = this.configService.get<string>('EMAIL_HOST') || process.env.EMAIL_HOST;
-    const emailPort = parseInt(this.configService.get<string>('EMAIL_PORT') || process.env.EMAIL_PORT || '587');
-    const emailSecure = (this.configService.get<string>('EMAIL_SECURE') || process.env.EMAIL_SECURE || 'false').toLowerCase() === 'true';
-
-    // Si on a un host spécifique, on utilise la configuration SMTP
-    if (emailHost) {
-      const transportConfig = {
-        host: emailHost,
-        port: emailPort,
-        secure: emailSecure,
-        auth: {
-          user: emailUser,
-          pass: emailPass,
-        },
-        tls: {
-          rejectUnauthorized: process.env.NODE_ENV === 'production',
-        },
-      };
-      
-      this.transporter = nodemailer.createTransport(transportConfig);
-    } else {
-      // Sinon on utilise un service prédéfini
-      this.transporter = nodemailer.createTransport({
-        service: 'gmail', 
-        auth: {
-          user: emailUser,
-          pass: emailPass,
-        },
-      });
-    }
+    const port = parseInt(this.configService.get("EMAIL_PORT"));
+    const secure = false; // Toujours false pour port 587
+    const useTls = port === 587; // STARTTLS pour le port 587
     
-    this.logger.log('Transporter email initialisé avec succès');
+    this.transporter = nodemailer.createTransport({
+      host: this.configService.get("EMAIL_HOST"),
+      port: port,
+      secure: secure, // false pour port 587
+      requireTLS: useTls, // true pour port 587
+      ignoreTLS: !useTls, // false pour port 587
+      auth: {
+        user: emailUser,
+        pass: this.configService.get("EMAIL_PASS"),
+      },
+      tls: {
+        rejectUnauthorized: true,
+        ciphers: 'SSLv3'
+      },
+      connectionTimeout: 15000,
+      greetingTimeout: 10000,
+      socketTimeout: 20000,
+    });
+
+    await this.testConnection();
+    this.emailServiceAvailable = true;
+    this.logger.log('Service notification email initialisé avec succès');
+    
+  } catch (error) {
+    this.logger.error(`Erreur initialisation service notification: ${error.message}`, error.stack);
+    this.emailServiceAvailable = false;
   }
+}
+
+  private async testConnection(): Promise<void> {
+    if (!this.transporter) {
+      throw new Error('Transporter non initialisé');
+    }
+    await this.transporter.verify();
+  }
+
 
   private async sendEmail(
     to: string, 
@@ -125,7 +131,7 @@ export class NotificationService {
           <div class="footer">
             <p>Cordialement,<br><strong>L'équipe Paname Consulting</strong></p>
             <p>
-              <a href="${this.frontendUrl}" class="website-link">${this.frontendUrl.replace('https://', '')}</a>
+              <a href="${this.configService.get('FRONTEND_URL')}" class="website-link">${this.configService.get('FRONTEND_URL').replace('https://', '')}</a>
             </p>
           </div>
         </div>
@@ -221,7 +227,7 @@ export class NotificationService {
           </div>
           
           <p style="text-align: center; margin-top: 20px;">
-            <a href="${this.frontendUrl}" class="button">Reprogrammer un rendez-vous</a>
+              <a href="${this.configService.get('FRONTEND_URL')}" class="website-link">${this.configService.get('FRONTEND_URL').replace('https://', '')}</a>
           </p>
         `;
         break;
