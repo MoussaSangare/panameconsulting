@@ -1,138 +1,166 @@
 import { Injectable, Logger, OnModuleInit } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
-import * as nodemailer from "nodemailer";
 import { Rendezvous } from "../schemas/rendezvous.schema";
 import { Procedure, ProcedureStatus, StepStatus } from "../schemas/procedure.schema";
 import { Contact } from "../schemas/contact.schema";
+import { EmailConfigService } from "../config/email-config.service";
+import { AppConfig } from "../config/configuration";
 
+interface EmailTemplateData {
+  firstName: string;
+  [key: string]: any;
+}
 
 @Injectable()
 export class NotificationService implements OnModuleInit {
   private readonly logger = new Logger(NotificationService.name);
-  private transporter: nodemailer.Transporter;
-  private emailServiceAvailable: boolean = false;
-  private readonly appName = "Paname Consulting";
-  private fromEmail: string;
+  private appName = "Paname Consulting";
+  private frontendUrl: string;
+  private initialized = false;
 
-  constructor(private configService: ConfigService) {}
+  constructor(
+    private configService: ConfigService<AppConfig>,
+    private emailService: EmailConfigService
+  ) {
+    const config = this.configService.get<AppConfig>('app', { infer: true });
+    this.appName = config.appName;
+    this.frontendUrl = config.frontendUrl;
+  }
 
   async onModuleInit() {
-    await this.initializeTransporter();
-  }
-
-private async initializeTransporter(): Promise<void> {
-  const emailUser = this.configService.get("EMAIL_USER");
-  
-  if (!this.configService.get("EMAIL_HOST") || !emailUser || !this.configService.get("EMAIL_PASS")) {
-    this.logger.warn('Configuration email incomplète - notifications désactivées');
-    this.emailServiceAvailable = false;
-    return;
-  }
-
-  try {
-    this.fromEmail = `"${this.appName}" <${emailUser}>`;
+    this.logger.log('⏳ Initialisation du service notification...');
     
-    const port = parseInt(this.configService.get("EMAIL_PORT"));
-    const secure = false; // Toujours false pour port 587
-    const useTls = port === 587; // STARTTLS pour le port 587
-    
-    this.transporter = nodemailer.createTransport({
-      host: this.configService.get("EMAIL_HOST"),
-      port: port,
-      secure: secure, // false pour port 587
-      requireTLS: useTls, // true pour port 587
-      ignoreTLS: !useTls, // false pour port 587
-      auth: {
-        user: emailUser,
-        pass: this.configService.get("EMAIL_PASS"),
-      },
-      tls: {
-        rejectUnauthorized:false,
-        ciphers: 'SSLv3'
-      },
-     connectionTimeout: 60000, // 60 secondes
-      greetingTimeout: 30000,   // 30 secondes
-      socketTimeout: 60000,    // 60 secondes
-    });
+    try {
+      // Attendre que le service email soit initialisé
+      let attempts = 0;
+      const maxAttempts = 10;
+      const delayMs = 1000;
 
-    await this.testConnection();
-    this.emailServiceAvailable = true;
-    this.logger.log('Service notification email initialisé avec succès');
-    
-  } catch (error) {
-    this.logger.error(`Erreur initialisation service notification: ${error.message}`, error.stack);
-    this.emailServiceAvailable = false;
-  }
-}
+      while (attempts < maxAttempts) {
+        if (this.emailService.isAvailable()) {
+          const status = this.emailService.getStatus();
+          this.logger.log('✅ Service notification initialisé avec succès');
+          this.logger.log(`📊 Statut email: ${status.sentCount} envoyés, ${status.failedCount} échecs`);
+          this.initialized = true;
+          return;
+        }
+        
+        attempts++;
+        this.logger.debug(`⏳ Attente du service email... (${attempts}/${maxAttempts})`);
+        await this.delay(delayMs);
+      }
 
-  private async testConnection(): Promise<void> {
-    if (!this.transporter) {
-      throw new Error('Transporter non initialisé');
+      // Si on arrive ici, le service email n'est pas disponible
+      this.logger.warn('⚠️ Service email non disponible après plusieurs tentatives');
+      this.logger.warn('Le service notification fonctionnera en mode dégradé');
+      
+    } catch (error) {
+      this.logger.error(`❌ Erreur lors de l'initialisation: ${error.message}`);
     }
-    await this.transporter.verify();
   }
 
-
-  private async sendEmail(
-    to: string, 
-    subject: string, 
-    html: string, 
-    context: string
+  private async sendNotification(
+    to: string,
+    subject: string,
+    templateName: string,
+    templateData: EmailTemplateData
   ): Promise<boolean> {
-    if (!this.emailServiceAvailable) {
-      this.logger.warn(`Notification "${context}" ignorée - service email indisponible`);
-      this.logger.warn(`Vérifiez les variables d'environnement EMAIL_USER et EMAIL_PASS`);
+    // Vérifier si le service est initialisé
+    if (!this.initialized || !this.emailService.isAvailable()) {
+      this.logger.warn(`⏸️  Notification "${templateName}" ignorée - service email non disponible`);
+      this.logger.debug(`Initialized: ${this.initialized}, Available: ${this.emailService.isAvailable()}`);
       return false;
     }
 
     try {
-      await this.transporter.sendMail({
-        from: this.fromEmail,
-        to: to,
-        subject: subject,
-        html: html
-      });
+      const html = this.generateTemplate(templateName, templateData);
+      const context = `${templateName}-${new Date().toISOString().split('T')[0]}`;
       
-      this.logger.log(`Email envoyé (${context}) à: ${this.maskEmail(to)}`);
-      return true;
+      const result = await this.emailService.sendEmail(to, subject, html, context);
+      
+      if (result) {
+        this.logger.log(`✅ Notification "${templateName}" envoyée à ${this.maskEmail(to)}`);
+      } else {
+        this.logger.warn(`⚠️ Échec d'envoi de notification "${templateName}"`);
+      }
+      
+      return result;
       
     } catch (error) {
-      this.logger.error(`Erreur lors de l'envoi "${context}": ${error.message}`);
+      this.logger.error(`❌ Erreur lors de l'envoi "${templateName}": ${error.message}`);
       return false;
     }
   }
 
-  private getBaseTemplate(header: string, content: string, firstName: string): string {
+  private generateTemplate(templateName: string, data: EmailTemplateData): string {
+    const baseTemplate = this.getBaseTemplate();
+    const content = this.getTemplateContent(templateName, data);
+    
+    return baseTemplate
+      .replace('{{APP_NAME}}', this.appName)
+      .replace('{{CONTENT}}', content)
+      .replace(/{{FIRST_NAME}}/g, data.firstName)
+      .replace(/{{FRONTEND_URL}}/g, this.frontendUrl)
+      .replace(/{{CURRENT_YEAR}}/g, new Date().getFullYear().toString());
+  }
+
+  private getBaseTemplate(): string {
     return `
       <!DOCTYPE html>
-      <html>
+      <html lang="fr">
       <head>
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>${this.appName} - ${header}</title>
+        <meta http-equiv="X-UA-Compatible" content="ie=edge">
+        <title>{{APP_NAME}}</title>
         <style>
-          body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 0; }
-          .header { background: linear-gradient(135deg, #0ea5e9, #0284c7); color: white; padding: 30px 20px; text-align: center; }
-          .content { background: white; padding: 30px; }
-          .footer { text-align: center; margin-top: 30px; padding-top: 20px; border-top: 1px solid #e2e8f0; color: #64748b; font-size: 12px; }
-          .info-box { background: #f8fafc; padding: 20px; border-radius: 6px; border-left: 4px solid #0ea5e9; margin: 20px 0; }
-          .button { display: inline-block; padding: 12px 24px; background: #0ea5e9; color: white; text-decoration: none; border-radius: 4px; }
-          .website-link { color: #0284c7; text-decoration: none; }
+          * { margin: 0; padding: 0; box-sizing: border-box; }
+          body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.6; color: #333; background: #f5f7fa; }
+          .email-container { max-width: 600px; margin: 0 auto; background: white; }
+          .header { background: linear-gradient(135deg, #0ea5e9 0%, #0284c7 100%); color: white; padding: 40px 30px; text-align: center; }
+          .header h1 { font-size: 28px; font-weight: 700; margin-bottom: 10px; }
+          .header p { font-size: 16px; opacity: 0.9; }
+          .content { padding: 40px 30px; }
+          .greeting { font-size: 18px; margin-bottom: 25px; color: #1e293b; }
+          .info-box { background: #f8fafc; border-left: 4px solid #0ea5e9; padding: 25px; margin: 25px 0; border-radius: 0 8px 8px 0; }
+          .info-box h3 { color: #0f172a; margin-bottom: 15px; font-size: 18px; }
+          .info-box p { margin: 8px 0; color: #475569; }
+          .footer { background: #f1f5f9; padding: 30px; text-align: center; border-top: 1px solid #e2e8f0; }
+          .footer p { color: #64748b; font-size: 14px; line-height: 1.5; }
+          .footer a { color: #0ea5e9; text-decoration: none; }
+          .footer .copyright { margin-top: 20px; font-size: 12px; color: #94a3b8; }
+          .button { display: inline-block; padding: 14px 28px; background: linear-gradient(135deg, #0ea5e9 0%, #0284c7 100%); color: white; text-decoration: none; border-radius: 6px; font-weight: 600; margin: 10px 0; }
+          .important { background: #fef3c7; border-left-color: #f59e0b; }
+          .success { background: #d1fae5; border-left-color: #10b981; }
+          .warning { background: #fef3c7; border-left-color: #f59e0b; }
+          .danger { background: #fee2e2; border-left-color: #ef4444; }
         </style>
       </head>
       <body>
-        <div class="header">
-          <h1 style="margin: 0;">${this.appName}</h1>
-          <p style="margin: 5px 0 0 0;">${header}</p>
-        </div>
-        <div class="content">
-          <p>Bonjour <strong>${firstName}</strong>,</p>
-          ${content}
+        <div class="email-container">
+          <div class="header">
+            <h1>{{APP_NAME}}</h1>
+            <p>Votre partenaire pour les études à l'international</p>
+          </div>
+          
+          <div class="content">
+            <p class="greeting">Bonjour <strong>{{FIRST_NAME}}</strong>,</p>
+            {{CONTENT}}
+          </div>
+          
           <div class="footer">
-            <p>Cordialement,<br><strong>L'équipe Paname Consulting</strong></p>
             <p>
-              <a href="${this.configService.get('FRONTEND_URL')}" class="website-link">${this.configService.get('FRONTEND_URL').replace('https://', '')}</a>
+              <strong>Besoin d'aide ?</strong><br>
+              Contactez-nous : <a href="mailto:support@panameconsulting.com">support@panameconsulting.com</a>
             </p>
+            <p>
+              <strong>Visitez notre site :</strong><br>
+              <a href="{{FRONTEND_URL}}">{{FRONTEND_URL.replace('https://', '')}}</a>
+            </p>
+            <div class="copyright">
+              © {{CURRENT_YEAR}} {{APP_NAME}}. Tous droits réservés.<br>
+              Kalaban Coura, Bamako, Mali
+            </div>
           </div>
         </div>
       </body>
@@ -153,135 +181,187 @@ private async initializeTransporter(): Promise<void> {
     const content = `
       <p>Votre rendez-vous a été confirmé avec succès.</p>
       
-      <div class="info-box">
-        <h3 style="margin-top: 0;">Détails du rendez-vous</h3>
+      <div class="info-box success">
+        <h3>📅 Détails du rendez-vous</h3>
         <p><strong>Date :</strong> ${dateFormatted}</p>
         <p><strong>Heure :</strong> ${rendezvous.time}</p>
-        <p><strong>Lieu :</strong> Paname Consulting - Kalaban Coura</p>
-        <p><strong>Statut :</strong> Confirmé</p>
+        <p><strong>Lieu :</strong> ${this.appName} - Kalaban Coura, Bamako</p>
+        <p><strong>Statut :</strong> <span style="color: #10b981;">Confirmé ✓</span></p>
       </div>
       
-      <p>Nous vous attendons avec impatience.</p>
+      <p>Nous vous attendons avec impatience pour échanger sur votre projet d'études.</p>
+      
+      <div class="info-box">
+        <p><strong>ℹ️ Informations importantes :</strong></p>
+        <p>• Merci d'arriver 10 minutes avant l'heure prévue</p>
+        <p>• Apportez vos documents d'identité et académiques</p>
+        <p>• Durée estimée : 45 minutes à 1 heure</p>
+      </div>
     `;
 
-    return await this.sendEmail(
+    return await this.sendNotification(
       rendezvous.email,
-      "Confirmation de votre rendez-vous - Paname Consulting",
-      this.getBaseTemplate("Rendez-vous Confirmé", content, rendezvous.firstName),
-      "confirmation-rendezvous"
+      `Confirmation de rendez-vous - ${this.appName}`,
+      'rendezvous-confirmation',
+      {
+        firstName: rendezvous.firstName,
+        content,
+      }
     );
   }
 
   async sendReminder(rendezvous: Rendezvous): Promise<boolean> {
     const content = `
-      <p>Rappel : Vous avez un rendez-vous aujourd'hui.</p>
+      <p>Rappel amical : Vous avez un rendez-vous prévu aujourd'hui.</p>
       
-      <div class="info-box">
-        <h3 style="margin-top: 0;">Votre rendez-vous aujourd'hui</h3>
+      <div class="info-box important">
+        <h3>⏰ Votre rendez-vous aujourd'hui</h3>
         <p><strong>Heure :</strong> ${rendezvous.time}</p>
-        <p><strong>Lieu :</strong> Paname Consulting - Kalaban Coura</p>
+        <p><strong>Lieu :</strong> ${this.appName} - Kalaban Coura, Bamako</p>
       </div>
       
-      <p>Nous sommes impatients de vous rencontrer.</p>
+      <p>Nous sommes impatients de vous rencontrer et de discuter de votre projet.</p>
+      
+      <div style="text-align: center; margin: 25px 0;">
+        <a href="tel:+22320202020" class="button">📞 Nous appeler</a>
+        <a href="${this.frontendUrl}/rendezvous" class="button" style="background: #475569; margin-left: 10px;">📋 Mes rendez-vous</a>
+      </div>
     `;
 
-    return await this.sendEmail(
+    return await this.sendNotification(
       rendezvous.email,
-      "Rappel - Rendez-vous aujourd'hui - Paname Consulting",
-      this.getBaseTemplate("Rappel de Rendez-vous", content, rendezvous.firstName),
-      "rappel-rendezvous"
+      `Rappel - Rendez-vous aujourd'hui - ${this.appName}`,
+      'rendezvous-reminder',
+      {
+        firstName: rendezvous.firstName,
+        content,
+      }
     );
   }
 
   async sendStatusUpdate(rendezvous: Rendezvous): Promise<boolean> {
-    let content = "";
-    let subject = "";
-    let header = "Mise à jour de Rendez-vous";
+    const dateStr = new Date(rendezvous.date).toLocaleDateString("fr-FR");
+    
+    let subject = '';
+    let header = 'Mise à jour de Rendez-vous';
+    let content = '';
+    let boxClass = 'info-box';
 
     switch (rendezvous.status) {
       case "Confirmé":
-        subject = "Rendez-vous Confirmé - Paname Consulting";
+        subject = `Rendez-vous Confirmé - ${this.appName}`;
+        boxClass = 'info-box success';
         content = `
-          <p>Votre rendez-vous a été confirmé.</p>
+          <p>Votre demande de rendez-vous a été confirmée par notre équipe.</p>
           
-          <div class="info-box">
-            <h3 style="margin-top: 0;">Rendez-vous confirmé</h3>
-            <p><strong>Date :</strong> ${new Date(rendezvous.date).toLocaleDateString("fr-FR")}</p>
+          <div class="${boxClass}">
+            <h3>✅ Rendez-vous confirmé</h3>
+            <p><strong>Date :</strong> ${dateStr}</p>
             <p><strong>Heure :</strong> ${rendezvous.time}</p>
+            <p><strong>Référence :</strong> RDV-${rendezvous._id.toString().substring(0, 8).toUpperCase()}</p>
           </div>
+          
+          <p>Vous recevrez un rappel la veille de votre rendez-vous.</p>
         `;
         break;
 
       case "Annulé":
-        subject = "Rendez-vous Annulé - Paname Consulting";
-        header = "Rendez-vous Annulé";
+        subject = `Rendez-vous Annulé - ${this.appName}`;
+        header = 'Rendez-vous Annulé';
+        boxClass = 'info-box danger';
         const cancelledBy = rendezvous.cancelledBy === 'admin' ? 'par notre équipe' : 'à votre demande';
+        
         content = `
           <p>Votre rendez-vous a été annulé ${cancelledBy}.</p>
           
-          <div class="info-box">
-            <h3 style="margin-top: 0;">Rendez-vous annulé</h3>
-            <p><strong>Date prévue :</strong> ${new Date(rendezvous.date).toLocaleDateString("fr-FR")}</p>
+          <div class="${boxClass}">
+            <h3>❌ Rendez-vous annulé</h3>
+            <p><strong>Date prévue :</strong> ${dateStr}</p>
             <p><strong>Heure prévue :</strong> ${rendezvous.time}</p>
             ${rendezvous.cancellationReason ? `<p><strong>Raison :</strong> ${rendezvous.cancellationReason}</p>` : ""}
+            <p><strong>Référence :</strong> RDV-${rendezvous._id.toString().substring(0, 8).toUpperCase()}</p>
           </div>
           
-          <p style="text-align: center; margin-top: 20px;">
-              <a href="${this.configService.get('FRONTEND_URL')}" class="website-link">${this.configService.get('FRONTEND_URL').replace('https://', '')}</a>
-          </p>
+          <p>Nous regrettons cette annulation et restons à votre disposition pour un nouveau rendez-vous.</p>
+          
+          <div style="text-align: center; margin: 20px 0;">
+            <a href="${this.frontendUrl}/rendezvous/nouveau" class="button">📅 Prendre un nouveau rendez-vous</a>
+          </div>
         `;
         break;
 
       case "Terminé":
         header = "Rendez-vous Terminé";
         if (rendezvous.avisAdmin === "Favorable") {
-          subject = "Rendez-vous Terminé - Avis Favorable - Paname Consulting";
+          subject = `Rendez-vous Terminé - Avis Favorable - ${this.appName}`;
+          boxClass = 'info-box success';
           content = `
             <p>Votre rendez-vous s'est déroulé avec succès.</p>
             
-            <div class="info-box">
-              <h3 style="margin-top: 0;">Avis favorable</h3>
-              <p>Votre dossier a reçu un avis favorable.</p>
-              <p>Votre procédure d'admission a été lancée.</p>
+            <div class="${boxClass}">
+              <h3>🎉 Avis favorable</h3>
+              <p>Votre dossier a reçu un avis favorable de notre comité d'admission.</p>
+              <p><strong>Prochaine étape :</strong> Lancement de votre procédure d'admission</p>
             </div>
             
-            <p>Félicitations pour cette première étape réussie.</p>
+            <p>Félicitations ! Vous recevrez sous peu les détails de la procédure à suivre.</p>
+            
+            <div style="text-align: center; margin: 20px 0;">
+              <a href="${this.frontendUrl}/procedures" class="button">📋 Suivre ma procédure</a>
+            </div>
           `;
         } else if (rendezvous.avisAdmin === "Défavorable") {
-          subject = "Rendez-vous Terminé - Paname Consulting";
+          subject = `Rendez-vous Terminé - ${this.appName}`;
+          boxClass = 'info-box warning';
           content = `
             <p>Votre rendez-vous est maintenant terminé.</p>
             
-            <div class="info-box">
-              <h3 style="margin-top: 0;">Compte rendu</h3>
-              <p>Votre dossier n'a pas reçu un avis favorable pour le programme envisagé.</p>
+            <div class="${boxClass}">
+              <h3>📝 Compte rendu</h3>
+              <p>Après examen, votre dossier n'a pas reçu un avis favorable pour le programme envisagé.</p>
             </div>
             
-            <p>Notre équipe reste à votre disposition pour étudier d'autres alternatives.</p>
+            <p>Notre équipe reste à votre disposition pour étudier d'autres alternatives adaptées à votre profil.</p>
+            
+            <div style="text-align: center; margin: 20px 0;">
+              <a href="${this.frontendUrl}/contact" class="button">💬 Discuter des alternatives</a>
+            </div>
           `;
         }
         break;
 
       case "En attente":
-        subject = "Statut Modifié - En Attente - Paname Consulting";
+        subject = `Statut Modifié - En Attente - ${this.appName}`;
         header = "Rendez-vous en Attente";
+        boxClass = 'info-box warning';
         content = `
           <p>Votre demande de rendez-vous est en attente de confirmation.</p>
           
-          <div class="info-box">
-            <h3 style="margin-top: 0;">En attente de confirmation</h3>
+          <div class="${boxClass}">
+            <h3>⏳ En attente de confirmation</h3>
             <p>Nous traitons votre demande dans les meilleurs délais.</p>
+            <p><strong>Référence :</strong> RDV-${rendezvous._id.toString().substring(0, 8).toUpperCase()}</p>
           </div>
+          
+          <p>Vous recevrez une notification dès que votre rendez-vous sera confirmé.</p>
+          
+          <p style="font-size: 14px; color: #64748b; margin-top: 20px;">
+            <em>Délai de traitement habituel : 24 à 48 heures ouvrables</em>
+          </p>
         `;
         break;
     }
 
     if (content && subject) {
-      return await this.sendEmail(
+      return await this.sendNotification(
         rendezvous.email,
         subject,
-        this.getBaseTemplate(header, content, rendezvous.firstName),
-        `mise-à-jour-statut:${rendezvous.status}`
+        'rendezvous-status-update',
+        {
+          firstName: rendezvous.firstName,
+          content,
+          header,
+        }
       );
     }
 
@@ -298,88 +378,141 @@ private async initializeTransporter(): Promise<void> {
 
     let content = "";
     let header = "Mise à jour de Procédure";
-    let subject = "Mise à jour de votre procédure - Paname Consulting";
+    let subject = `Mise à jour de votre procédure - ${this.appName}`;
+    let boxClass = 'info-box';
 
     if (currentStep) {
+      boxClass = 'info-box';
       content = `
         <p>Votre procédure d'admission avance.</p>
         
-        <div class="info-box">
-          <h3 style="margin-top: 0;">Avancement</h3>
-          <p><strong>Progression :</strong> ${progress}%</p>
+        <div class="${boxClass}">
+          <h3>📈 Avancement</h3>
+          <div style="margin: 15px 0;">
+            <div style="background: #e2e8f0; height: 8px; border-radius: 4px; overflow: hidden;">
+              <div style="background: linear-gradient(90deg, #0ea5e9 0%, #0284c7 100%); width: ${progress}%; height: 100%;"></div>
+            </div>
+            <p style="text-align: center; margin-top: 5px; font-weight: 600; color: #0ea5e9;">${progress}% complété</p>
+          </div>
           <p><strong>Étape en cours :</strong> ${currentStep.nom}</p>
           <p><strong>Statut :</strong> ${procedure.statut}</p>
           <p><strong>Destination :</strong> ${procedure.destination}</p>
+          <p><strong>Filière :</strong> ${procedure.filiere}</p>
+          <p><strong>Référence :</strong> PROC-${procedure._id.toString().substring(0, 8).toUpperCase()}</p>
         </div>
         
-        <p>Notre équipe travaille activement sur votre dossier.</p>
+        <p>Notre équipe travaille activement sur votre dossier. Vous serez informé de la prochaine étape.</p>
+        
+        <div style="text-align: center; margin: 20px 0;">
+          <a href="${this.frontendUrl}/procedures/${procedure._id}" class="button">👁️ Voir le détail</a>
+        </div>
       `;
     } else if (procedure.statut === ProcedureStatus.COMPLETED) {
-      subject = "Procédure Terminée - Paname Consulting";
+      subject = `🎉 Procédure Terminée - ${this.appName}`;
       header = "Procédure Finalisée";
+      boxClass = 'info-box success';
       content = `
-        <p>Votre procédure d'admission est maintenant terminée avec succès.</p>
+        <p>Félicitations ! Votre procédure d'admission est maintenant terminée avec succès.</p>
         
-        <div class="info-box">
-          <h3 style="margin-top: 0;">Procédure finalisée</h3>
-          <p><strong>Statut :</strong> ${procedure.statut}</p>
+        <div class="${boxClass}">
+          <h3>✅ Procédure finalisée</h3>
+          <p><strong>Statut :</strong> <span style="color: #10b981;">${procedure.statut} ✓</span></p>
           <p><strong>Destination :</strong> ${procedure.destination}</p>
           <p><strong>Filière :</strong> ${procedure.filiere}</p>
+          <p><strong>Référence :</strong> PROC-${procedure._id.toString().substring(0, 8).toUpperCase()}</p>
+          <p><strong>Date de finalisation :</strong> ${new Date().toLocaleDateString('fr-FR')}</p>
         </div>
         
-        <p>Félicitations ! Vous avez franchi toutes les étapes nécessaires.</p>
+        <p>Vous avez franchi toutes les étapes nécessaires. Notre équipe vous contactera sous peu pour la suite.</p>
+        
+        <div style="background: #d1fae5; padding: 20px; border-radius: 8px; margin: 20px 0;">
+          <p><strong>📋 Prochaines étapes :</strong></p>
+          <p>• Récupération des documents officiels</p>
+          <p>• Préparation au départ</p>
+          <p>• Briefing pré-départ</p>
+        </div>
+        
+        <div style="text-align: center; margin: 20px 0;">
+          <a href="tel:+22320202020" class="button">📞 Prendre rendez-vous</a>
+        </div>
       `;
     } else if (procedure.statut === ProcedureStatus.REJECTED) {
-      subject = "Procédure Rejetée - Paname Consulting";
+      subject = `Procédure Rejetée - ${this.appName}`;
       header = "Procédure Rejetée";
+      boxClass = 'info-box danger';
       content = `
         <p>Votre procédure d'admission a été rejetée.</p>
         
-        <div class="info-box">
-          <h3 style="margin-top: 0;">Décision</h3>
-          <p><strong>Statut :</strong> ${procedure.statut}</p>
+        <div class="${boxClass}">
+          <h3>❌ Décision</h3>
+          <p><strong>Statut :</strong> <span style="color: #ef4444;">${procedure.statut}</span></p>
           <p><strong>Destination :</strong> ${procedure.destination}</p>
+          <p><strong>Filière :</strong> ${procedure.filiere}</p>
           ${procedure.raisonRejet ? `<p><strong>Raison :</strong> ${procedure.raisonRejet}</p>` : ""}
+          <p><strong>Référence :</strong> PROC-${procedure._id.toString().substring(0, 8).toUpperCase()}</p>
         </div>
         
-        <p>Notre équipe reste à votre disposition pour discuter des alternatives.</p>
+        <p>Nous regrettons cette décision. Notre équipe reste à votre disposition pour discuter des alternatives possibles.</p>
+        
+        <div style="text-align: center; margin: 20px 0;">
+          <a href="${this.frontendUrl}/contact" class="button">💬 Discuter des options</a>
+        </div>
       `;
     }
 
     if (content) {
-      return await this.sendEmail(
+      return await this.sendNotification(
         procedure.email,
         subject,
-        this.getBaseTemplate(header, content, procedure.prenom),
-        `mise-à-jour-procedure:${procedure.statut}`
+        'procedure-update',
+        {
+          firstName: procedure.prenom,
+          content,
+          header,
+        }
       );
     }
 
     return false;
   }
 
-  async sendProcedureCreation(
-    procedure: Procedure,
-    rendezvous: Rendezvous
-  ): Promise<boolean> {
+  async sendProcedureCreation(procedure: Procedure, rendezvous: Rendezvous): Promise<boolean> {
     const content = `
-      <p>Suite à l'avis favorable de votre rendez-vous, votre procédure d'admission a été lancée.</p>
+      <p>Suite à l'avis favorable de votre rendez-vous, votre procédure d'admission a été officiellement lancée.</p>
       
-      <div class="info-box">
-        <h3 style="margin-top: 0;">Votre procédure est lancée</h3>
+      <div class="info-box success">
+        <h3>🚀 Votre procédure est lancée</h3>
         <p><strong>Destination :</strong> ${procedure.destination}</p>
         <p><strong>Filière :</strong> ${procedure.filiere}</p>
         <p><strong>Date du rendez-vous :</strong> ${new Date(rendezvous.date).toLocaleDateString("fr-FR")}</p>
+        <p><strong>Référence procédure :</strong> PROC-${procedure._id.toString().substring(0, 8).toUpperCase()}</p>
+        <p><strong>Référence rendez-vous :</strong> RDV-${rendezvous._id.toString().substring(0, 8).toUpperCase()}</p>
       </div>
       
-      <p>Notre équipe va désormais vous accompagner pas à pas.</p>
+      <p>Notre équipe va désormais vous accompagner pas à pas dans toutes les étapes de votre admission.</p>
+      
+      <div style="background: #f0f9ff; padding: 20px; border-radius: 8px; margin: 20px 0;">
+        <p><strong>📋 Étapes de la procédure :</strong></p>
+        <ol style="margin-left: 20px; margin-top: 10px;">
+          ${procedure.steps.map((step, index) => 
+            `<li>${step.nom} <span style="color: ${step.statut === StepStatus.COMPLETED ? '#10b981' : '#94a3b8'}">(${step.statut})</span></li>`
+          ).join('')}
+        </ol>
+      </div>
+      
+      <div style="text-align: center; margin: 20px 0;">
+        <a href="${this.frontendUrl}/procedures/${procedure._id}" class="button">📊 Suivre ma procédure</a>
+      </div>
     `;
 
-    return await this.sendEmail(
+    return await this.sendNotification(
       procedure.email,
-      "Votre procédure est lancée - Paname Consulting",
-      this.getBaseTemplate("Procédure Créée", content, procedure.prenom),
-      "création-procédure"
+      `Votre procédure est lancée - ${this.appName}`,
+      'procedure-creation',
+      {
+        firstName: procedure.prenom,
+        content,
+      }
     );
   }
 
@@ -387,20 +520,30 @@ private async initializeTransporter(): Promise<void> {
     const content = `
       <p>Votre procédure d'admission a été annulée.</p>
       
-      <div class="info-box">
-        <h3 style="margin-top: 0;">Annulation</h3>
+      <div class="info-box danger">
+        <h3>🛑 Annulation</h3>
         <p><strong>Destination :</strong> ${procedure.destination}</p>
+        <p><strong>Filière :</strong> ${procedure.filiere}</p>
+        <p><strong>Référence :</strong> PROC-${procedure._id.toString().substring(0, 8).toUpperCase()}</p>
         ${procedure.deletionReason ? `<p><strong>Raison :</strong> ${procedure.deletionReason}</p>` : ""}
+        <p><strong>Date d'annulation :</strong> ${new Date().toLocaleDateString('fr-FR')}</p>
       </div>
       
-      <p>Notre équipe reste à votre disposition pour toute question.</p>
+      <p>Nous regrettons cette annulation. Notre équipe reste à votre disposition pour toute question ou pour étudier d'autres projets.</p>
+      
+      <div style="text-align: center; margin: 20px 0;">
+        <a href="${this.frontendUrl}/contact" class="button">💬 Nous contacter</a>
+      </div>
     `;
 
-    return await this.sendEmail(
+    return await this.sendNotification(
       procedure.email,
-      "Annulation de votre procédure - Paname Consulting",
-      this.getBaseTemplate("Procédure Annulée", content, procedure.prenom),
-      "annulation-procédure"
+      `Annulation de votre procédure - ${this.appName}`,
+      'procedure-cancellation',
+      {
+        firstName: procedure.prenom,
+        content,
+      }
     );
   }
 
@@ -408,52 +551,76 @@ private async initializeTransporter(): Promise<void> {
 
   async sendContactReply(contact: Contact, reply: string): Promise<boolean> {
     const content = `
-      <p>Nous vous répondons à votre message :</p>
+        <p>En réponse à votre message, ${contact.firstName} vous écrit :</p>
       
       <div class="info-box">
-        <p style="white-space: pre-line;">${reply}</p>
+        <div style="background: white; padding: 20px; border-radius: 6px; border: 1px solid #e2e8f0;">
+          <p style="white-space: pre-line; line-height: 1.8;">${reply}</p>
+        </div>
       </div>
       
       <p>Nous espérons que cette réponse correspond à vos attentes.</p>
+      
+      <div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #e2e8f0;">
+        <p><strong>Votre message original :</strong></p>
+        <div style="background: #f8fafc; padding: 15px; border-radius: 6px; margin-top: 10px; font-size: 14px;">
+          <p style="white-space: pre-line;">${contact.message}</p>
+        </div>
+      </div>
+      
+      <div style="text-align: center; margin: 25px 0;">
+        <a href="${this.frontendUrl}/contact" class="button">💬 Nouveau message</a>
+      </div>
     `;
 
-    return await this.sendEmail(
+    return await this.sendNotification(
       contact.email,
-      "Réponse à votre message - Paname Consulting",
-      this.getBaseTemplate("Réponse de notre équipe", content, contact.firstName || "Cher client"),
-      "réponse-contact"
+      `Réponse à votre message - ${this.appName}`,
+      'contact-reply',
+      {
+        firstName: contact.firstName || 'Cher client',
+        content,
+      }
     );
   }
 
   async sendContactNotification(contact: Contact): Promise<boolean> {
-    const adminEmail = this.configService.get<string>('EMAIL_USER') || process.env.EMAIL_USER;
+    const adminEmail = this.configService.get<string>('app.adminEmail', { infer: true });
+    
     if (!adminEmail) {
       this.logger.warn("Email admin non configuré - notification contact ignorée");
       return false;
     }
 
     const content = `
-      <p>Nouveau message de contact reçu :</p>
+      <p>Nouveau message de contact reçu sur le site :</p>
       
-      <div class="info-box">
-        <h3 style="margin-top: 0;">Informations</h3>
-        <p><strong>Nom :</strong> ${contact.firstName} ${contact.lastName}</p>
+      <div class="info-box important">
+        <h3>📨 Informations du contact</h3>
+        <p><strong>Nom complet :</strong> ${contact.firstName} ${contact.lastName}</p>
         <p><strong>Email :</strong> ${contact.email}</p>
+        
         <p><strong>Date :</strong> ${new Date().toLocaleString("fr-FR")}</p>
       </div>
       
-      <div style="background: #f8fafc; padding: 15px; border-radius: 6px; margin: 15px 0;">
-        <p style="white-space: pre-line;">${contact.message}</p>
+      <div style="background: #f8fafc; padding: 20px; border-radius: 8px; margin: 20px 0; border: 1px solid #e2e8f0;">
+        <h4 style="margin-top: 0; color: #475569;">Message :</h4>
+        <p style="white-space: pre-line; line-height: 1.6;">${contact.message}</p>
       </div>
       
-      <p>Pour répondre : Répondre à cet email.</p>
+      <div style="text-align: center; margin: 25px 0;">
+        <a href="mailto:${contact.email}" class="button">📧 Répondre</a>
+      </div>
     `;
 
-    return await this.sendEmail(
+    return await this.emailService.sendEmail(
       adminEmail,
-      'Nouveau message de contact - Paname Consulting',
-      this.getBaseTemplate("Nouveau Message Contact", content, "Équipe"),
-      'notification-contact-admin'
+      `Nouveau message de contact - ${contact.firstName} ${contact.lastName} - ${this.appName}`,
+      this.generateTemplate('contact-admin', {
+        firstName: 'Équipe',
+        content,
+      }),
+      'contact-admin-notification'
     );
   }
 
@@ -461,39 +628,92 @@ private async initializeTransporter(): Promise<void> {
     const content = `
       <p>Nous accusons réception de votre message.</p>
       
-      <div class="info-box">
-        <p>Votre demande a bien été enregistrée et sera traitée dans les plus brefs délais.</p>
+      <div class="info-box success">
+        <h3>✅ Message bien reçu</h3>
+        <p>Votre demande a bien été enregistrée dans notre système.</p>
         <p><strong>Délai de réponse :</strong> 48 heures ouvrables maximum</p>
       </div>
       
-      <p>Un membre de notre équipe vous contactera rapidement.</p>
+      <p>Un membre de notre équipe vous contactera rapidement par email ou téléphone.</p>
+      
+      <div style="background: #f0f9ff; padding: 20px; border-radius: 8px; margin: 20px 0;">
+        <p><strong>ℹ️ Informations pratiques :</strong></p>
+        <p><strong>📞 Téléphone :</strong> +223 20 20 20 20</p>
+        <p><strong>🕒 Horaires :</strong> Lundi - Vendredi, 8h - 18h</p>
+        <p><strong>📍 Adresse :</strong> Kalaban Coura, Bamako, Mali</p>
+      </div>
+      
+      <div style="text-align: center; margin: 20px 0;">
+        <a href="${this.frontendUrl}" class="button">🌐 Visiter notre site</a>
+      </div>
     `;
 
-    return await this.sendEmail(
+    return await this.sendNotification(
       contact.email,
-      'Confirmation de votre message - Paname Consulting',
-      this.getBaseTemplate("Confirmation de Réception", content, contact.firstName || "Cher client"),
-      'confirmation-contact'
+      `Confirmation de réception - ${this.appName}`,
+      'contact-confirmation',
+      {
+        firstName: contact.firstName || 'Cher client',
+        content,
+      }
     );
   }
 
   // ==================== UTILITY METHODS ====================
 
-  private maskEmail(email: string): string {
-    if (!email || !email.includes('@')) return '***@***';
-    const [name, domain] = email.split('@');
-    const maskedName = name.length > 2 
-      ? name.substring(0, 2) + '***' + name.substring(name.length - 1)
-      : '***';
-    return `${maskedName}@${domain}`;
+  private getTemplateContent(templateName: string, data: any): string {
+    // Cette méthode est utilisée par generateTemplate
+    return data.content;
   }
 
-  getEmailStatus(): { available: boolean; message: string } {
+  getEmailStatus(): { available: boolean; stats: any; lastCheck: string } {
+    const status = this.emailService.getStatus();
+    
     return {
-      available: this.emailServiceAvailable,
-      message: this.emailServiceAvailable 
-        ? 'Service email disponible' 
-        : 'Service email indisponible - vérifiez EMAIL_USER et EMAIL_PASS'
+      available: status.available,
+      stats: {
+        sent: status.sentCount,
+        failed: status.failedCount,
+        uptime: Math.floor(status.uptime / 1000 / 60) + ' minutes',
+      },
+      lastCheck: status.lastCheck || 'Jamais',
     };
+  }
+
+  
+  private maskEmail(email: string): string {
+    if (!email?.includes('@')) return '***@***';
+    
+    const [name, domain] = email.split('@');
+    const nameLength = name.length;
+    
+    if (nameLength <= 3) {
+      return '***@' + domain;
+    }
+    
+    const first = name.substring(0, 2);
+    const last = name.substring(nameLength - 1);
+    const masked = first + '*'.repeat(3) + last;
+    
+    return masked + '@' + domain;
+  }
+
+  private delay(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  async testEmailService(): Promise<{ success: boolean; message: string }> {
+    try {
+      const result = await this.emailService.testEmailService();
+      return {
+        success: result.success,
+        message: result.message,
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: `Erreur lors du test: ${error.message}`,
+      };
+    }
   }
 }

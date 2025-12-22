@@ -1,251 +1,326 @@
-import { Injectable, Logger, OnModuleInit } from "@nestjs/common";
+import { Injectable, Logger } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
-import * as nodemailer from "nodemailer";
-
-interface EmailConfig {
-  host: string;
-  port: number;
-  secure: boolean;
-  user: string;
-  pass: string;
-}
+import { EmailConfigService } from "../config/email-config.service";
+import { AppConfig } from "../config/configuration";
 
 interface EmailTemplate {
   subject: string;
   html: string;
 }
 
-@Injectable()
-export class MailService implements OnModuleInit {
-  private readonly logger = new Logger(MailService.name);
-  private transporter: nodemailer.Transporter;
-  private readonly appName = "Paname Consulting";
-  private readonly fromEmail: string;
-  private readonly supportEmail: string;
-
-  constructor(private readonly configService: ConfigService) {
-    this.fromEmail = `"${this.appName}" <${this.configService.get("EMAIL_USER")}>`;
-    this.supportEmail = this.configService.get("EMAIL_USER") || this.configService.get("EMAIL_USER");
-  }
-
-  async onModuleInit() {
-    await this.initializeTransporter();
-  }
-
-private async initializeTransporter(): Promise<void> {
-  const config = this.getEmailConfig();
-  
-  if (!this.isConfigValid(config)) {
-    this.logger.warn('Configuration email incomplète - service email désactivé');
-    return;
-  }
-
-  try {
-    // Configuration exclusive pour port 587 avec STARTTLS
-    const secure = false; // Toujours false pour port 587
-    const useTls = config.port === 587; // STARTTLS pour le port 587
-    
-    this.transporter = nodemailer.createTransport({
-      host: config.host,
-      port: config.port,
-      secure: secure, // false pour port 587
-      requireTLS: useTls, // true pour port 587
-      ignoreTLS: !useTls, // false pour port 587
-      auth: {
-        user: config.user,
-        pass: config.pass,
-      },
-      tls: {
-        rejectUnauthorized: true,
-        ciphers: 'SSLv3'
-      },
-      connectionTimeout: 30000, // 30 secondes
-      greetingTimeout: 30000,   // 30 secondes
-      socketTimeout: 20000,    // 20 secondes
-      debug: !this.isProduction(),
-      logger: !this.isProduction(),
-    });
-
-    await this.testConnection();
-    this.logger.log('Service email initialisé avec succès');
-    
-  } catch (error) {
-    this.logger.error(`Erreur initialisation service email: ${error.message}`, error.stack);
-  }
+interface EmailContext {
+  [key: string]: any;
 }
 
-  private getEmailConfig(): Partial<EmailConfig> {
-    return {
-      host: this.configService.get('EMAIL_HOST'),
-      port: parseInt(this.configService.get('EMAIL_PORT')),
-      secure: this.configService.get('EMAIL_SECURE'),
-      user: this.configService.get('EMAIL_USER'),
-      pass: this.configService.get('EMAIL_PASS'),
-    };
+@Injectable()
+export class MailService {
+  private readonly logger = new Logger(MailService.name);
+  private readonly appName: string;
+  private readonly frontendUrl: string;
+  private readonly supportEmail: string;
+
+  constructor(
+    private readonly configService: ConfigService<AppConfig>,
+    private readonly emailService: EmailConfigService
+  ) {
+    const config = this.configService.get<AppConfig>('app', { infer: true });
+    this.appName = config.appName;
+    this.frontendUrl = config.frontendUrl;
+    this.supportEmail = config.emailFrom;
   }
 
-  private isConfigValid(config: Partial<EmailConfig>): boolean {
-    return !!(config.host && config.user && config.pass);
+  async sendEmail(
+    to: string | string[],
+    template: EmailTemplate,
+    context?: EmailContext
+  ): Promise<boolean> {
+    const html = context ? this.renderTemplate(template.html, context) : template.html;
+    
+    return await this.emailService.sendEmail(to, template.subject, html, 'mail-service');
   }
 
-  private isProduction(): boolean {
-    return this.configService.get('NODE_ENV') === 'production';
-  }
-
-  private async testConnection(): Promise<void> {
-    if (!this.transporter) {
-      throw new Error('Transporter non initialisé');
-    }
-    await this.transporter.verify();
-  }
-
-  async sendEmail(to: string, template: EmailTemplate, context?: Record<string, any>): Promise<boolean> {
-    if (!this.transporter) {
-      this.logger.warn(`Tentative d'envoi email - service indisponible`);
-      return false;
-    }
-
-    // Validation de l'adresse email
-    if (!to || !to.includes('@')) {
-      this.logger.error(`Adresse email invalide: ${to}`);
-      return false;
-    }
-
-    const mailOptions = {
-      from: this.fromEmail,
-      to: to,
-      replyTo: this.supportEmail,
-      subject: template.subject,
-      html: context ? this.renderTemplate(template.html, context) : template.html,
-    };
-
-    try {
-      await this.transporter.sendMail(mailOptions);
-      this.logger.log(`✅ Email envoyé à: ${this.maskEmail(to)}`);
-      return true;
-    } catch (error) {
-      this.logger.error(`❌ Erreur envoi email à ${this.maskEmail(to)}: ${error.message}`);
-      return false;
-    }
-  }
-
-  async sendPasswordResetEmail(email: string, resetUrl: string): Promise<void> {
+  async sendPasswordResetEmail(email: string, resetToken: string): Promise<boolean> {
+    const resetUrl = `${this.frontendUrl}/reset-password?token=${resetToken}`;
+    
     const template = this.getPasswordResetTemplate(resetUrl);
-    const success = await this.sendEmail(email, template);
+    const success = await this.sendEmail(email, template, { resetUrl });
     
     if (success) {
-      this.logger.log(`✅ Email de réinitialisation envoyé à: ${this.maskEmail(email)}`);
+      this.logger.log(`✅ Email de réinitialisation envoyé à: ${this.emailService.maskEmail(email)}`);
     } else {
-      this.logger.error(`❌ Échec d'envoi d'email de réinitialisation à: ${this.maskEmail(email)}`);
+      this.logger.error(`❌ Échec d'envoi d'email de réinitialisation à: ${this.emailService.maskEmail(email)}`);
     }
+    
+    return success;
   }
 
-  async sendWelcomeEmail(email: string, firstName: string): Promise<void> {
+  async sendWelcomeEmail(email: string, firstName: string): Promise<boolean> {
     const template = this.getWelcomeTemplate(firstName);
-    const success = await this.sendEmail(email, template);
+    const success = await this.sendEmail(email, template, { firstName });
     
     if (success) {
-      this.logger.log(`✅ Email de bienvenue envoyé à: ${this.maskEmail(email)}`);
+      this.logger.log(`✅ Email de bienvenue envoyé à: ${this.emailService.maskEmail(email)}`);
     } else {
-      this.logger.error(`❌ Échec d'envoi d'email de bienvenue à: ${this.maskEmail(email)}`);
+      this.logger.error(`❌ Échec d'envoi d'email de bienvenue à: ${this.emailService.maskEmail(email)}`);
     }
+    
+    return success;
+  }
+
+  async sendAccountVerificationEmail(email: string, verificationToken: string): Promise<boolean> {
+    const verificationUrl = `${this.frontendUrl}/verify-account?token=${verificationToken}`;
+    
+    const template = this.getVerificationTemplate(verificationUrl);
+    const success = await this.sendEmail(email, template, { verificationUrl });
+    
+    if (success) {
+      this.logger.log(`✅ Email de vérification envoyé à: ${this.emailService.maskEmail(email)}`);
+    }
+    
+    return success;
+  }
+
+  async sendAdminNotification(subject: string, message: string, priority: 'low' | 'medium' | 'high' = 'medium'): Promise<boolean> {
+    const adminEmail = this.configService.get<string>('app.adminEmail', { infer: true });
+    
+    if (!adminEmail) {
+      this.logger.warn('Email admin non configuré - notification ignorée');
+      return false;
+    }
+
+    const template = this.getAdminNotificationTemplate(subject, message, priority);
+    return await this.sendEmail(adminEmail, template, { subject, message, priority });
   }
 
   private getPasswordResetTemplate(resetUrl: string): EmailTemplate {
     return {
-      subject: 'Réinitialisation de votre mot de passe - Paname Consulting',
+      subject: `Réinitialisation de mot de passe - ${this.appName}`,
       html: `
-        <!DOCTYPE html>
-        <html>
-        <head>
-          <meta charset="utf-8">
-          <meta name="viewport" content="width=device-width, initial-scale=1.0">
-          <title>Réinitialisation de mot de passe</title>
-        </head>
-        <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
-          <div style="background: linear-gradient(135deg, #0ea5e9, #0369a1); color: white; padding: 30px 20px; text-align: center; border-radius: 8px 8px 0 0;">
-            <h1 style="margin: 0; font-size: 24px; font-weight: 600;">Réinitialisation de mot de passe</h1>
+        <div style="max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.05);">
+          <div style="background: linear-gradient(135deg, #0ea5e9 0%, #0284c7 100%); color: white; padding: 40px 30px; text-align: center;">
+            <h1 style="margin: 0; font-size: 28px; font-weight: 700;">Réinitialisation de mot de passe</h1>
+            <p style="margin: 10px 0 0 0; opacity: 0.9;">${this.appName}</p>
           </div>
           
-          <div style="background: #ffffff; padding: 30px; border-radius: 0 0 8px 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.05);">
-            <p>Bonjour,</p>
-            <p>Vous avez demandé à réinitialiser votre mot de passe. Cliquez sur le bouton ci-dessous pour procéder :</p>
+          <div style="padding: 40px 30px;">
+            <p style="font-size: 18px; margin-bottom: 25px; color: #1e293b;">
+              Bonjour,
+            </p>
+            
+            <p style="color: #475569; line-height: 1.6; margin-bottom: 25px;">
+              Vous avez demandé à réinitialiser votre mot de passe. Cliquez sur le bouton ci-dessous pour procéder :
+            </p>
             
             <div style="text-align: center; margin: 30px 0;">
-              <a href="${resetUrl}" 
-                 style="display: inline-block; padding: 14px 28px; background: linear-gradient(135deg, #0ea5e9, #0369a1); 
-                        color: white; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 16px;">
+              <a href="{{resetUrl}}" 
+                 style="display: inline-block; padding: 16px 32px; 
+                        background: linear-gradient(135deg, #0ea5e9 0%, #0284c7 100%); 
+                        color: white; text-decoration: none; border-radius: 8px; 
+                        font-weight: 600; font-size: 16px; letter-spacing: 0.5px;">
                 Réinitialiser mon mot de passe
               </a>
             </div>
 
-            <div style="background: #f8fafc; padding: 15px; border-radius: 6px; border-left: 4px solid #0ea5e9; margin: 20px 0;">
+            <div style="background: #f8fafc; padding: 20px; border-radius: 8px; border-left: 4px solid #0ea5e9; margin: 25px 0;">
               <p style="color: #64748b; font-size: 14px; margin: 0;">
-                <strong>Important :</strong> Ce lien expirera dans 1 heure.
+                <strong>⏰ Important :</strong> Ce lien est valable pendant 1 heure seulement.
               </p>
             </div>
             
-            <p style="color: #94a3b8; font-size: 14px; margin-top: 30px;">
+            <p style="color: #94a3b8; font-size: 14px; line-height: 1.5; margin-top: 30px;">
               Si vous n'avez pas demandé cette réinitialisation, veuillez ignorer cet email ou 
-              <a href="mailto:${this.supportEmail}" style="color: #0ea5e9;">contacter notre support</a>.
+              <a href="mailto:${this.supportEmail}" style="color: #0ea5e9; text-decoration: none;">contacter notre support</a> 
+              immédiatement.
             </p>
             
-            <div style="margin-top: 40px; padding-top: 20px; border-top: 1px solid #e2e8f0; text-align: center;">
-              <p style="color: #64748b; font-size: 12px; line-height: 1.4;">
+            <div style="margin-top: 40px; padding-top: 25px; border-top: 1px solid #e2e8f0;">
+              <p style="color: #64748b; font-size: 14px; line-height: 1.5; text-align: center;">
                 Cordialement,<br>
-                <strong style="color: #0ea5e9;">L'équipe Paname Consulting</strong><br>
+                <strong style="color: #0ea5e9;">L'équipe ${this.appName}</strong><br>
                 <a href="mailto:${this.supportEmail}" style="color: #64748b; text-decoration: none;">${this.supportEmail}</a>
               </p>
             </div>
           </div>
-        </body>
-        </html>
+        </div>
       `,
     };
   }
 
   private getWelcomeTemplate(firstName: string): EmailTemplate {
     return {
-      subject: 'Bienvenue chez Paname Consulting',
+      subject: `Bienvenue chez ${this.appName} !`,
       html: `
-        <!DOCTYPE html>
-        <html>
-        <head>
-          <meta charset="utf-8">
-          <meta name="viewport" content="width=device-width, initial-scale=1.0">
-          <title>Bienvenue</title>
-        </head>
-        <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
-          <div style="background: linear-gradient(135deg, #0ea5e9, #0369a1); color: white; padding: 30px 20px; text-align: center; border-radius: 8px 8px 0 0;">
-            <h1 style="margin: 0; font-size: 24px; font-weight: 600;">Bienvenue chez Paname Consulting</h1>
+        <div style="max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.05);">
+          <div style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: white; padding: 40px 30px; text-align: center;">
+            <h1 style="margin: 0; font-size: 28px; font-weight: 700;">Bienvenue !</h1>
+            <p style="margin: 10px 0 0 0; opacity: 0.9;">${this.appName} - Votre avenir commence ici</p>
           </div>
           
-          <div style="background: #ffffff; padding: 30px; border-radius: 0 0 8px 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.05);">
-            <p>Bonjour <strong>${firstName}</strong>,</p>
-            <p>Nous sommes ravis de vous accueillir chez <strong>Paname Consulting</strong> !</p>
+          <div style="padding: 40px 30px;">
+            <p style="font-size: 18px; margin-bottom: 25px; color: #1e293b;">
+              Bonjour <strong>{{firstName}}</strong>,
+            </p>
             
-            <div style="background: #f0f9ff; padding: 20px; border-radius: 6px; margin: 20px 0;">
-              <p style="margin: 0 0 15px 0;"><strong>Votre compte a été créé avec succès.</strong></p>
-              <p style="margin: 0;">Vous pouvez maintenant accéder à votre espace personnel et prendre rendez-vous avec nos conseillers.</p>
+            <p style="color: #475569; line-height: 1.6; margin-bottom: 25px;">
+              Nous sommes ravis de vous accueillir chez <strong>${this.appName}</strong> !
+              Votre compte a été créé avec succès.
+            </p>
+            
+            <div style="background: #d1fae5; padding: 25px; border-radius: 8px; margin: 25px 0;">
+              <p style="margin: 0 0 15px 0; color: #065f46; font-weight: 600;">
+                🎉 Votre compte est maintenant actif !
+              </p>
+              <p style="margin: 0; color: #047857;">
+                Vous pouvez dès maintenant accéder à votre espace personnel, prendre rendez-vous avec nos conseillers et suivre vos procédures d'admission.
+              </p>
             </div>
 
-            <p>Nous sommes impatients de vous accompagner dans votre projet d'études à l'international.</p>
+            <p style="color: #475569; line-height: 1.6; margin-bottom: 25px;">
+              Nous sommes impatients de vous accompagner dans votre projet d'études à l'international.
+            </p>
             
-            <div style="margin-top: 40px; padding-top: 20px; border-top: 1px solid #e2e8f0; text-align: center;">
-              <p style="color: #64748b; font-size: 12px; line-height: 1.4;">
-                Cordialement,<br>
-                <strong style="color: #0ea5e9;">L'équipe Paname Consulting</strong><br>
-                <a href="mailto:${this.supportEmail}" style="color: #64748b; text-decoration: none;">${this.supportEmail}</a>
+            <div style="text-align: center; margin: 30px 0;">
+              <a href="${this.frontendUrl}/dashboard" 
+                 style="display: inline-block; padding: 16px 32px; 
+                        background: linear-gradient(135deg, #10b981 0%, #059669 100%); 
+                        color: white; text-decoration: none; border-radius: 8px; 
+                        font-weight: 600; font-size: 16px;">
+                Accéder à mon espace
+              </a>
+            </div>
+            
+            <div style="background: #f0f9ff; padding: 20px; border-radius: 8px; margin: 25px 0;">
+              <p style="margin: 0 0 15px 0; color: #0369a1; font-weight: 600;">
+                📋 Pour commencer :
+              </p>
+              <ul style="margin: 0; padding-left: 20px; color: #475569;">
+                <li>Complétez votre profil</li>
+                <li>Prenez rendez-vous avec un conseiller</li>
+                <li>Explorez nos destinations et programmes</li>
+                <li>Consultez nos guides et ressources</li>
+              </ul>
+            </div>
+            
+            <div style="margin-top: 40px; padding-top: 25px; border-top: 1px solid #e2e8f0;">
+              <p style="color: #64748b; font-size: 14px; line-height: 1.5; text-align: center;">
+                À très bientôt,<br>
+                <strong style="color: #10b981;">L'équipe ${this.appName}</strong><br>
+                <a href="${this.frontendUrl}" style="color: #64748b; text-decoration: none;">${this.frontendUrl.replace('https://', '')}</a>
               </p>
             </div>
           </div>
-        </body>
-        </html>
+        </div>
       `,
     };
   }
 
-  private renderTemplate(html: string, context?: Record<string, any>): string {
+  private getVerificationTemplate(verificationUrl: string): EmailTemplate {
+    return {
+      subject: `Vérification de votre compte - ${this.appName}`,
+      html: `
+        <div style="max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.05);">
+          <div style="background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%); color: white; padding: 40px 30px; text-align: center;">
+            <h1 style="margin: 0; font-size: 28px; font-weight: 700;">Vérifiez votre compte</h1>
+            <p style="margin: 10px 0 0 0; opacity: 0.9;">${this.appName}</p>
+          </div>
+          
+          <div style="padding: 40px 30px;">
+            <p style="font-size: 18px; margin-bottom: 25px; color: #1e293b;">
+              Bonjour,
+            </p>
+            
+            <p style="color: #475569; line-height: 1.6; margin-bottom: 25px;">
+              Merci de vous être inscrit sur ${this.appName}. Pour activer votre compte et accéder à toutes les fonctionnalités, veuillez vérifier votre adresse email.
+            </p>
+            
+            <div style="text-align: center; margin: 30px 0;">
+              <a href="{{verificationUrl}}" 
+                 style="display: inline-block; padding: 16px 32px; 
+                        background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%); 
+                        color: white; text-decoration: none; border-radius: 8px; 
+                        font-weight: 600; font-size: 16px;">
+                Vérifier mon email
+              </a>
+            </div>
+
+            <div style="background: #faf5ff; padding: 20px; border-radius: 8px; border-left: 4px solid #8b5cf6; margin: 25px 0;">
+              <p style="color: #7c3aed; font-size: 14px; margin: 0;">
+                <strong>💡 Pourquoi vérifier ?</strong><br>
+                La vérification de votre email vous permet de recevoir des notifications importantes concernant vos rendez-vous et procédures.
+              </p>
+            </div>
+            
+            <p style="color: #94a3b8; font-size: 14px; line-height: 1.5; margin-top: 30px;">
+              Si vous n'avez pas créé de compte sur ${this.appName}, vous pouvez ignorer cet email en toute sécurité.
+            </p>
+            
+            <div style="margin-top: 40px; padding-top: 25px; border-top: 1px solid #e2e8f0;">
+              <p style="color: #64748b; font-size: 14px; line-height: 1.5; text-align: center;">
+                Cordialement,<br>
+                <strong style="color: #8b5cf6;">L'équipe ${this.appName}</strong><br>
+                <a href="mailto:${this.supportEmail}" style="color: #64748b; text-decoration: none;">${this.supportEmail}</a>
+              </p>
+            </div>
+          </div>
+        </div>
+      `,
+    };
+  }
+
+  private getAdminNotificationTemplate(subject: string, message: string, priority: string): EmailTemplate {
+    const priorityColors = {
+      low: '#10b981',
+      medium: '#f59e0b',
+      high: '#ef4444'
+    };
+
+    const priorityLabels = {
+      low: '🟢 Faible',
+      medium: '🟡 Moyenne',
+      high: '🔴 Haute'
+    };
+
+    return {
+      subject: `[${priority.toUpperCase()}] ${subject} - ${this.appName}`,
+      html: `
+        <div style="max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.05);">
+          <div style="background: linear-gradient(135deg, ${priorityColors[priority]} 0%, ${priorityColors[priority]}77 100%); color: white; padding: 40px 30px; text-align: center;">
+            <h1 style="margin: 0; font-size: 28px; font-weight: 700;">Notification Admin</h1>
+            <p style="margin: 10px 0 0 0; opacity: 0.9;">${priorityLabels[priority]}</p>
+          </div>
+          
+          <div style="padding: 40px 30px;">
+            <div style="background: #f8fafc; padding: 25px; border-radius: 8px; margin-bottom: 25px; border-left: 4px solid ${priorityColors[priority]};">
+              <h2 style="margin: 0 0 15px 0; color: #1e293b;">{{subject}}</h2>
+              <p style="color: #475569; white-space: pre-line; line-height: 1.6; margin: 0;">
+                {{message}}
+              </p>
+            </div>
+            
+            <div style="background: #f1f5f9; padding: 20px; border-radius: 8px; margin: 25px 0;">
+              <p style="margin: 0 0 10px 0; color: #475569; font-weight: 600;">
+                📊 Informations système :
+              </p>
+              <p style="margin: 0; color: #64748b; font-size: 14px;">
+                <strong>Date :</strong> ${new Date().toLocaleString('fr-FR')}<br>
+                <strong>Environnement :</strong> ${process.env.NODE_ENV || 'production'}<br>
+                <strong>Application :</strong> ${this.appName}
+              </p>
+            </div>
+            
+            <div style="margin-top: 40px; padding-top: 25px; border-top: 1px solid #e2e8f0;">
+              <p style="color: #64748b; font-size: 14px; line-height: 1.5; text-align: center;">
+                Ceci est une notification automatique du système ${this.appName}.<br>
+                <a href="${this.frontendUrl}/admin" style="color: ${priorityColors[priority]}; text-decoration: none;">Accéder à l'administration</a>
+              </p>
+            </div>
+          </div>
+        </div>
+      `,
+    };
+  }
+
+  private renderTemplate(html: string, context?: EmailContext): string {
     if (!context) return html;
     
     let rendered = html;
@@ -256,18 +331,17 @@ private async initializeTransporter(): Promise<void> {
     return rendered;
   }
 
-  private maskEmail(email: string): string {
-    if (!email?.includes('@')) return '***@***';
-    const [name, domain] = email.split('@');
-    return `${name.substring(0, 2)}***@${domain}`;
-  }
-
   getServiceStatus(): { available: boolean; config: any } {
+    const emailStatus = this.emailService.getStatus();
+    const config = this.configService.get<AppConfig>('app', { infer: true });
+    
     return {
-      available: !!this.transporter,
+      available: emailStatus.available,
       config: {
-        user: process.env.EMAIL_USER,
-        fromEmail: this.fromEmail,
+        appName: config.appName,
+        fromEmail: config.emailFrom,
+        frontendUrl: config.frontendUrl,
+        emailConfigured: !!config.emailUser,
       }
     };
   }
