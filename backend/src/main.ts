@@ -27,29 +27,6 @@ declare global {
 
 const isProduction = true;
 
-// 🌐 ORIGINES AUTORISÉES EN PRODUCTION EXCLUSIVE
-const productionOrigins = [
-  "https://panameconsulting.com",
-  "https://www.panameconsulting.com",
-  "https://panameconsulting.vercel.app",
-  "https://vercel.live",
-  "http://localhost:5713",
-];
-
-// Fonction pour vérifier si une origine correspond à un pattern avec wildcard
-function isOriginAllowed(origin: string, allowedOrigins: string[]): boolean {
-  return allowedOrigins.some(allowedOrigin => {
-    if (allowedOrigin.includes('*')) {
-      const pattern = allowedOrigin
-        .replace(/\./g, '\\.')
-        .replace(/\*/g, '.*');
-      const regex = new RegExp(`^${pattern}$`);
-      return regex.test(origin);
-    }
-    return origin === allowedOrigin;
-  });
-}
-
 async function bootstrap() {
   const logger = new Logger("Bootstrap");
 
@@ -101,7 +78,7 @@ async function bootstrap() {
     },
   );
 
-  // 🔐 CONFIGURATION DE SÉCURITÉ HELMET - APPLIQUÉE AVANT TOUTES LES ROUTES
+  // 🔐 CONFIGURATION DE SÉCURITÉ HELMET
   app.use(
     helmet({
       contentSecurityPolicy: {
@@ -110,11 +87,11 @@ async function bootstrap() {
           scriptSrc: ["'self'", "'unsafe-inline'"],
           styleSrc: ["'self'", "'unsafe-inline'"],
           imgSrc: ["'self'", "data:", "https:"],
-          connectSrc: ["'self'", ...productionOrigins],
+          connectSrc: ["'self'"],
           fontSrc: ["'self'", "https:"],
           objectSrc: ["'none'"],
           mediaSrc: ["'self'"],
-          frameSrc: ["'self'", "https://vercel.live", "https://www.google.com"],
+          frameSrc: ["'self'"],
           baseUri: ["'self'"],
           formAction: ["'self'"],
         },
@@ -170,10 +147,42 @@ async function bootstrap() {
     next();
   });
 
+  // Fonction pour vérifier si une origine est autorisée
+  function isOriginAllowed(origin: string): boolean {
+    if (!origin) return false;
+
+    // Liste des origines autorisées (exactes)
+    const allowedExactOrigins = [
+      "https://panameconsulting.up.railway.app",
+      "https://panameconsulting.com",
+      "https://www.panameconsulting.com",
+      "http://localhost:5173",
+      "https://vercel.live",
+      "https://panameconsulting.vercel.app",
+    ];
+
+    // Vérifier les origines exactes
+    if (allowedExactOrigins.includes(origin)) {
+      return true;
+    }
+
+    // Vérifier les domaines .vercel.app
+    try {
+      const url = new URL(origin);
+      if (url.hostname.endsWith('.vercel.app')) {
+        logger.debug(`✅ Origine .vercel.app détectée: ${origin}`);
+        return true;
+      }
+    } catch (e) {
+      // URL invalide
+      return false;
+    }
+
+    return false;
+  }
+
   // ✅ CONFIGURATION CORS STRICTE
-  logger.log(`Configuration CORS pour environnement: PRODUCTION EXCLUSIVE`);
-  logger.log(`Parsing middleware: ✅ JSON, URL-encoded, Cookies activés`);
-  logger.log(`Origines autorisées: ${productionOrigins.length} origines`);
+  logger.log(`Configuration CORS pour environnement: PRODUCTION`);
 
   app.enableCors({
     origin: (origin, callback) => {
@@ -184,15 +193,12 @@ async function bootstrap() {
         return;
       }
 
-      // 🔒 Vérification stricte des origines
-      const isAllowed = isOriginAllowed(origin, productionOrigins);
-
-      if (isAllowed) {
+      // 🔐 Vérification des origines
+      if (isOriginAllowed(origin)) {
         logger.debug(`✅ Origine autorisée: ${origin}`);
         callback(null, true);
       } else {
         logger.warn(`❌ Origine non autorisée: ${origin}`);
-        logger.warn(`   Origines autorisées: ${productionOrigins.join(', ')}`);
         callback(new Error(`Origine non autorisée: ${origin}`), false);
       }
     },
@@ -259,12 +265,11 @@ async function bootstrap() {
             <p><strong>Environnement:</strong> PRODUCTION</p>
             <p><strong>Version:</strong> ${process.env.npm_package_version || '1.0.0'}</p>
             <p><strong>Timestamp:</strong> ${new Date().toLocaleString()}</p>
-            <p><strong>Parsing:</strong> ✅ JSON, URL-encoded, Cookies, Text</p>
+            <p><strong>CORS:</strong> ✅ Railway.app, Vercel.app, Localhost:5173</p>
           </div>
           <div class="links">
             <a href="/health">Health Check</a>
             <a href="/api">API Info</a>
-            <a href="/api/test-cors">Test CORS</a>
           </div>
         </div>
       </body>
@@ -279,14 +284,14 @@ async function bootstrap() {
       timestamp: new Date().toISOString(),
       uptime: process.uptime(),
       memory: process.memoryUsage(),
-      parsing: {
-        json: "enabled",
-        urlencoded: "enabled",
-        cookies: "enabled",
-        text: "enabled"
-      },
       cors: {
-        allowedOrigins: productionOrigins,
+        allowed: [
+          "panameconsulting.up.railway.app",
+          "panameconsulting.com",
+          "www.panameconsulting.com",
+          "localhost:5173",
+          "*.vercel.app"
+        ],
         credentials: "enabled"
       }
     });
@@ -302,13 +307,14 @@ async function bootstrap() {
       environment: "production",
       support: "panameconsulting906@gmail.com",
       uptime: process.uptime(),
-      parsing: {
-        json: "enabled",
-        urlencoded: "enabled",
-        cookies: "enabled"
-      },
       cors: {
-        allowedOrigins: productionOrigins
+        allowedOrigins: [
+          "panameconsulting.up.railway.app",
+          "panameconsulting.com", 
+          "www.panameconsulting.com",
+          "localhost:5173",
+          "*.vercel.app"
+        ]
       }
     });
   });
@@ -318,13 +324,13 @@ async function bootstrap() {
     // Répondre immédiatement aux requêtes OPTIONS (pré-vol CORS)
     if (req.method === "OPTIONS") {
       const origin = req.headers.origin;
-      if (origin && isOriginAllowed(origin, productionOrigins)) {
+      if (origin && isOriginAllowed(origin)) {
         res.header("Access-Control-Allow-Origin", origin);
       }
       res.header("Access-Control-Allow-Credentials", "true");
       res.header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
       res.header("Access-Control-Allow-Headers", "Authorization, Content-Type, Accept, Origin, X-Requested-With, Cookie, Access-Control-Allow-Credentials");
-      res.header("Access-Control-Expose-Headers", "Authorization, X-RateLimit-Limit, X-RateLimit-Remaining, Set-Cookie, Access-Control-Allow-Origin");
+      res.header("Access-Control-Expose-Headers", "Authorization, Set-Cookie, Access-Control-Allow-Origin");
       res.header("Access-Control-Max-Age", "86400");
       return res.status(200).end();
     }
@@ -414,35 +420,35 @@ async function bootstrap() {
     // ✅ LOG DE DÉMARRAGE DÉTAILLÉ
     logger.log(`========================================`);
     logger.log(`🚀 Application: Paname Consulting API`);
-    logger.log(`📍 Environnement: PRODUCTION EXCLUSIVE`);
+    logger.log(`📍 Environnement: PRODUCTION`);
     logger.log(`🌐 Host: ${host}`);
     logger.log(`🚪 Port: ${port}`);
     logger.log(`📁 Dossier uploads: ${uploadsDir}`);
     logger.log(`🔒 Mode production: ${isProduction}`);
-    logger.log(`🔐 CORS activé: ${productionOrigins.length} origines`);
+    logger.log(`🔐 CORS activé avec .vercel.app`);
     logger.log(`📝 Parsing middleware: ✅ Activé`);
     logger.log(`🍪 Cookie parser: ✅ Activé`);
     logger.log(`========================================`);
     
     // ✅ LISTE DES ORIGINES AUTORISÉES
     logger.log(`🌍 Origines CORS autorisées:`);
-    productionOrigins.forEach(origin => {
-      logger.log(`   • ${origin}`);
-    });
+    logger.log(`   • https://panameconsulting.up.railway.app`);
+    logger.log(`   • https://panameconsulting.com`);
+    logger.log(`   • https://www.panameconsulting.com`);
+    logger.log(`   • http://localhost:5173`);
+    logger.log(`   • *.vercel.app (tous les sous-domaines)`);
 
     // ✅ DÉMARRAGE DU SERVEUR
     await app.listen(port, host);
 
     logger.log(`✅ Serveur démarré sur http://${host}:${port}`);
     logger.log(`✅ Health check: http://${host}:${port}/health`);
-    logger.log(`✅ Parsing middleware: JSON, URL-encoded, Cookies activés`);
     
     // ✅ INFORMATION DE MONITORING
     const memoryUsage = process.memoryUsage();
     logger.log(`📊 Mémoire utilisée: ${Math.round(memoryUsage.heapUsed / 1024 / 1024)}MB / ${Math.round(memoryUsage.heapTotal / 1024 / 1024)}MB`);
 
   } catch (error: unknown) {
-    // ✅ LOG SÉCURISÉ SANS DONNÉES SENSIBLES
     logger.error("❌ Erreur fatale au démarrage", {
       message: error instanceof Error ? error.message : "Erreur inconnue",
       timestamp: new Date().toISOString(),
@@ -456,7 +462,6 @@ async function bootstrap() {
 // ✅ GESTION D'ERREUR GLOBALE
 process.on("uncaughtException", (error: Error) => {
   const logger = new Logger("UncaughtException");
-  
   logger.error("⚠️ Erreur non gérée détectée", {
     message: error.message,
     timestamp: new Date().toISOString(),
@@ -466,7 +471,6 @@ process.on("uncaughtException", (error: Error) => {
 
 process.on("unhandledRejection", (reason: any, promise: Promise<any>) => {
   const logger = new Logger("UnhandledRejection");
-  
   logger.error("⚠️ Promise rejection non gérée", {
     reason: reason instanceof Error ? reason.message : "Raison inconnue",
     timestamp: new Date().toISOString(),
