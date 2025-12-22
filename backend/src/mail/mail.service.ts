@@ -31,64 +31,49 @@ export class MailService implements OnModuleInit {
   async onModuleInit() {
     await this.initializeTransporter();
   }
-  private async initializeTransporter(): Promise<void> {
+
+private async initializeTransporter(): Promise<void> {
   const config = this.getEmailConfig();
   
-  // Log de la config (sans le mot de passe)
-  this.logger.log(`Config email: ${config.host}:${config.port} user:${config.user}`);
-  
+  if (!this.isConfigValid(config)) {
+    this.logger.warn('Configuration email incomplète - service email désactivé');
+    return;
+  }
+
   try {
-    // Configuration pour Railway (offre souvent un réseau restreint)
-    const transporterOptions: any = {
+    // Configuration exclusive pour port 587 avec STARTTLS
+    const secure = false; // Toujours false pour port 587
+    const useTls = config.port === 587; // STARTTLS pour le port 587
+    
+    this.transporter = nodemailer.createTransport({
       host: config.host,
       port: config.port,
-      secure: config.port === 465,
+      secure: secure, // false pour port 587
+      requireTLS: useTls, // true pour port 587
+      ignoreTLS: !useTls, // false pour port 587
       auth: {
         user: config.user,
         pass: config.pass,
       },
-      // Configuration optimisée pour Railway
-      connectionTimeout: 30000,
-      greetingTimeout: 15000,
-      socketTimeout: 30000,
-      pool: true,
-      maxConnections: 1, // Réduit le nombre de connexions simultanées
-      maxMessages: 10,
-    };
-
-    // Désactiver complètement les vérifications TLS si nécessaire
-    if (config.port === 587) {
-      transporterOptions.tls = {
-        rejectUnauthorized: false,
+      tls: {
+        rejectUnauthorized: true,
         ciphers: 'SSLv3'
-      };
-      transporterOptions.requireTLS = true;
-      transporterOptions.ignoreTLS = false;
-    }
+      },
+      connectionTimeout: 30000, // 30 secondes
+      greetingTimeout: 30000,   // 30 secondes
+      socketTimeout: 20000,    // 20 secondes
+      debug: !this.isProduction(),
+      logger: !this.isProduction(),
+    });
 
-    this.transporter = nodemailer.createTransport(transporterOptions);
-
-    // Vérification avec retry
-    let verified = false;
-    for (let i = 0; i < 3 && !verified; i++) {
-      try {
-        await this.transporter.verify();
-        verified = true;
-        this.logger.log('✅ Connexion SMTP réussie');
-      } catch (verifyError) {
-        this.logger.warn(`Tentative ${i + 1}/3 échouée: ${verifyError.message}`);
-        if (i < 2) await new Promise(resolve => setTimeout(resolve, 2000));
-      }
-    }
+    await this.testConnection();
+    this.logger.log('Service email initialisé avec succès');
     
   } catch (error) {
-    this.logger.error(`❌ Impossible d'initialiser le service email: ${error.message}`);    
-    // En production, continuer sans email
-    if (this.isProduction()) {
-      this.logger.warn('L\'application continue sans service email');
-    }
+    this.logger.error(`Erreur initialisation service email: ${error.message}`, error.stack);
   }
 }
+
   private getEmailConfig(): Partial<EmailConfig> {
     return {
       host: this.configService.get('EMAIL_HOST'),
@@ -99,9 +84,19 @@ export class MailService implements OnModuleInit {
     };
   }
 
+  private isConfigValid(config: Partial<EmailConfig>): boolean {
+    return !!(config.host && config.user && config.pass);
+  }
 
   private isProduction(): boolean {
     return this.configService.get('NODE_ENV') === 'production';
+  }
+
+  private async testConnection(): Promise<void> {
+    if (!this.transporter) {
+      throw new Error('Transporter non initialisé');
+    }
+    await this.transporter.verify();
   }
 
   async sendEmail(to: string, template: EmailTemplate, context?: Record<string, any>): Promise<boolean> {
