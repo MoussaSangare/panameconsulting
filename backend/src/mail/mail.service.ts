@@ -15,7 +15,7 @@ export class MailService {
   private readonly supportEmail: string;
 
   constructor(private configService: ConfigService) {
-    // Chargement des variables d'environnement obligatoires
+    // Chargement des variables d'environnement
     const emailUser = this.configService.get<string>('EMAIL_USER');
     const emailPass = this.configService.get<string>('EMAIL_PASS');
     
@@ -36,58 +36,72 @@ export class MailService {
       return;
     }
 
-    // Configuration simplifiée pour Gmail
-    this.transporter = nodemailer.createTransport({
-      service: 'gmail', // Utilise la configuration prédéfinie de Gmail
-      auth: {
-        user: user,
-        pass: pass,
+    // Essayer différentes configurations Gmail
+    const configs = [
+      {
+        name: 'Gmail SSL (port 465)',
+        config: {
+          host: 'smtp.gmail.com',
+          port: 465,
+          secure: true, // SSL
+          auth: { user, pass },
+          tls: { rejectUnauthorized: false },
+          connectionTimeout: 15000,
+          socketTimeout: 15000,
+        }
       },
-      // Timeouts optimisés
-      connectionTimeout: 10000,
-      greetingTimeout: 5000,
-      socketTimeout: 10000,
-      
-      // Configuration TLS/SSL
-      tls: {
-        rejectUnauthorized: false, // Désactiver pour éviter les problèmes de certificat
+      {
+        name: 'Gmail STARTTLS (port 587)',
+        config: {
+          host: 'smtp.gmail.com',
+          port: 587,
+          secure: false, // STARTTLS
+          requireTLS: true,
+          auth: { user, pass },
+          tls: { rejectUnauthorized: false },
+          connectionTimeout: 15000,
+          socketTimeout: 15000,
+        }
       },
-      
-      // Désactiver les logs en production
-      logger: process.env.NODE_ENV === 'development',
-      debug: process.env.NODE_ENV === 'development',
-    });
+      {
+        name: 'Gmail service',
+        config: {
+          service: 'gmail',
+          auth: { user, pass },
+          tls: { rejectUnauthorized: false },
+          connectionTimeout: 15000,
+          socketTimeout: 15000,
+        }
+      }
+    ];
 
-    // Test de connexion asynchrone
-    this.testConnection();
+    // Tester chaque configuration
+    this.testConfigurations(configs);
   }
 
-  private async testConnection(): Promise<void> {
-    if (!this.transporter) {
-      this.logger.error('Transporter non initialisé - vérifiez les variables d\'environnement');
-      return;
-    }
-
-    try {
-      await this.transporter.verify();
-      this.logger.log('✅ Connexion SMTP établie avec succès');
-    } catch (error) {
-      this.logger.error(`❌ Échec de la connexion SMTP: ${error.message}`);
+  private async testConfigurations(configs: Array<{name: string, config: any}>) {
+    for (const config of configs) {
+      this.logger.log(`Test configuration: ${config.name}`);
       
-      // Suggestions spécifiques selon le type d'erreur
-      if (error.code === 'ETIMEDOUT') {
-        this.logger.error('Conseil: Le serveur SMTP ne répond pas. Vérifiez:');
-        this.logger.error('1. La connexion internet de votre serveur');
-        this.logger.error('2. Les firewalls autorisent les connexions sortantes SMTP');
-        this.logger.error('3. Gmail est accessible depuis votre localisation serveur');
-      } else if (error.code === 'EAUTH') {
-        this.logger.error('Conseil: Échec d\'authentification. Vérifiez:');
-        this.logger.error('1. EMAIL_USER et EMAIL_PASS sont corrects');
-        this.logger.error('2. Activez "Accès aux applications moins sécurisées"');
-        this.logger.error('3. OU utilisez un mot de passe d\'application Gmail');
-        this.logger.error('Lien: https://myaccount.google.com/security');
+      try {
+        const testTransporter = nodemailer.createTransport(config.config);
+        await testTransporter.verify();
+        
+        // Si réussi, utiliser cette configuration
+        this.transporter = testTransporter;
+        this.logger.log(`✅ Configuration "${config.name}" réussie`);
+        this.logger.log(`✅ Connexion SMTP établie avec ${config.config.host || config.config.service}:${config.config.port || 'auto'}`);
+        return;
+        
+      } catch (error) {
+        this.logger.warn(`❌ Configuration "${config.name}" échouée: ${error.code || error.message}`);
+        // Continuer avec la configuration suivante
       }
     }
+    
+    // Si aucune configuration ne fonctionne
+    this.logger.error('❌ Toutes les configurations SMTP ont échoué');
+    this.transporter = null;
   }
 
   async checkConnection(): Promise<boolean> {
