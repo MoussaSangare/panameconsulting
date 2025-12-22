@@ -1,6 +1,14 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import * as nodemailer from 'nodemailer';
+import { Injectable, Logger, OnModuleInit } from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
+import * as nodemailer from "nodemailer";
+
+interface EmailConfig {
+  host: string;
+  port: number;
+  secure: boolean;
+  user: string;
+  pass: string;
+}
 
 interface EmailTemplate {
   subject: string;
@@ -8,116 +16,87 @@ interface EmailTemplate {
 }
 
 @Injectable()
-export class MailService {
+export class MailService implements OnModuleInit {
   private readonly logger = new Logger(MailService.name);
   private transporter: nodemailer.Transporter;
+  private readonly appName = "Paname Consulting";
   private readonly fromEmail: string;
   private readonly supportEmail: string;
 
-  constructor(private configService: ConfigService) {
-    // Chargement des variables d'environnement
-    const emailUser = this.configService.get<string>('EMAIL_USER');
-    const emailPass = this.configService.get<string>('EMAIL_PASS');
-    
-    this.fromEmail = `"Paname Consulting" <${emailUser}>`;
-    this.supportEmail = emailUser;
-    
-    this.initializeTransporter(emailUser, emailPass);
+  constructor(private readonly configService: ConfigService) {
+    this.fromEmail = `"${this.appName}" <${this.configService.get("EMAIL_USER")}>`;
+    this.supportEmail = this.configService.get("EMAIL_USER") || this.configService.get("EMAIL_USER");
   }
 
-  private initializeTransporter(user: string, pass: string) {
-    // Vérification de la configuration minimale
-    if (!user || !pass) {
-      this.logger.error('Configuration SMTP incomplète. Variables manquantes:', {
-        user: user ? '✓' : '✗',
-        pass: pass ? '✗ (masqué)' : '✗',
-      });
-      this.transporter = null;
-      return;
-    }
+  async onModuleInit() {
+    await this.initializeTransporter();
+  }
 
-    // Essayer différentes configurations Gmail
-    const configs = [
-      {
-        name: 'Gmail SSL (port 465)',
-        config: {
-          host: 'smtp.gmail.com',
-          port: 465,
-          secure: true, // SSL
-          auth: { user, pass },
-          tls: { rejectUnauthorized: false },
-          connectionTimeout: 15000,
-          socketTimeout: 15000,
-        }
+private async initializeTransporter(): Promise<void> {
+  const config = this.getEmailConfig();
+  
+  if (!this.isConfigValid(config)) {
+    this.logger.warn('Configuration email incomplète - service email désactivé');
+    return;
+  }
+
+  try {
+    // Configuration exclusive pour port 587 avec STARTTLS
+    const secure = false; // Toujours false pour port 587
+    const useTls = config.port === 587; // STARTTLS pour le port 587
+    
+    this.transporter = nodemailer.createTransport({
+      host: config.host,
+      port: config.port,
+      secure: secure, // false pour port 587
+      requireTLS: useTls, // true pour port 587
+      ignoreTLS: !useTls, // false pour port 587
+      auth: {
+        user: config.user,
+        pass: config.pass,
       },
-      {
-        name: 'Gmail STARTTLS (port 587)',
-        config: {
-          host: 'smtp.gmail.com',
-          port: 587,
-          secure: false, // STARTTLS
-          requireTLS: true,
-          auth: { user, pass },
-          tls: { rejectUnauthorized: false },
-          connectionTimeout: 15000,
-          socketTimeout: 15000,
-        }
+      tls: {
+        rejectUnauthorized: true,
+        ciphers: 'SSLv3'
       },
-      {
-        name: 'Gmail service',
-        config: {
-          service: 'gmail',
-          auth: { user, pass },
-          tls: { rejectUnauthorized: false },
-          connectionTimeout: 15000,
-          socketTimeout: 15000,
-        }
-      }
-    ];
+      connectionTimeout: 30000,
+      greetingTimeout: 15000,
+      socketTimeout: 60000,
+      debug: !this.isProduction(),
+      logger: !this.isProduction(),
+    });
 
-    // Tester chaque configuration
-    this.testConfigurations(configs);
-  }
-
-  private async testConfigurations(configs: Array<{name: string, config: any}>) {
-    for (const config of configs) {
-      this.logger.log(`Test configuration: ${config.name}`);
-      
-      try {
-        const testTransporter = nodemailer.createTransport(config.config);
-        await testTransporter.verify();
-        
-        // Si réussi, utiliser cette configuration
-        this.transporter = testTransporter;
-        this.logger.log(`✅ Configuration "${config.name}" réussie`);
-        this.logger.log(`✅ Connexion SMTP établie avec ${config.config.host || config.config.service}:${config.config.port || 'auto'}`);
-        return;
-        
-      } catch (error) {
-        this.logger.warn(`❌ Configuration "${config.name}" échouée: ${error.code || error.message}`);
-        // Continuer avec la configuration suivante
-      }
-    }
+    await this.testConnection();
+    this.logger.log('Service email initialisé avec succès');
     
-    // Si aucune configuration ne fonctionne
-    this.logger.error('❌ Toutes les configurations SMTP ont échoué');
-    this.transporter = null;
+  } catch (error) {
+    this.logger.error(`Erreur initialisation service email: ${error.message}`, error.stack);
+  }
+}
+
+  private getEmailConfig(): Partial<EmailConfig> {
+    return {
+      host: this.configService.get('EMAIL_HOST'),
+      port: parseInt(this.configService.get('EMAIL_PORT')),
+      secure: this.configService.get('EMAIL_SECURE'),
+      user: this.configService.get('EMAIL_USER'),
+      pass: this.configService.get('EMAIL_PASS'),
+    };
   }
 
-  async checkConnection(): Promise<boolean> {
+  private isConfigValid(config: Partial<EmailConfig>): boolean {
+    return !!(config.host && config.user && config.pass);
+  }
+
+  private isProduction(): boolean {
+    return this.configService.get('NODE_ENV') === 'production';
+  }
+
+  private async testConnection(): Promise<void> {
     if (!this.transporter) {
-      this.logger.warn('Service email non configuré');
-      return false;
+      throw new Error('Transporter non initialisé');
     }
-
-    try {
-      await this.transporter.verify();
-      this.logger.log('✅ Service email connecté');
-      return true;
-    } catch (error) {
-      this.logger.error(`❌ Service email non connecté: ${error.message}`);
-      return false;
-    }
+    await this.transporter.verify();
   }
 
   async sendEmail(to: string, template: EmailTemplate, context?: Record<string, any>): Promise<boolean> {
