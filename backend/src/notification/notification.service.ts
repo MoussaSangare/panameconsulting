@@ -6,6 +6,15 @@ import { Procedure, ProcedureStatus, StepStatus } from "../schemas/procedure.sch
 import { Contact } from "../schemas/contact.schema";
 
 
+interface EmailConfig {
+  host: string;
+  port: number;
+  secure: boolean;
+  user: string;
+  pass: string;
+}
+
+
 @Injectable()
 export class NotificationService implements OnModuleInit {
   private readonly logger = new Logger(NotificationService.name);
@@ -20,57 +29,78 @@ export class NotificationService implements OnModuleInit {
     await this.initializeTransporter();
   }
 
-private async initializeTransporter(): Promise<void> {
-  const emailUser = this.configService.get("EMAIL_USER");
+    private async initializeTransporter(): Promise<void> {
+    const config = this.getEmailConfig();
+    
+    // Log de la config (sans le mot de passe)
+    this.logger.log(`Config email: ${config.host}:${config.port} user:${config.user}`);
+    
+    try {
+      // Configuration pour Railway (offre souvent un réseau restreint)
+      const transporterOptions: any = {
+        host: config.host,
+        port: config.port,
+        secure: config.port === 465,
+        auth: {
+          user: config.user,
+          pass: config.pass,
+        },
+        // Configuration optimisée pour Railway
+        connectionTimeout: 30000,
+        greetingTimeout: 15000,
+        socketTimeout: 30000,
+        pool: true,
+        maxConnections: 1, // Réduit le nombre de connexions simultanées
+        maxMessages: 10,
+      };
   
-  if (!this.configService.get("EMAIL_HOST") || !emailUser || !this.configService.get("EMAIL_PASS")) {
-    this.logger.warn('Configuration email incomplète - notifications désactivées');
-    this.emailServiceAvailable = false;
-    return;
-  }
-
-  try {
-    this.fromEmail = `"${this.appName}" <${emailUser}>`;
-    
-    const port = parseInt(this.configService.get("EMAIL_PORT"));
-    const secure = false; // Toujours false pour port 587
-    const useTls = port === 587; // STARTTLS pour le port 587
-    
-    this.transporter = nodemailer.createTransport({
-      host: this.configService.get("EMAIL_HOST"),
-      port: port,
-      secure: secure, // false pour port 587
-      requireTLS: useTls, // true pour port 587
-      ignoreTLS: !useTls, // false pour port 587
-      auth: {
-        user: emailUser,
-        pass: this.configService.get("EMAIL_PASS"),
-      },
-      tls: {
-        rejectUnauthorized: true,
-        ciphers: 'SSLv3'
-      },
-      connectionTimeout: 15000,
-      greetingTimeout: 10000,
-      socketTimeout: 20000,
-    });
-
-    await this.testConnection();
-    this.emailServiceAvailable = true;
-    this.logger.log('Service notification email initialisé avec succès');
-    
-  } catch (error) {
-    this.logger.error(`Erreur initialisation service notification: ${error.message}`, error.stack);
-    this.emailServiceAvailable = false;
-  }
-}
-
-  private async testConnection(): Promise<void> {
-    if (!this.transporter) {
-      throw new Error('Transporter non initialisé');
+      // Désactiver complètement les vérifications TLS si nécessaire
+      if (config.port === 587) {
+        transporterOptions.tls = {
+          rejectUnauthorized: false,
+          ciphers: 'SSLv3'
+        };
+        transporterOptions.requireTLS = true;
+        transporterOptions.ignoreTLS = false;
+      }
+  
+      this.transporter = nodemailer.createTransport(transporterOptions);
+  
+      // Vérification avec retry
+      let verified = false;
+      for (let i = 0; i < 3 && !verified; i++) {
+        try {
+          await this.transporter.verify();
+          verified = true;
+          this.logger.log('✅ Connexion SMTP réussie');
+        } catch (verifyError) {
+          this.logger.warn(`Tentative ${i + 1}/3 échouée: ${verifyError.message}`);
+          if (i < 2) await new Promise(resolve => setTimeout(resolve, 2000));
+        }
+      }
+      
+    } catch (error) {
+      this.logger.error(`❌ Impossible d'initialiser le service email: ${error.message}`);    
+      // En production, continuer sans email
+      if (this.isProduction()) {
+        this.logger.warn('L\'application continue sans service email');
+      }
     }
-    await this.transporter.verify();
   }
+    private getEmailConfig(): Partial<EmailConfig> {
+      return {
+        host: this.configService.get('EMAIL_HOST'),
+        port: parseInt(this.configService.get('EMAIL_PORT')),
+        secure: this.configService.get('EMAIL_SECURE'),
+        user: this.configService.get('EMAIL_USER'),
+        pass: this.configService.get('EMAIL_PASS'),
+      };
+    }
+  
+  
+    private isProduction(): boolean {
+      return this.configService.get('NODE_ENV') === 'production';
+    }
 
 
   private async sendEmail(
