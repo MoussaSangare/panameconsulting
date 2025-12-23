@@ -18,6 +18,16 @@ frontend/.next/
 frontend/.env
 frontend/.env.*
 
+# Global
+.node_modules/
+# Build outputs 
+
+
+node_modules/
+dist/
+build/
+logs/
+.next/
 # IDE
 .vscode/
 .idea/
