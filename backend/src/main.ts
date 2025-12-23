@@ -424,79 +424,40 @@ async function bootstrap() {
       }),
     );
 
-    // ✅ RATE LIMITING AVEC DÉTECTION PAR RÔLE
+    // ✅ RATE LIMITING CORRIGÉ (Sans erreur IPv6)
     const rateLimit = require("express-rate-limit");
 
-    // Middleware pour détecter les routes admin
-    app.use((req: express.Request, res: express.Response, next: express.NextFunction) => {
-      // Liste des préfixes de routes admin
-      const adminRoutePrefixes = [
-        '/api/users/stats',
-        '/api/users/:id/toggle-status',
-        '/api/users/maintenance-',
-        '/api/users/:id/admin-reset-password',
-        '/api/procedures/admin/',
-        '/api/auth/logout-all',
-        '/api/contact', // Attention: GET seulement pour admin, POST pour tous
-        '/api/contact/stats',
-        '/api/contact/:id/',
-        '/api/destinations', // Attention: GET pour tous, POST/PUT/DELETE pour admin
-        '/api/rendezvous', // Attention: POST pour tous, GET admin
-        '/api/rendezvous/:id/status',
-        '/api/rendezvous/:id/confirm'
-      ];
-      
-      // Détecter si c'est une route admin
-      const isAdminRoute = adminRoutePrefixes.some(prefix => {
-        if (req.method === 'GET' && req.path === '/api/contact') {
-          return true; // GET /api/contact est admin
-        }
-        if (req.method === 'GET' && req.path === '/api/rendezvous') {
-          return true; // GET /api/rendezvous est admin
-        }
-        if (req.method === 'GET' && req.path.startsWith('/api/destinations') && req.path !== '/api/destinations/all') {
-          return true; // GET /api/destinations (sans /all) est admin
-        }
-        return req.path.startsWith(prefix);
-      });
-      
-      // Ajouter un flag à la requête
-      (req as any).isAdminRoute = isAdminRoute;
-      
-      next();
+    // Configuration unique pour toutes les routes (30 minutes comme demandé)
+    const generalRateLimiter = rateLimit({
+      windowMs: 30 * 60 * 1000, // 30 minutes (comme vos sessions)
+      max: 5000, // 5000 requêtes par fenêtre
+      message: {
+        status: 429,
+        message: "Trop de requêtes (5000 req/30min), veuillez réessayer plus tard.",
+        limit: 5000,
+        window: "30 minutes"
+      },
+      standardHeaders: true, // Envoyer les headers RateLimit-*
+      legacyHeaders: false, // Ne pas envoyer les headers X-RateLimit-*
+      skip: (req: express.Request) => {
+        // Exclure les routes de santé et monitoring du rate limiting
+        const excludedRoutes = ['/', '/health', '/api'];
+        return excludedRoutes.includes(req.path);
+      },
+      keyGenerator: (req: express.Request) => {
+        // Simple key generator sans gestion complexe d'IP
+        // Utilise l'IP de base pour éviter l'erreur IPv6
+        const ip = req.ip || 'unknown';
+        return ip.replace(/:/g, '_'); // Remplacer : pour éviter les problèmes
+      },
+      validate: {
+        trustProxy: process.env.TRUST_PROXY === '1', // Utilise votre variable existante
+        ip: false // Désactiver la validation IP pour éviter l'erreur
+      }
     });
 
-    // ✅ RATE LIMIT UNIQUE AVEC LOGIQUE CONDITIONNELLE
-    app.use(
-      rateLimit({
-        windowMs: 30 * 60 * 1000, // 30 minutes
-        max: (req: express.Request) => {
-          // ✅ ADMIN: 25,000 requêtes
-          if ((req as any).isAdminRoute) {
-            return 25000;
-          }
-          // ✅ UTILISATEURS NORMAUX: 5,000 requêtes
-          return 5000;
-        },
-        message: (req: express.Request) => {
-          const limit = (req as any).isAdminRoute ? 25000 : 5000;
-          return {
-            status: 429,
-            message: `Trop de requêtes (${limit} req/30min), veuillez réessayer plus tard.`,
-            limit: limit,
-            window: "30 minutes"
-          };
-        },
-        standardHeaders: true,
-        legacyHeaders: false,
-        skipSuccessfulRequests: false,
-        keyGenerator: (req: express.Request) => {
-          const ip = req.ip || req.headers['x-forwarded-for'] || 'unknown';
-          // Différencier les clés par type d'utilisateur
-          return (req as any).isAdminRoute ? `admin_${ip}` : `user_${ip}`;
-        }
-      }),
-    );
+    // Appliquer le rate limiting global
+    app.use(generalRateLimiter);
 
     const port = process.env.PORT || 10000;
     const host = "0.0.0.0";
@@ -512,6 +473,7 @@ async function bootstrap() {
     logger.log(`🔐 CORS activé: ${productionOrigins.length} origines`);
     logger.log(`📝 Parsing middleware: ✅ Activé`);
     logger.log(`🍪 Cookie parser: ✅ Activé`);
+    logger.log(`⏱️ Rate limiting: ✅ 5000 req/30min`);
     logger.log(`========================================`);
     
     // ✅ LISTE DES ORIGINES AUTORISÉES
@@ -526,6 +488,7 @@ async function bootstrap() {
     logger.log(`✅ Serveur démarré sur http://${host}:${port}`);
     logger.log(`✅ Health check: http://${host}:${port}/health`);
     logger.log(`✅ Parsing middleware: JSON, URL-encoded, Cookies activés`);
+    logger.log(`✅ Rate limiting: 5000 requêtes par 30 minutes`);
     
     // ✅ INFORMATION DE MONITORING
     const memoryUsage = process.memoryUsage();

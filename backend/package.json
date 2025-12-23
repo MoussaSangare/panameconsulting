@@ -43,7 +43,7 @@
     "compression": "^1.8.1",
     "cookie-parser": "^1.4.7",
     "date-holidays": "^3.26.5",
-    "dotenv": "^16.6.1",
+    "dotenv": "^17.2.3",
     "express": "^4.22.1",
     "express-rate-limit": "^8.2.1",
     "helmet": "^8.1.0",

@@ -18,8 +18,8 @@ export class MailService {
   }
 
   private async initialize(): Promise<void> {
-    const emailUser = this.configService.get<string>('EMAIL_USER');
-    const emailPass = this.configService.get<string>('EMAIL_PASS');
+    const emailUser = this.configService.get<string>('EMAIL_USER') || process.env.EMAIL_USER;
+    const emailPass = this.configService.get<string>('EMAIL_PASS') || process.env.EMAIL_PASS;
 
     if (!emailUser || !emailPass) {
       this.logger.error('❌ EMAIL_USER ou EMAIL_PASS manquant');

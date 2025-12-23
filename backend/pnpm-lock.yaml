@@ -78,8 +78,8 @@ dependencies:
     specifier: ^3.26.5
     version: 3.26.5
   dotenv:
-    specifier: ^16.6.1
-    version: 16.6.1
+    specifier: ^17.2.3
+    version: 17.2.3
   express:
     specifier: ^4.22.1
     version: 4.22.1
@@ -5585,7 +5585,7 @@ packages:
     resolution: {integrity: sha512-LaKRbou8gt0RNID/9RoI+J2rvXsBRPMV7p+ElHlPhcSARbCPDYcYG2s1TIzAfWv4YSgyY5taidWzzs31lNV3yQ==}
     engines: {node: '>=12'}
     dependencies:
-      dotenv: 16.6.1
+      dotenv: 16.4.7
     dev: false
 
   /dotenv@16.4.7:
@@ -5595,6 +5595,11 @@ packages:
 
   /dotenv@16.6.1:
     resolution: {integrity: sha512-uBq4egWHTcTt33a72vpSG0z3HnPuIl6NqYcTrKEg2azoEyl2hpW0zqlxysq2pK9HlDIHyHyakeYaYnSAwd8bow==}
+    engines: {node: '>=12'}
+    dev: false
+
+  /dotenv@17.2.3:
+    resolution: {integrity: sha512-JVUnt+DUIzu87TABbhPmNfVdBDt18BLOWjMUFJMSi/Qqg7NTYtabbvSNJGOJ7afbRuv9D/lngizHtP7QyLQ+9w==}
     engines: {node: '>=12'}
     dev: false
 
