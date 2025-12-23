@@ -84,8 +84,8 @@ dependencies:
     specifier: ^4.22.1
     version: 4.22.1
   express-rate-limit:
-    specifier: ^8.2.1
-    version: 8.2.1(express@4.22.1)
+    specifier: ^7.1.5
+    version: 7.1.5(express@4.22.1)
   helmet:
     specifier: ^8.1.0
     version: 8.1.0
@@ -6040,14 +6040,13 @@ packages:
       jest-util: 30.2.0
     dev: true
 
-  /express-rate-limit@8.2.1(express@4.22.1):
-    resolution: {integrity: sha512-PCZEIEIxqwhzw4KF0n7QF4QqruVTcF73O5kFKUnGOyjbCCgizBBiFaYpd/fnBLUMPw/BWw9OsiN7GgrNYr7j6g==}
+  /express-rate-limit@7.1.5(express@4.22.1):
+    resolution: {integrity: sha512-/iVogxu7ueadrepw1bS0X0kaRC/U0afwiYRSLg68Ts+p4Dc85Q5QKsOnPS/QUjPMHvOJQtBDrZgvkOzf8ejUYw==}
     engines: {node: '>= 16'}
     peerDependencies:
-      express: '>= 4.11'
+      express: 4 || 5 || ^5.0.0-beta.1
     dependencies:
       express: 4.22.1
-      ip-address: 10.0.1
     dev: false
 
   /express@4.22.1:
@@ -6877,11 +6876,6 @@ packages:
     resolution: {integrity: sha512-6xwYfHbajpoF0xLW+iwLkhwgvLoZDfjYfoFNu8ftMoXINzwuymNLd9u/KmwtdT2GbR+/Cz66otEGEVVUHX9QLQ==}
     engines: {node: '>=10.13.0'}
     dev: true
-
-  /ip-address@10.0.1:
-    resolution: {integrity: sha512-NWv9YLW4PoW2B7xtzaS3NCot75m6nK7Icdv0o3lfMceJVRfSoQwqD4wEH5rLwoKJwUiZ/rfpiVBhnaF0FK4HoA==}
-    engines: {node: '>= 12'}
-    dev: false
 
   /ip-address@10.1.0:
     resolution: {integrity: sha512-XXADHxXmvT9+CRxhXg56LJovE+bmWnEWB78LB83VZTprKTmaC5QfruXocxzTZ2Kl0DNwKuBdlIhjL8LeY8Sf8Q==}
