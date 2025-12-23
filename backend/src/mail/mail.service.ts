@@ -10,43 +10,55 @@ export class MailService {
   private fromEmail: string = '';
 
   constructor(private readonly configService: ConfigService) {
-    this.initialize();
+    // Délai pour laisser le ConfigService s'initialiser
+    setTimeout(() => {
+      this.initialize();
+    }, 1000);
   }
 
-  private initialize() {
-    const emailUser = this.configService.get<string>('EMAIL_USER') || process.env.EMAIL_USER;
-    const emailPass = this.configService.get<string>('EMAIL_PASS') || process.env.EMAIL_PASS;
-
+  private async initialize() {
+    const emailUser = this.configService.get<string>('EMAIL_USER');
+    const emailPass = this.configService.get<string>('EMAIL_PASS');
 
     if (!emailUser || !emailPass) {
       this.logger.warn('❌ Service email désactivé - EMAIL_USER ou EMAIL_PASS manquant');
       return;
     }
 
-    this.isAvailable = true;
     this.fromEmail = `"Paname Consulting" <${emailUser}>`;
 
-    // Configuration Gmail simple
-    this.transporter = nodemailer.createTransport({
-      host: 'smtp.gmail.com',
-      port: 587,
-      secure: false,
-      auth: {
-        user: emailUser,
-        pass: emailPass,
-      },
-    });
-
-    // Test de connexion
-    this.transporter.verify()
-      .then(() => {
-        this.logger.log('✅ Service email Gmail initialisé avec succès');
-        this.logger.log(`📧 Envoi depuis: ${this.maskEmail(emailUser)}`);
-      })
-      .catch((error) => {
-        this.logger.error(`❌ Échec connexion Gmail: ${error.message}`);
-        this.isAvailable = false;
+    try {
+      this.logger.log('🔄 Initialisation du service email Gmail...');
+      
+      // Configuration simplifiée utilisant 'service'
+      this.transporter = nodemailer.createTransport({
+        service: 'gmail', // Configuration Gmail prédéfinie
+        auth: {            
+           user: process.env.EMAIL_USER || this.configService.get<string>('EMAIL_USER'), 
+           pass: process.env.EMAIL_PASS || this.configService.get<string>('EMAIL_PASS')           
+        },
+        // Options de connexion flexibles
+        tls: {
+          rejectUnauthorized: false
+        }
       });
+
+      // Test de connexion avec timeout
+      const testPromise = this.transporter.verify();
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Timeout après 15s')), 15000)
+      );
+
+      await Promise.race([testPromise, timeoutPromise]);
+      
+      this.isAvailable = true;
+      this.logger.log('✅ Service email Gmail initialisé avec succès');
+      this.logger.log(`📧 Envoi depuis: ${this.maskEmail(emailUser)}`);
+      
+    } catch (error) {
+      this.logger.error(`❌ Échec connexion Gmail: ${error.message}`);
+      this.isAvailable = false;
+    }
   }
 
   /**

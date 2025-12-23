@@ -15,12 +15,15 @@ export class NotificationService {
   private frontendUrl: string = 'https://panameconsulting.vercel.app';
 
   constructor(private configService: ConfigService) {
-    this.initializeEmailService();
+    // Délai pour laisser le ConfigService s'initialiser
+    setTimeout(() => {
+      this.initializeEmailService();
+    }, 1000);
   }
 
   private async initializeEmailService() {
-    const emailUser = this.configService.get<string>('EMAIL_USER') || process.env.EMAIL_USER;
-    const emailPass = this.configService.get<string>('EMAIL_PASS') || process.env.EMAIL_PASS;
+    const emailUser = this.configService.get<string>('EMAIL_USER');
+    const emailPass = this.configService.get<string>('EMAIL_PASS');
 
     if (!emailUser || !emailPass) {
       this.logger.warn('❌ Service email désactivé - credentials manquants');
@@ -29,100 +32,71 @@ export class NotificationService {
 
     this.fromEmail = `"Paname Consulting" <${emailUser}>`;
 
-    // Liste de toutes les configurations Gmail possibles
-    const gmailConfigs = [
-      // Configuration standard TLS
-      {
-        name: 'Gmail TLS 587',
-        host: 'smtp.gmail.com',
-        port: 587,
-        secure: false,
-        requireTLS: true,
-      },
-      // Configuration SSL
-      {
-        name: 'Gmail SSL 465',
-        host: 'smtp.gmail.com',
-        port: 465,
-        secure: true,
-      },
-      // Configuration avec timeout augmentés
-      {
-        name: 'Gmail Timeout Long',
-        host: 'smtp.gmail.com',
-        port: 587,
-        secure: false,
-      },
-      // Try port 25 (peut-être moins filtré)
-      {
-        name: 'Gmail Port 25',
-        host: 'smtp.gmail.com',
-        port: 25,
-        secure: false,
-      }
-    ];
+    try {
+      this.logger.log('🔄 Initialisation du service email Gmail...');
+      
+      // Configuration simplifiée utilisant 'service' au lieu de host/port
+      const transporterConfig: any = {
+        service: 'gmail', // Configuration Gmail prédéfinie
+        auth: {
+          user: process.env.EMAIL_USER || this.configService.get<string>('EMAIL_USER'),
+          pass: process.env.EMAIL_PASS || this.configService.get<string>('EMAIL_PASS')
+        },
+        pool: true,
+        maxConnections: 5,
+        maxMessages: 10,
+        socketTimeout: 30000,
+        connectionTimeout: 10000,
+        // Désactiver temporairement la vérification SSL stricte
+        tls: {
+          rejectUnauthorized: false
+        }
+      };
 
-    // ESSAIE CHAQUE CONFIGURATION
-    for (const config of gmailConfigs) {
+      this.transporter = nodemailer.createTransport(transporterConfig);
+
+      // Test de connexion avec timeout
+      const testPromise = this.transporter.verify();
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Timeout après 15s')), 15000)
+      );
+
+      await Promise.race([testPromise, timeoutPromise]);
+
+      this.emailServiceAvailable = true;
+      this.logger.log('✅ Service email Gmail initialisé avec succès');
+      this.logger.log(`📧 Envoi depuis: ${this.maskEmail(emailUser)}`);
+      
+    } catch (error) {
+      this.logger.error(`❌ Échec initialisation email Gmail: ${error.message}`);
+      
+      // Essayer une configuration alternative
       try {
-        this.logger.log(`🔄 Tentative: ${config.name} (${config.host}:${config.port})`);
+        this.logger.log('🔄 Essai avec configuration alternative...');
         
-        // Créer la configuration de base
-        const transporterConfig: any = {
-          host: config.host,
-          port: config.port,
-          secure: config.secure,
+        // Configuration alternative simple
+        this.transporter = nodemailer.createTransport({
+          host: 'smtp.gmail.com',
+          port: 587,
+          secure: false,
           auth: {
-            user: emailUser,
-            pass: emailPass
+            user: process.env.EMAIL_USER || this.configService.get<string>('EMAIL_USER'),
+            pass: process.env.EMAIL_PASS || this.configService.get<string>('EMAIL_PASS')
           },
-          // Options de timeout augmentées
-          connectionTimeout: 15000,
-          greetingTimeout: 15000,
-          socketTimeout: 30000,
-        };
-
-        // Ajouter tls options si nécessaire
-        if (config.requireTLS) {
-          transporterConfig.requireTLS = true;
-        }
-
-        // Pour SSL, pas besoin de tls options
-        if (config.port === 587) {
-          transporterConfig.tls = {
+          tls: {
             rejectUnauthorized: false
-          };
-        }
+          }
+        });
 
-        this.transporter = nodemailer.createTransport(transporterConfig);
-
-        // Test avec timeout
-        const testPromise = this.transporter.verify();
-        const timeoutPromise = new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('Timeout after 10s')), 10000)
-        );
-
-        await Promise.race([testPromise, timeoutPromise]);
-
+        await this.transporter.verify();
         this.emailServiceAvailable = true;
-        this.logger.log(`✅ ${config.name} - CONNEXION RÉUSSIE!`);
+        this.logger.log('✅ Configuration alternative réussie');
         
-        // Test d'envoi immédiat pour confirmer
-        try {
-        } catch (testError) {
-          this.logger.warn(`⚠️ Test email échoué mais connexion OK: ${testError.message}`);
-        }
-        
-        return; // Stop après succès
-        
-      } catch (error) {
-        this.logger.warn(`❌ ${config.name} échoué: ${error.message}`);
+      } catch (altError) {
+        this.logger.error(`❌ Configuration alternative échouée: ${altError.message}`);
+        this.emailServiceAvailable = false;
       }
     }
-
-    // Si rien ne marche
-    this.logger.error('❌ Toutes les tentatives Gmail ont échoué');
-    this.emailServiceAvailable = false;
   }
 
   private async sendEmail(
