@@ -15,7 +15,7 @@ import * as compression from "compression";
 import * as cookieParser from "cookie-parser";
 import { join } from "path";
 import { AppModule } from "./app.module";
-import { rateLimit } from 'express-rate-limit';
+const rateLimit = require("express-rate-limit");
 
 
 // 📦 ÉTENDRE L'INTERFACE REQUEST D'EXPRESS
