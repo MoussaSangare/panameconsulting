@@ -18,41 +18,111 @@ export class NotificationService {
     this.initializeEmailService();
   }
 
-  private initializeEmailService() {
-    // 🔧 CONFIGURATION SIMPLIFIÉE POUR GMAIL
-    const emailUser = this.configService.get<string>('EMAIL_USER') || process.env.EMAIL_USER;
-    const emailPass = this.configService.get<string>('EMAIL_PASS') || process.env.EMAIL_PASS;
+  private async initializeEmailService() {
+    const emailUser = this.configService.get<string>('EMAIL_USER');
+    const emailPass = this.configService.get<string>('EMAIL_PASS');
 
     if (!emailUser || !emailPass) {
-      this.logger.warn('❌ Service email désactivé - EMAIL_USER ou EMAIL_PASS manquant');
-      this.emailServiceAvailable = false;
+      this.logger.warn('❌ Service email désactivé - credentials manquants');
       return;
     }
 
-    this.emailServiceAvailable = true;
     this.fromEmail = `"Paname Consulting" <${emailUser}>`;
-    
-    // ✅ CONFIGURATION GMAIL FIXE
-    this.transporter = nodemailer.createTransport({
-      host: 'smtp.gmail.com',
-      port: 587,
-      secure: false,
-      auth: {
-        user: emailUser,
-        pass: emailPass
-      }
-    });
 
-    // ✅ TEST DE CONNEXION
-    this.transporter.verify()
-      .then(() => {
-        this.logger.log('✅ Service email Gmail initialisé avec succès');
-        this.logger.log(`📧 Envoi depuis: ${this.maskEmail(emailUser)}`);
-      })
-      .catch((error) => {
-        this.logger.error(`❌ Échec de la connexion Gmail: ${error.message}`);
-        this.emailServiceAvailable = false;
-      });
+    // Liste de toutes les configurations Gmail possibles
+    const gmailConfigs = [
+      // Configuration standard TLS
+      {
+        name: 'Gmail TLS 587',
+        host: 'smtp.gmail.com',
+        port: 587,
+        secure: false,
+        requireTLS: true,
+      },
+      // Configuration SSL
+      {
+        name: 'Gmail SSL 465',
+        host: 'smtp.gmail.com',
+        port: 465,
+        secure: true,
+      },
+      // Configuration avec timeout augmentés
+      {
+        name: 'Gmail Timeout Long',
+        host: 'smtp.gmail.com',
+        port: 587,
+        secure: false,
+      },
+      // Try port 25 (peut-être moins filtré)
+      {
+        name: 'Gmail Port 25',
+        host: 'smtp.gmail.com',
+        port: 25,
+        secure: false,
+      }
+    ];
+
+    // ESSAIE CHAQUE CONFIGURATION
+    for (const config of gmailConfigs) {
+      try {
+        this.logger.log(`🔄 Tentative: ${config.name} (${config.host}:${config.port})`);
+        
+        // Créer la configuration de base
+        const transporterConfig: any = {
+          host: config.host,
+          port: config.port,
+          secure: config.secure,
+          auth: {
+            user: emailUser,
+            pass: emailPass
+          },
+          // Options de timeout augmentées
+          connectionTimeout: 15000,
+          greetingTimeout: 15000,
+          socketTimeout: 30000,
+        };
+
+        // Ajouter tls options si nécessaire
+        if (config.requireTLS) {
+          transporterConfig.requireTLS = true;
+        }
+
+        // Pour SSL, pas besoin de tls options
+        if (config.port === 587) {
+          transporterConfig.tls = {
+            rejectUnauthorized: false
+          };
+        }
+
+        this.transporter = nodemailer.createTransport(transporterConfig);
+
+        // Test avec timeout
+        const testPromise = this.transporter.verify();
+        const timeoutPromise = new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Timeout after 10s')), 10000)
+        );
+
+        await Promise.race([testPromise, timeoutPromise]);
+
+        this.emailServiceAvailable = true;
+        this.logger.log(`✅ ${config.name} - CONNEXION RÉUSSIE!`);
+        
+        // Test d'envoi immédiat pour confirmer
+        try {
+        } catch (testError) {
+          this.logger.warn(`⚠️ Test email échoué mais connexion OK: ${testError.message}`);
+        }
+        
+        return; // Stop après succès
+        
+      } catch (error) {
+        this.logger.warn(`❌ ${config.name} échoué: ${error.message}`);
+      }
+    }
+
+    // Si rien ne marche
+    this.logger.error('❌ Toutes les tentatives Gmail ont échoué');
+    this.emailServiceAvailable = false;
   }
 
   private async sendEmail(
