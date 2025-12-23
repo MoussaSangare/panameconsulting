@@ -825,7 +825,7 @@ const jtiRefresh = randomUUID();
       this.logger.log(`🔗 URL de reset générée pour ${this.maskEmail(email)}`);
 
       try {
-        await this.mailService.sendPasswordResetEmail(user.email, resetUrl);
+        await this.mailService.sendPasswordReset(user.email, resetUrl);
         this.logger.log(`✅ Email de réinitialisation envoyé à ${this.maskEmail(email)}`);
       } catch (emailError) {
         this.logger.error(`❌ Échec envoi email pour ${this.maskEmail(email)}: ${emailError.message}`);
