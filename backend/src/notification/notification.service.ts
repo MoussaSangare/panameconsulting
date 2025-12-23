@@ -15,10 +15,10 @@ export class NotificationService {
   private frontendUrl: string = 'https://panameconsulting.vercel.app';
 
   constructor(private configService: ConfigService) {
-    // Délai pour laisser le ConfigService s'initialiser
-    setTimeout(() => {
-      this.initializeEmailService();
-    }, 1000);
+   
+  }
+  async initManually(): Promise<void> {
+    await this.initializeEmailService();
   }
 
   private async initializeEmailService() {

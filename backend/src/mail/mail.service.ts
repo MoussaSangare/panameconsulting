@@ -10,10 +10,11 @@ export class MailService {
   private fromEmail: string = '';
 
   constructor(private readonly configService: ConfigService) {
-    // Délai pour laisser le ConfigService s'initialiser
-    setTimeout(() => {
-      this.initialize();
-    }, 1000);
+  
+  }
+
+  async initManually(): Promise<void> {
+    await this.initialize();
   }
 
   private async initialize() {
