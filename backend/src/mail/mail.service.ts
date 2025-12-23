@@ -1,8 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as nodemailer from 'nodemailer';
-
-// Définition de l'interface avant la classe
 interface EmailTemplate {
   subject: string;
   html: string;
@@ -17,9 +15,10 @@ export class MailService {
   private readonly supportEmail: string;
 
   constructor(private readonly configService: ConfigService) {
-    // Initialisation des propriétés
-    const emailUser = this.configService.get('EMAIL_USER');
-    const emailPass = this.configService.get('EMAIL_PASS');
+    const emailUser = this.configService.get('EMAIL_USER') || process.env.EMAIL_USER;
+    const emailPass = this.configService.get('EMAIL_PASS') || process.env.EMAIL_PASS;
+    
+    this.logger.log(`Email config - USER: ${emailUser ? 'Set' : 'Missing'}, PASS: ${emailPass ? 'Set' : 'Missing'}`);
     
     this.isServiceAvailable = !!(emailUser && emailPass);
     this.fromEmail = `"Paname Consulting" <${emailUser}>`;
@@ -34,29 +33,30 @@ export class MailService {
       return;
     }
 
+    const emailUser = this.configService.get('EMAIL_USER') || process.env.EMAIL_USER;
+    const emailPass = this.configService.get('EMAIL_PASS') || process.env.EMAIL_PASS;
+    
     this.transporter = nodemailer.createTransport({
-      service: 'gmail',
+      host: this.configService.get('EMAIL_HOST') || 'smtp.gmail.com',
+      port: this.configService.get('EMAIL_PORT') || 587,
+      secure: false, // false pour TLS
       auth: {
-        user: this.configService.get('EMAIL_USER') || process.env.EMAIL_USER,
-        pass: this.configService.get('EMAIL_PASS') || process.env.EMAIL_PASS,
+        user: emailUser,
+        pass: emailPass
       },
+      tls: {
+        rejectUnauthorized: false
+      }
     });
-  }
 
-  async checkConnection(): Promise<boolean> {
-    if (!this.isServiceAvailable) {
-      this.logger.warn('Email service is not available');
-      return false;
-    }
-
-    return this.transporter.verify()
-      .then(() => {
-        this.logger.log('Email service is connected');
-        return true;
-      })
-      .catch((error) => {
-        this.logger.error('Email service is not connected', error);
-        return false;
+    // Vérifier la connexion
+    this.transporter.verify()
+      .then(() => this.logger.log('✅ Service email initialisé avec succès'))
+      .catch(error => {
+        this.logger.error(`❌ Échec de la connexion email: ${error.message}`);
+        if (error.code === 'EAUTH') {
+          this.logger.error('🔐 Erreur d\'authentification - vérifiez votre App Password Gmail');
+        }
       });
   }
 

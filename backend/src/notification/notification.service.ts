@@ -18,36 +18,66 @@ export class NotificationService {
     this.initializeEmailService();
   }
 
- private initializeEmailService() {
-  const emailUser = this.configService.get<string>('EMAIL_USER') || process.env.EMAIL_USER;
-  const emailPass = this.configService.get<string>('EMAIL_PASS') || process.env.EMAIL_PASS;
+  private initializeEmailService() {
+  // 🔧 CORRIGER : Chercher les deux noms possibles
+  const emailUser = this.configService.get<string>('EMAIL_USER') || 
+                    process.env.EMAIL_USER || 
+                    this.configService.get<string>('EMAIL_USERNAME');
   
-  if (emailUser && emailPass) {
-    this.emailServiceAvailable = true;
-    this.fromEmail = `"Paname Consulting" <${emailUser}>`;
-    this.frontendUrl = this.configService.get<string>('FRONTEND_URL') || this.frontendUrl;
-    
-    // Méthode éprouvée en production
-    this.transporter = nodemailer.createTransport({
-      service: 'gmail', // Utilise directement le service Gmail
-      auth: {
-        user: emailUser,
-        pass: emailPass
-      }
-    });
+  const emailPass = this.configService.get<string>('EMAIL_PASS') || 
+                    process.env.EMAIL_PASS || 
+                    this.configService.get<string>('EMAIL_PASSWORD');
 
-    // Vérification de la connexion
-    this.transporter.verify()
-      .then(() => this.logger.log('Service email initialisé avec succès'))
-      .catch(err => {
-        this.logger.error('Erreur lors de l\'initialisation du service email:', err.message);
-        this.emailServiceAvailable = false;
-      });
-  } else {
-    this.logger.warn('Service email désactivé - EMAIL_USER ou EMAIL_PASS manquant');
+  this.logger.log(`🔧 Email Config - USER: ${emailUser ? '✓' : '✗'}, PASS: ${emailPass ? '✓' : '✗'}`);
+
+  if (!emailUser || !emailPass) {
+    this.logger.error('❌ Service email désactivé - EMAIL_USER ou EMAIL_PASS manquant');
+    this.logger.error(`   EMAIL_USER: ${emailUser ? 'Set' : 'Missing'}`);
+    this.logger.error(`   EMAIL_PASS: ${emailPass ? 'Set' : 'Missing'}`);
+    this.emailServiceAvailable = false;
+    return;
   }
-}
 
+  this.emailServiceAvailable = true;
+  this.fromEmail = `"Paname Consulting" <${emailUser}>`;
+  this.frontendUrl = this.configService.get<string>('FRONTEND_URL') || this.frontendUrl;
+
+  // ✅ CONFIGURATION OPTIMISÉE POUR PRODUCTION
+  this.transporter = nodemailer.createTransport({
+    host: this.configService.get<string>('EMAIL_HOST') || 'smtp.gmail.com',
+    port: parseInt(this.configService.get<string>('EMAIL_PORT') || '587'),
+    secure: false, // true pour 465, false pour 587
+    auth: {
+      user: emailUser,
+      pass: emailPass
+    },
+    tls: {
+      rejectUnauthorized: false // Important pour Railway/Heroku
+    },
+    // Options de timeout
+    connectionTimeout: 10000,
+    greetingTimeout: 10000,
+    socketTimeout: 10000
+  });
+
+  // ✅ TEST DE CONNEXION ROBUSTE
+  this.transporter.verify()
+  .then(() => {
+    this.logger.log('✅ Service email initialisé avec succès');
+    this.logger.log(`   Envoi depuis: ${this.maskEmail(emailUser)}`);
+    
+    // ✅ CORRECTION : Récupérer les valeurs de configuration
+    const host = this.configService.get<string>('EMAIL_HOST') || 'smtp.gmail.com';
+    const port = parseInt(this.configService.get<string>('EMAIL_PORT') || '587');
+    this.logger.log(`   Serveur SMTP: ${host}:${port}`);
+    
+    // OU utiliser les options du transporter de manière sûre
+    const transporterOptions = (this.transporter as any).options || {};
+    if (transporterOptions.host) {
+      this.logger.log(`   Serveur SMTP (transporter): ${transporterOptions.host}:${transporterOptions.port || 587}`);
+    }
+  })
+}
   private async sendEmail(
     to: string, 
     subject: string, 
