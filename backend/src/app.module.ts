@@ -20,8 +20,8 @@ import { ProcedureModule } from "./procedure/procedure.module";
     // 1. Configuration globale
     ConfigModule.forRoot({
       load: [configuration],
-      isGlobal: true, // Pour rendre la config disponible partout
-      envFilePath: '.env',
+      isGlobal: true,
+      envFilePath: '.env', // ← AJOUTÉ
     }),
 
     // 2. Base de données - CONFIGURATION AMÉLIORÉE
@@ -29,7 +29,7 @@ import { ProcedureModule } from "./procedure/procedure.module";
       imports: [ConfigModule],
       useFactory: async (configService: ConfigService) => {
         const logger = new Logger('MongooseModule');
-        const uri = configService.get<string>("MONGODB_URI") || process.env.MONGODB_URI;
+        const uri = configService.get<string>("MONGODB_URI");
 
         // Logs détaillés pour le débogage
         logger.log(`🔗 Configuration MongoDB...`);
@@ -50,6 +50,7 @@ import { ProcedureModule } from "./procedure/procedure.module";
           socketTimeoutMS: 45000, // ← AJOUTÉ
           bufferCommands: false, // ← AJOUTÉ
           connectTimeoutMS: 30000, // ← AJOUTÉ
+          // Options supplémentaires pour la stabilité
           maxPoolSize: 10,
           minPoolSize: 1,
           heartbeatFrequencyMS: 10000,
