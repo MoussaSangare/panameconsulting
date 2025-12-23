@@ -23,34 +23,65 @@ export class NotificationService {
   }
 
   private async initializeEmailService() {
-    const emailUser = process.env.EMAIL_USER || this.configService.get<string>('EMAIL_USER');
-    const emailPass = process.env.EMAIL_PASS || this.configService.get<string>('EMAIL_PASS');
+    const emailUser = this.configService.get<string>('EMAIL_USER');
+    const emailPass = this.configService.get<string>('EMAIL_PASS');
 
     if (!emailUser || !emailPass) {
-      this.logger.warn('❌ Service email désactivé - EMAIL_USER ou EMAIL_PASS manquants');
+      this.logger.error('❌ EMAIL_USER ou EMAIL_PASS manquant');
       return;
     }
 
     this.fromEmail = `"Paname Consulting" <${emailUser}>`;
 
     try {
-      this.logger.log('🔄 Initialisation du service email Gmail...');
+      this.logger.log('🔄 Initialisation SMTP Gmail (Port 465)...');
       
+      // Configuration SMTP directe avec port 465 (SSL)
       this.transporter = nodemailer.createTransport({
-        service: 'gmail',
+        host: 'smtp.gmail.com',
+        port: 465,
+        secure: true, // SSL
         auth: {
           user: emailUser,
           pass: emailPass
-        }
+        },
+        connectionTimeout: 10000,
+        greetingTimeout: 10000
       });
 
-      await this.transporter.verify();
+      const info = await this.transporter.verify();
       this.emailServiceAvailable = true;
-      this.logger.log('✅ Service email Gmail initialisé avec succès');
+      this.logger.log('✅ Service email opérationnel (SSL:465)');
       
     } catch (error) {
-      this.logger.error(`❌ Échec initialisation email: ${error.message}`);
-      this.emailServiceAvailable = false;
+      this.logger.error(`❌ Erreur port 465: ${error.message}`);
+      
+      // Essai avec port 587 (TLS)
+      try {
+        this.logger.log('🔄 Tentative port 587 (TLS)...');
+        
+        this.transporter = nodemailer.createTransport({
+          host: 'smtp.gmail.com',
+          port: 587,
+          secure: false, // TLS
+          auth: {
+            user: emailUser,
+            pass: emailPass
+          },
+          connectionTimeout: 10000,
+          greetingTimeout: 10000
+        });
+
+        await this.transporter.verify();
+        this.emailServiceAvailable = true;
+        this.logger.log('✅ Service email opérationnel (TLS:587)');
+        
+      } catch (altError) {
+        this.logger.error(`❌ Erreur port 587: ${altError.message}`);
+        this.logger.error('💡 Railway bloque probablement les ports SMTP sortants');
+        this.logger.error('💡 Solutions: 1) Utiliser SendGrid/Resend, 2) Contacter Railway, 3) Utiliser un proxy SMTP');
+        this.emailServiceAvailable = false;
+      }
     }
   }
 
@@ -61,7 +92,7 @@ export class NotificationService {
     context: string
   ): Promise<boolean> {
     if (!this.emailServiceAvailable) {
-      this.logger.warn(`📧 Notification "${context}" ignorée - service email indisponible`);
+      this.logger.warn(`📧 "${context}" ignorée - service indisponible`);
       return false;
     }
 
@@ -119,6 +150,8 @@ export class NotificationService {
       </html>
     `;
   }
+
+  // ==================== RENDEZ-VOUS NOTIFICATIONS ====================
 
   async sendConfirmation(rendezvous: Rendezvous): Promise<boolean> {
     const dateFormatted = new Date(rendezvous.date).toLocaleDateString("fr-FR", {
@@ -266,6 +299,8 @@ export class NotificationService {
     return false;
   }
 
+  // ==================== PROCEDURE NOTIFICATIONS ====================
+
   async sendProcedureUpdate(procedure: Procedure): Promise<boolean> {
     const currentStep = procedure.steps.find(s => s.statut === StepStatus.IN_PROGRESS);
     const completedSteps = procedure.steps.filter(s => s.statut === StepStatus.COMPLETED).length;
@@ -380,6 +415,8 @@ export class NotificationService {
     );
   }
 
+  // ==================== CONTACT NOTIFICATIONS ====================
+
   async sendContactReply(contact: Contact, reply: string): Promise<boolean> {
     const content = `
       <p>Nous vous répondons à votre message :</p>
@@ -400,9 +437,9 @@ export class NotificationService {
   }
 
   async sendContactNotification(contact: Contact): Promise<boolean> {
-    const adminEmail = process.env.EMAIL_USER || this.configService.get<string>('EMAIL_USER');
+    const adminEmail = this.configService.get<string>('EMAIL_USER');
     if (!adminEmail) {
-      this.logger.warn("📧 Email admin non configuré - notification contact ignorée");
+      this.logger.warn("📧 Email admin non configuré");
       return false;
     }
 
@@ -450,6 +487,8 @@ export class NotificationService {
       'confirmation-contact'
     );
   }
+
+  // ==================== UTILITY METHODS ====================
 
   private maskEmail(email: string): string {
     if (!email || !email.includes('@')) return '***@***';
