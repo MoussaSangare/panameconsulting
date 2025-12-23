@@ -33,6 +33,7 @@ const productionOrigins = [
   "https://panameconsulting.com",
   "https://www.panameconsulting.com",
   "https://panameconsulting.vercel.app",
+  "https://panameconsulting.up.railway.app",
   "https://vercel.live",
   "http://localhost:5713",
 ];
@@ -176,48 +177,97 @@ async function bootstrap() {
   logger.log(`Parsing middleware: ✅ JSON, URL-encoded, Cookies activés`);
   logger.log(`Origines autorisées: ${productionOrigins.length} origines`);
 
-  app.enableCors({
-    origin: (origin, callback) => {
-      // 🔒 REFUSER les requêtes sans origine
-      if (!origin) {
-        logger.warn(`❌ Requête sans origine rejetée`);
-        callback(new Error('Origine requise'), false);
-        return;
-      }
+ app.enableCors({
+  origin: (origin, callback) => {
+    // ✅ PERMETTRE les requêtes sans origine (appels internes, favicon, etc.)
+    if (!origin) {
+      logger.debug(`✅ Requête sans origine autorisée (appel interne)`);
+      callback(null, true);
+      return;
+    }
 
-      // 🔒 Vérification stricte des origines
-      const isAllowed = isOriginAllowed(origin, productionOrigins);
+    // 🔒 Vérification stricte des origines
+    const isAllowed = isOriginAllowed(origin, productionOrigins);
 
-      if (isAllowed) {
-        logger.debug(`✅ Origine autorisée: ${origin}`);
-        callback(null, true);
-      } else {
-        logger.warn(`❌ Origine non autorisée: ${origin}`);
-        logger.warn(`   Origines autorisées: ${productionOrigins.join(', ')}`);
-        callback(new Error(`Origine non autorisée: ${origin}`), false);
-      }
-    },
-    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allowedHeaders: [
-      "Authorization",
-      "Content-Type",
-      "Accept",
-      "Origin",
-      "X-Requested-With",
-      "Cookie",
-      "Set-Cookie",
-      "Access-Control-Allow-Credentials"
-    ],
-    credentials: true,
-    maxAge: 86400,
-    exposedHeaders: [
-      "Authorization",
-      "Set-Cookie",
-      "Access-Control-Allow-Origin",
-      "Access-Control-Allow-Credentials"
-    ],
-    optionsSuccessStatus: 204,
-  });
+    if (isAllowed) {
+      logger.debug(`✅ Origine autorisée: ${origin}`);
+      callback(null, true);
+    } else {
+      logger.warn(`❌ Origine non autorisée: ${origin}`);
+      logger.warn(`   Origines autorisées: ${productionOrigins.join(', ')}`);
+      callback(new Error(`Origine non autorisée: ${origin}`), false);
+    }
+  },
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  allowedHeaders: [
+    "Authorization",
+    "Content-Type",
+    "Accept",
+    "Origin",
+    "X-Requested-With",
+    "Cookie",
+    "Set-Cookie",
+    "Access-Control-Allow-Credentials"
+  ],
+  credentials: true,
+  maxAge: 86400,
+  exposedHeaders: [
+    "Authorization",
+    "Set-Cookie",
+    "Access-Control-Allow-Origin",
+    "Access-Control-Allow-Credentials"
+  ],
+  optionsSuccessStatus: 204,
+});
+
+// ✅ MIDDLEWARE POUR GÉRER MANUELLEMENT LES HEADERS CORS (OPTIONS)
+app.use((req: express.Request, res: express.Response, next: express.NextFunction) => {
+  // Répondre immédiatement aux requêtes OPTIONS (pré-vol CORS)
+  if (req.method === "OPTIONS") {
+    const origin = req.headers.origin;
+    if (origin && isOriginAllowed(origin, productionOrigins)) {
+      res.header("Access-Control-Allow-Origin", origin);
+    } else if (!origin) {
+      // ✅ Autoriser les requêtes OPTIONS sans origine
+      res.header("Access-Control-Allow-Origin", "*");
+    }
+    res.header("Access-Control-Allow-Credentials", "true");
+    res.header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
+    res.header("Access-Control-Allow-Headers", "Authorization, Content-Type, Accept, Origin, X-Requested-With, Cookie, Access-Control-Allow-Credentials");
+    res.header("Access-Control-Expose-Headers", "Authorization, X-RateLimit-Limit, X-RateLimit-Remaining, Set-Cookie, Access-Control-Allow-Origin");
+    res.header("Access-Control-Max-Age", "86400");
+    return res.status(200).end();
+  }
+  
+  // Pour les autres méthodes, vérifier l'origine
+  const origin = req.headers.origin;
+  if (origin && isOriginAllowed(origin, productionOrigins)) {
+    res.header("Access-Control-Allow-Origin", origin);
+  }
+  res.header("Access-Control-Allow-Credentials", "true");
+  
+  next();
+});
+
+// ✅ EXCLUSION DES ROUTES SPÉCIFIQUES DU CORS STRICT
+app.use((req: express.Request, res: express.Response, next: express.NextFunction) => {
+  // Liste des routes qui peuvent être appelées sans origine
+  const excludedFromCorsCheck = [
+    '/', 
+    '/health', 
+    '/api',
+    '/favicon.ico',
+    '/robots.txt',
+    '/sitemap.xml'
+  ];
+  
+  if (excludedFromCorsCheck.includes(req.path)) {
+    // Pour ces routes, autoriser l'accès sans vérification d'origine
+    return next();
+  }
+  
+  next();
+});
 
   // ✅ ROUTE RACINE SIMPLE
   server.get("/", (_req: express.Request, res: express.Response) => {
