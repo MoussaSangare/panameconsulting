@@ -15,6 +15,8 @@ import * as compression from "compression";
 import * as cookieParser from "cookie-parser";
 import { join } from "path";
 import { AppModule } from "./app.module";
+import { rateLimit } from 'express-rate-limit';
+
 
 // 📦 ÉTENDRE L'INTERFACE REQUEST D'EXPRESS
 declare global {
@@ -424,8 +426,6 @@ async function bootstrap() {
       }),
     );
 
-    // ✅ RATE LIMITING CORRIGÉ (Sans erreur IPv6)
-    const rateLimit = require("express-rate-limit");
 
     // Configuration unique pour toutes les routes (30 minutes comme demandé)
     const generalRateLimiter = rateLimit({
