@@ -301,11 +301,6 @@ async function bootstrap() {
             <p><strong>Timestamp:</strong> ${new Date().toLocaleString()}</p>
             <p><strong>Parsing:</strong> ✅ JSON, URL-encoded, Cookies, Text</p>
           </div>
-          <div class="links">
-            <a href="/health">Health Check</a>
-            <a href="/api">API Info</a>
-            <a href="/api/test-cors">Test CORS</a>
-          </div>
         </div>
       </body>
       </html>
