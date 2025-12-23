@@ -20,8 +20,8 @@ export class NotificationService {
 
   private initializeEmailService() {
     // 🔧 CONFIGURATION SIMPLIFIÉE POUR GMAIL
-    const emailUser = this.configService.get<string>('EMAIL_USER');
-    const emailPass = this.configService.get<string>('EMAIL_PASS');
+    const emailUser = this.configService.get<string>('EMAIL_USER') || process.env.EMAIL_USER;
+    const emailPass = this.configService.get<string>('EMAIL_PASS') || process.env.EMAIL_PASS;
 
     if (!emailUser || !emailPass) {
       this.logger.warn('❌ Service email désactivé - EMAIL_USER ou EMAIL_PASS manquant');
@@ -62,7 +62,7 @@ export class NotificationService {
     context: string
   ): Promise<boolean> {
     if (!this.emailServiceAvailable) {
-      this.logger.warn(`Notification "${context}" ignorée - service email indisponible`);
+      this.logger.warn(`📧 Notification "${context}" ignorée - service email indisponible`);
       return false;
     }
 
@@ -74,11 +74,11 @@ export class NotificationService {
         html: html
       });
       
-      this.logger.log(`Email envoyé (${context}) à: ${this.maskEmail(to)}`);
+      this.logger.log(`📧 Email envoyé (${context}) à: ${this.maskEmail(to)}`);
       return true;
       
     } catch (error) {
-      this.logger.error(`Erreur lors de l'envoi "${context}": ${error.message}`);
+      this.logger.error(`❌ Erreur "${context}": ${error.message}`);
       return false;
     }
   }
@@ -409,7 +409,7 @@ export class NotificationService {
   async sendContactNotification(contact: Contact): Promise<boolean> {
     const adminEmail = this.configService.get<string>('EMAIL_USER');
     if (!adminEmail) {
-      this.logger.warn("Email admin non configuré - notification contact ignorée");
+      this.logger.warn("📧 Email admin non configuré - notification contact ignorée");
       return false;
     }
 
@@ -473,8 +473,8 @@ export class NotificationService {
     return {
       available: this.emailServiceAvailable,
       message: this.emailServiceAvailable 
-        ? 'Service email disponible' 
-        : 'Service email indisponible - vérifiez EMAIL_USER et EMAIL_PASS'
+        ? '📧 Service email disponible' 
+        : '❌ Service email indisponible - vérifiez EMAIL_USER et EMAIL_PASS'
     };
   }
 }
