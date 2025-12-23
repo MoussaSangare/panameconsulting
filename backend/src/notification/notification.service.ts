@@ -15,87 +15,42 @@ export class NotificationService {
   private frontendUrl: string = 'https://panameconsulting.vercel.app';
 
   constructor(private configService: ConfigService) {
-   
+    this.initializeEmailService();
   }
+
   async initManually(): Promise<void> {
     await this.initializeEmailService();
   }
 
   private async initializeEmailService() {
-    const emailUser = this.configService.get<string>('EMAIL_USER');
-    const emailPass = this.configService.get<string>('EMAIL_PASS');
+    const emailUser = this.configService.get<string>('EMAIL_USER') || process.env.EMAIL_USER;
+    const emailPass = this.configService.get<string>('EMAIL_PASS') || process.env.EMAIL_PASS;
 
     if (!emailUser || !emailPass) {
-      this.logger.warn('❌ Service email désactivé - credentials manquants');
+      this.logger.error('❌ EMAIL_USER ou EMAIL_PASS manquant');
       return;
     }
 
     this.fromEmail = `"Paname Consulting" <${emailUser}>`;
 
     try {
-      this.logger.log('🔄 Initialisation du service email Gmail...');
+      this.logger.log('🔄 Initialisation Gmail...');
       
-      // Configuration simplifiée utilisant 'service' au lieu de host/port
-      const transporterConfig: any = {
-        service: 'gmail', // Configuration Gmail prédéfinie
+      this.transporter = nodemailer.createTransport({
+        service: 'gmail',
         auth: {
-          user: process.env.EMAIL_USER || this.configService.get<string>('EMAIL_USER'),
-          pass: process.env.EMAIL_PASS || this.configService.get<string>('EMAIL_PASS')
-        },
-        pool: true,
-        maxConnections: 5,
-        maxMessages: 10,
-        socketTimeout: 30000,
-        connectionTimeout: 10000,
-        // Désactiver temporairement la vérification SSL stricte
-        tls: {
-          rejectUnauthorized: false
+          user: emailUser,
+          pass: emailPass
         }
-      };
+      });
 
-      this.transporter = nodemailer.createTransport(transporterConfig);
-
-      // Test de connexion avec timeout
-      const testPromise = this.transporter.verify();
-      const timeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Timeout après 15s')), 15000)
-      );
-
-      await Promise.race([testPromise, timeoutPromise]);
-
+      await this.transporter.verify();
       this.emailServiceAvailable = true;
-      this.logger.log('✅ Service email Gmail initialisé avec succès');
-      this.logger.log(`📧 Envoi depuis: ${this.maskEmail(emailUser)}`);
+      this.logger.log('✅ Service email opérationnel');
       
     } catch (error) {
-      this.logger.error(`❌ Échec initialisation email Gmail: ${error.message}`);
-      
-      // Essayer une configuration alternative
-      try {
-        this.logger.log('🔄 Essai avec configuration alternative...');
-        
-        // Configuration alternative simple
-        this.transporter = nodemailer.createTransport({
-          host: 'smtp.gmail.com',
-          port: 587,
-          secure: false,
-          auth: {
-            user: process.env.EMAIL_USER || this.configService.get<string>('EMAIL_USER'),
-            pass: process.env.EMAIL_PASS || this.configService.get<string>('EMAIL_PASS')
-          },
-          tls: {
-            rejectUnauthorized: false
-          }
-        });
-
-        await this.transporter.verify();
-        this.emailServiceAvailable = true;
-        this.logger.log('✅ Configuration alternative réussie');
-        
-      } catch (altError) {
-        this.logger.error(`❌ Configuration alternative échouée: ${altError.message}`);
-        this.emailServiceAvailable = false;
-      }
+      this.logger.error(`❌ Erreur Gmail: ${error.message}`);
+      this.emailServiceAvailable = false;
     }
   }
 
@@ -106,7 +61,7 @@ export class NotificationService {
     context: string
   ): Promise<boolean> {
     if (!this.emailServiceAvailable) {
-      this.logger.warn(`📧 Notification "${context}" ignorée - service email indisponible`);
+      this.logger.warn(`📧 "${context}" ignorée - service indisponible`);
       return false;
     }
 
@@ -453,7 +408,7 @@ export class NotificationService {
   async sendContactNotification(contact: Contact): Promise<boolean> {
     const adminEmail = this.configService.get<string>('EMAIL_USER');
     if (!adminEmail) {
-      this.logger.warn("📧 Email admin non configuré - notification contact ignorée");
+      this.logger.warn("📧 Email admin non configuré");
       return false;
     }
 

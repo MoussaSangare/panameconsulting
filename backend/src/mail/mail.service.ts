@@ -10,7 +10,7 @@ export class MailService {
   private fromEmail: string = '';
 
   constructor(private readonly configService: ConfigService) {
-  
+    this.initialize();
   }
 
   async initManually(): Promise<void> {
@@ -18,46 +18,33 @@ export class MailService {
   }
 
   private async initialize() {
-    const emailUser = this.configService.get<string>('EMAIL_USER');
-    const emailPass = this.configService.get<string>('EMAIL_PASS');
+    const emailUser = this.configService.get<string>('EMAIL_USER') || process.env.EMAIL_USER;
+    const emailPass = this.configService.get<string>('EMAIL_PASS') || process.env.EMAIL_PASS;
 
     if (!emailUser || !emailPass) {
-      this.logger.warn('❌ Service email désactivé - EMAIL_USER ou EMAIL_PASS manquant');
+      this.logger.error('❌ EMAIL_USER ou EMAIL_PASS manquant');
       return;
     }
 
     this.fromEmail = `"Paname Consulting" <${emailUser}>`;
 
     try {
-      this.logger.log('🔄 Initialisation du service email Gmail...');
+      this.logger.log('🔄 Initialisation Gmail...');
       
-      // Configuration simplifiée utilisant 'service'
       this.transporter = nodemailer.createTransport({
-        service: 'gmail', // Configuration Gmail prédéfinie
-        auth: {            
-           user: process.env.EMAIL_USER || this.configService.get<string>('EMAIL_USER'), 
-           pass: process.env.EMAIL_PASS || this.configService.get<string>('EMAIL_PASS')           
-        },
-        // Options de connexion flexibles
-        tls: {
-          rejectUnauthorized: false
+        service: 'gmail',
+        auth: {
+          user: emailUser,
+          pass: emailPass
         }
       });
 
-      // Test de connexion avec timeout
-      const testPromise = this.transporter.verify();
-      const timeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Timeout après 15s')), 15000)
-      );
-
-      await Promise.race([testPromise, timeoutPromise]);
-      
+      await this.transporter.verify();
       this.isAvailable = true;
-      this.logger.log('✅ Service email Gmail initialisé avec succès');
-      this.logger.log(`📧 Envoi depuis: ${this.maskEmail(emailUser)}`);
+      this.logger.log('✅ Service email opérationnel');
       
     } catch (error) {
-      this.logger.error(`❌ Échec connexion Gmail: ${error.message}`);
+      this.logger.error(`❌ Erreur Gmail: ${error.message}`);
       this.isAvailable = false;
     }
   }
@@ -74,7 +61,7 @@ export class MailService {
     bcc?: string[];
   }): Promise<boolean> {
     if (!this.isAvailable) {
-      this.logger.warn(`📧 Envoi ignoré - service email indisponible`);
+      this.logger.warn(`📧 Envoi ignoré - service indisponible`);
       return false;
     }
 
@@ -94,7 +81,7 @@ export class MailService {
       this.logger.log(`📧 Email envoyé à: ${this.maskEmail(options.to)}`);
       return true;
     } catch (error) {
-      this.logger.error(`❌ Erreur envoi email: ${error.message}`);
+      this.logger.error(`❌ Erreur envoi: ${error.message}`);
       return false;
     }
   }
@@ -270,7 +257,7 @@ export class MailService {
     const adminEmail = this.configService.get<string>('ADMIN_EMAIL') || this.configService.get<string>('EMAIL_USER');
     
     if (!adminEmail) {
-      this.logger.warn('📧 Email admin non configuré - alerte ignorée');
+      this.logger.warn('📧 Email admin non configuré');
       return false;
     }
 
