@@ -16,12 +16,12 @@ import * as cookieParser from "cookie-parser";
 import { join } from "path";
 import { AppModule } from "./app.module";
 
-
 // 📦 ÉTENDRE L'INTERFACE REQUEST D'EXPRESS
 declare global {
   namespace Express {
     interface Request {
       invalidJson?: boolean;
+      isPublicRoute?: boolean;
     }
   }
 }
@@ -158,6 +158,18 @@ async function bootstrap() {
     next();
   });
 
+  // ✅ MIDDLEWARE POUR IDENTIFIER LES ROUTES PUBLIQUES
+  app.use((req: express.Request, res: express.Response, next: express.NextFunction) => {
+    const publicRoutes = ['/', '/health', '/api'];
+    
+    // Marquer les routes publiques
+    if (publicRoutes.includes(req.path)) {
+      req.isPublicRoute = true;
+    }
+    
+    next();
+  });
+
   // ✅ MIDDLEWARE DE LOGGING DES REQUÊTES
   app.use((req: express.Request, res: express.Response, next: express.NextFunction) => {
     const start = Date.now();
@@ -177,97 +189,74 @@ async function bootstrap() {
   logger.log(`Parsing middleware: ✅ JSON, URL-encoded, Cookies activés`);
   logger.log(`Origines autorisées: ${productionOrigins.length} origines`);
 
- app.enableCors({
-  origin: (origin, callback) => {
-    // ✅ PERMETTRE les requêtes sans origine (appels internes, favicon, etc.)
-    if (!origin) {
-      logger.debug(`✅ Requête sans origine autorisée (appel interne)`);
-      callback(null, true);
-      return;
-    }
+  app.enableCors({
+    origin: (origin, callback) => {
+      // 🔒 Autoriser les requêtes sans origine UNIQUEMENT pour les routes publiques
+      if (!origin) {
+        // Note: Nous ne pouvons pas accéder à req ici, donc on utilise une approche différente
+        // On permettra les routes publiques sans origine via le middleware suivant
+        logger.debug(`Requête sans origine détectée - sera gérée par le middleware`);
+        callback(null, true); // On autorise temporairement
+        return;
+      }
 
-    // 🔒 Vérification stricte des origines
-    const isAllowed = isOriginAllowed(origin, productionOrigins);
+      // 🔒 Vérification stricte des origines
+      const isAllowed = isOriginAllowed(origin, productionOrigins);
 
-    if (isAllowed) {
-      logger.debug(`✅ Origine autorisée: ${origin}`);
-      callback(null, true);
-    } else {
-      logger.warn(`❌ Origine non autorisée: ${origin}`);
-      logger.warn(`   Origines autorisées: ${productionOrigins.join(', ')}`);
-      callback(new Error(`Origine non autorisée: ${origin}`), false);
-    }
-  },
-  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-  allowedHeaders: [
-    "Authorization",
-    "Content-Type",
-    "Accept",
-    "Origin",
-    "X-Requested-With",
-    "Cookie",
-    "Set-Cookie",
-    "Access-Control-Allow-Credentials"
-  ],
-  credentials: true,
-  maxAge: 86400,
-  exposedHeaders: [
-    "Authorization",
-    "Set-Cookie",
-    "Access-Control-Allow-Origin",
-    "Access-Control-Allow-Credentials"
-  ],
-  optionsSuccessStatus: 204,
-});
+      if (isAllowed) {
+        logger.debug(`✅ Origine autorisée: ${origin}`);
+        callback(null, true);
+      } else {
+        logger.warn(`❌ Origine non autorisée: ${origin}`);
+        logger.warn(`   Origines autorisées: ${productionOrigins.join(', ')}`);
+        callback(new Error(`Origine non autorisée: ${origin}`), false);
+      }
+    },
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: [
+      "Authorization",
+      "Content-Type",
+      "Accept",
+      "Origin",
+      "X-Requested-With",
+      "Cookie",
+      "Set-Cookie",
+      "Access-Control-Allow-Credentials"
+    ],
+    credentials: true,
+    maxAge: 86400,
+    exposedHeaders: [
+      "Authorization",
+      "Set-Cookie",
+      "Access-Control-Allow-Origin",
+      "Access-Control-Allow-Credentials"
+    ],
+    optionsSuccessStatus: 204,
+  });
 
-// ✅ MIDDLEWARE POUR GÉRER MANUELLEMENT LES HEADERS CORS (OPTIONS)
-app.use((req: express.Request, res: express.Response, next: express.NextFunction) => {
-  // Répondre immédiatement aux requêtes OPTIONS (pré-vol CORS)
-  if (req.method === "OPTIONS") {
+  // ✅ MIDDLEWARE POUR GÉRER LES ROUTES SANS ORIGINE
+  app.use((req: express.Request, res: express.Response, next: express.NextFunction) => {
+    const publicRoutes = ['/', '/health', '/api'];
     const origin = req.headers.origin;
-    if (origin && isOriginAllowed(origin, productionOrigins)) {
-      res.header("Access-Control-Allow-Origin", origin);
-    } else if (!origin) {
-      // ✅ Autoriser les requêtes OPTIONS sans origine
-      res.header("Access-Control-Allow-Origin", "*");
+    
+    // Si pas d'origine ET que c'est une route publique
+    if (!origin && publicRoutes.includes(req.path)) {
+      // Autoriser l'accès aux routes publiques
+      return next();
     }
-    res.header("Access-Control-Allow-Credentials", "true");
-    res.header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
-    res.header("Access-Control-Allow-Headers", "Authorization, Content-Type, Accept, Origin, X-Requested-With, Cookie, Access-Control-Allow-Credentials");
-    res.header("Access-Control-Expose-Headers", "Authorization, X-RateLimit-Limit, X-RateLimit-Remaining, Set-Cookie, Access-Control-Allow-Origin");
-    res.header("Access-Control-Max-Age", "86400");
-    return res.status(200).end();
-  }
-  
-  // Pour les autres méthodes, vérifier l'origine
-  const origin = req.headers.origin;
-  if (origin && isOriginAllowed(origin, productionOrigins)) {
-    res.header("Access-Control-Allow-Origin", origin);
-  }
-  res.header("Access-Control-Allow-Credentials", "true");
-  
-  next();
-});
-
-// ✅ EXCLUSION DES ROUTES SPÉCIFIQUES DU CORS STRICT
-app.use((req: express.Request, res: express.Response, next: express.NextFunction) => {
-  // Liste des routes qui peuvent être appelées sans origine
-  const excludedFromCorsCheck = [
-    '/', 
-    '/health', 
-    '/api',
-    '/favicon.ico',
-    '/robots.txt',
-    '/sitemap.xml'
-  ];
-  
-  if (excludedFromCorsCheck.includes(req.path)) {
-    // Pour ces routes, autoriser l'accès sans vérification d'origine
-    return next();
-  }
-  
-  next();
-});
+    
+    // Si pas d'origine ET que c'est une route protégée
+    if (!origin && !publicRoutes.includes(req.path)) {
+      logger.warn(`❌ Accès refusé: Requête sans origine pour route protégée: ${req.path}`);
+      return res.status(403).json({
+        error: 'Access Denied',
+        message: 'Origine requise pour cette route',
+        timestamp: new Date().toISOString()
+      });
+    }
+    
+    next();
+  });
 
   // ✅ ROUTE RACINE SIMPLE
   server.get("/", (_req: express.Request, res: express.Response) => {
@@ -441,78 +430,78 @@ app.use((req: express.Request, res: express.Response, next: express.NextFunction
     );
 
     // ✅ RATE LIMITING AVEC DÉTECTION PAR RÔLE
-const rateLimit = require("express-rate-limit");
+    const rateLimit = require("express-rate-limit");
 
-// Middleware pour détecter les routes admin
-app.use((req: express.Request, res: express.Response, next: express.NextFunction) => {
-  // Liste des préfixes de routes admin
-  const adminRoutePrefixes = [
-    '/api/users/stats',
-    '/api/users/:id/toggle-status',
-    '/api/users/maintenance-',
-    '/api/users/:id/admin-reset-password',
-    '/api/procedures/admin/',
-    '/api/auth/logout-all',
-    '/api/contact', // Attention: GET seulement pour admin, POST pour tous
-    '/api/contact/stats',
-    '/api/contact/:id/',
-    '/api/destinations', // Attention: GET pour tous, POST/PUT/DELETE pour admin
-    '/api/rendezvous', // Attention: POST pour tous, GET admin
-    '/api/rendezvous/:id/status',
-    '/api/rendezvous/:id/confirm'
-  ];
-  
-  // Détecter si c'est une route admin
-  const isAdminRoute = adminRoutePrefixes.some(prefix => {
-    if (req.method === 'GET' && req.path === '/api/contact') {
-      return true; // GET /api/contact est admin
-    }
-    if (req.method === 'GET' && req.path === '/api/rendezvous') {
-      return true; // GET /api/rendezvous est admin
-    }
-    if (req.method === 'GET' && req.path.startsWith('/api/destinations') && req.path !== '/api/destinations/all') {
-      return true; // GET /api/destinations (sans /all) est admin
-    }
-    return req.path.startsWith(prefix);
-  });
-  
-  // Ajouter un flag à la requête
-  (req as any).isAdminRoute = isAdminRoute;
-  
-  next();
-});
+    // Middleware pour détecter les routes admin
+    app.use((req: express.Request, res: express.Response, next: express.NextFunction) => {
+      // Liste des préfixes de routes admin
+      const adminRoutePrefixes = [
+        '/api/users/stats',
+        '/api/users/:id/toggle-status',
+        '/api/users/maintenance-',
+        '/api/users/:id/admin-reset-password',
+        '/api/procedures/admin/',
+        '/api/auth/logout-all',
+        '/api/contact', // Attention: GET seulement pour admin, POST pour tous
+        '/api/contact/stats',
+        '/api/contact/:id/',
+        '/api/destinations', // Attention: GET pour tous, POST/PUT/DELETE pour admin
+        '/api/rendezvous', // Attention: POST pour tous, GET admin
+        '/api/rendezvous/:id/status',
+        '/api/rendezvous/:id/confirm'
+      ];
+      
+      // Détecter si c'est une route admin
+      const isAdminRoute = adminRoutePrefixes.some(prefix => {
+        if (req.method === 'GET' && req.path === '/api/contact') {
+          return true; // GET /api/contact est admin
+        }
+        if (req.method === 'GET' && req.path === '/api/rendezvous') {
+          return true; // GET /api/rendezvous est admin
+        }
+        if (req.method === 'GET' && req.path.startsWith('/api/destinations') && req.path !== '/api/destinations/all') {
+          return true; // GET /api/destinations (sans /all) est admin
+        }
+        return req.path.startsWith(prefix);
+      });
+      
+      // Ajouter un flag à la requête
+      (req as any).isAdminRoute = isAdminRoute;
+      
+      next();
+    });
 
-// ✅ RATE LIMIT UNIQUE AVEC LOGIQUE CONDITIONNELLE
-app.use(
-  rateLimit({
-    windowMs: 30 * 60 * 1000, // 30 minutes
-    max: (req: express.Request) => {
-      // ✅ ADMIN: 25,000 requêtes
-      if ((req as any).isAdminRoute) {
-        return 25000;
-      }
-      // ✅ UTILISATEURS NORMAUX: 5,000 requêtes
-      return 5000;
-    },
-    message: (req: express.Request) => {
-      const limit = (req as any).isAdminRoute ? 25000 : 5000;
-      return {
-        status: 429,
-        message: `Trop de requêtes (${limit} req/30min), veuillez réessayer plus tard.`,
-        limit: limit,
-        window: "30 minutes"
-      };
-    },
-    standardHeaders: true,
-    legacyHeaders: false,
-    skipSuccessfulRequests: false,
-    keyGenerator: (req: express.Request) => {
-      const ip = req.ip || req.headers['x-forwarded-for'] || 'unknown';
-      // Différencier les clés par type d'utilisateur
-      return (req as any).isAdminRoute ? `admin_${ip}` : `user_${ip}`;
-    }
-  }),
-);
+    // ✅ RATE LIMIT UNIQUE AVEC LOGIQUE CONDITIONNELLE
+    app.use(
+      rateLimit({
+        windowMs: 30 * 60 * 1000, // 30 minutes
+        max: (req: express.Request) => {
+          // ✅ ADMIN: 25,000 requêtes
+          if ((req as any).isAdminRoute) {
+            return 25000;
+          }
+          // ✅ UTILISATEURS NORMAUX: 5,000 requêtes
+          return 5000;
+        },
+        message: (req: express.Request) => {
+          const limit = (req as any).isAdminRoute ? 25000 : 5000;
+          return {
+            status: 429,
+            message: `Trop de requêtes (${limit} req/30min), veuillez réessayer plus tard.`,
+            limit: limit,
+            window: "30 minutes"
+          };
+        },
+        standardHeaders: true,
+        legacyHeaders: false,
+        skipSuccessfulRequests: false,
+        keyGenerator: (req: express.Request) => {
+          const ip = req.ip || req.headers['x-forwarded-for'] || 'unknown';
+          // Différencier les clés par type d'utilisateur
+          return (req as any).isAdminRoute ? `admin_${ip}` : `user_${ip}`;
+        }
+      }),
+    );
 
     const port = process.env.PORT || 10000;
     const host = "0.0.0.0";
