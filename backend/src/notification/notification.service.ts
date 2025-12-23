@@ -23,18 +23,18 @@ export class NotificationService {
   }
 
   private async initializeEmailService() {
-    const emailUser = this.configService.get<string>('EMAIL_USER') || process.env.EMAIL_USER;
-    const emailPass = this.configService.get<string>('EMAIL_PASS') || process.env.EMAIL_PASS;
+    const emailUser = process.env.EMAIL_USER || this.configService.get<string>('EMAIL_USER');
+    const emailPass = process.env.EMAIL_PASS || this.configService.get<string>('EMAIL_PASS');
 
     if (!emailUser || !emailPass) {
-      this.logger.error('❌ EMAIL_USER ou EMAIL_PASS manquant');
+      this.logger.warn('❌ Service email désactivé - EMAIL_USER ou EMAIL_PASS manquants');
       return;
     }
 
     this.fromEmail = `"Paname Consulting" <${emailUser}>`;
 
     try {
-      this.logger.log('🔄 Initialisation Gmail...');
+      this.logger.log('🔄 Initialisation du service email Gmail...');
       
       this.transporter = nodemailer.createTransport({
         service: 'gmail',
@@ -46,10 +46,10 @@ export class NotificationService {
 
       await this.transporter.verify();
       this.emailServiceAvailable = true;
-      this.logger.log('✅ Service email opérationnel');
+      this.logger.log('✅ Service email Gmail initialisé avec succès');
       
     } catch (error) {
-      this.logger.error(`❌ Erreur Gmail: ${error.message}`);
+      this.logger.error(`❌ Échec initialisation email: ${error.message}`);
       this.emailServiceAvailable = false;
     }
   }
@@ -61,7 +61,7 @@ export class NotificationService {
     context: string
   ): Promise<boolean> {
     if (!this.emailServiceAvailable) {
-      this.logger.warn(`📧 "${context}" ignorée - service indisponible`);
+      this.logger.warn(`📧 Notification "${context}" ignorée - service email indisponible`);
       return false;
     }
 
@@ -119,8 +119,6 @@ export class NotificationService {
       </html>
     `;
   }
-
-  // ==================== RENDEZ-VOUS NOTIFICATIONS ====================
 
   async sendConfirmation(rendezvous: Rendezvous): Promise<boolean> {
     const dateFormatted = new Date(rendezvous.date).toLocaleDateString("fr-FR", {
@@ -268,8 +266,6 @@ export class NotificationService {
     return false;
   }
 
-  // ==================== PROCEDURE NOTIFICATIONS ====================
-
   async sendProcedureUpdate(procedure: Procedure): Promise<boolean> {
     const currentStep = procedure.steps.find(s => s.statut === StepStatus.IN_PROGRESS);
     const completedSteps = procedure.steps.filter(s => s.statut === StepStatus.COMPLETED).length;
@@ -384,8 +380,6 @@ export class NotificationService {
     );
   }
 
-  // ==================== CONTACT NOTIFICATIONS ====================
-
   async sendContactReply(contact: Contact, reply: string): Promise<boolean> {
     const content = `
       <p>Nous vous répondons à votre message :</p>
@@ -406,9 +400,9 @@ export class NotificationService {
   }
 
   async sendContactNotification(contact: Contact): Promise<boolean> {
-    const adminEmail = this.configService.get<string>('EMAIL_USER');
+    const adminEmail = process.env.EMAIL_USER || this.configService.get<string>('EMAIL_USER');
     if (!adminEmail) {
-      this.logger.warn("📧 Email admin non configuré");
+      this.logger.warn("📧 Email admin non configuré - notification contact ignorée");
       return false;
     }
 
@@ -456,8 +450,6 @@ export class NotificationService {
       'confirmation-contact'
     );
   }
-
-  // ==================== UTILITY METHODS ====================
 
   private maskEmail(email: string): string {
     if (!email || !email.includes('@')) return '***@***';
