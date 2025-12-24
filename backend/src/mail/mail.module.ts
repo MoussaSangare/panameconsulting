@@ -2,16 +2,20 @@ import { Module, Global } from "@nestjs/common";
 import { MailService } from "./mail.service";
 import { ConfigModule } from "@nestjs/config";
 import { Resend } from "resend";
-import { ResendService } from "../config/resend.service";
+import {SmtpService } from "../config/smtp.service";
 
 @Global()
 @Module({
-  imports: [ConfigModule],
-  providers: [MailService,
-    ResendService
+  imports: [
+    ConfigModule.forRoot({
+      isGlobal: true,
+      envFilePath: '.env'
+    }),
   ],
+  providers: [MailService,
+SmtpService  ],
   exports: [MailService,
-    ResendService
+SmtpService
   ],
 })
 export class MailModule {}

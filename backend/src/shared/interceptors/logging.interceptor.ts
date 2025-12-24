@@ -16,6 +16,8 @@ export class LoggingInterceptor implements NestInterceptor {
   private readonly SENSITIVE_PATHS = [
     'password',
     'token',
+    'access_token',
+    'refresh_token',
     'secret',
     'credit-card',
     'auth',

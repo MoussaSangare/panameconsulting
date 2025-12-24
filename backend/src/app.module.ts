@@ -14,6 +14,7 @@ import { MailModule } from "./mail/mail.module";
 import { RendezvousModule } from "./rendez-vous/rendez-vous.module";
 import { NotificationModule } from "./notification/notification.module";
 import { ProcedureModule } from "./procedure/procedure.module";
+import { SmtpService } from "./config/smtp.service";
 
 @Module({
   imports: [
@@ -81,7 +82,7 @@ import { ProcedureModule } from "./procedure/procedure.module";
     RendezvousModule, // Gestion des rendez-vous
     NotificationModule, // Notifications
   ],
-  controllers: [],
+  controllers: [ ],
   providers: [
     {
       provide: 'INITIALIZE_DATABASE',
@@ -97,6 +98,10 @@ import { ProcedureModule } from "./procedure/procedure.module";
       },
       inject: [ConfigService],
     },
+     SmtpService,
+  ],
+  exports: [
+    SmtpService,
   ],
 })
 export class AppModule {}

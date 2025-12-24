@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { ResendService } from '../config/resend.service';
+import { SmtpService } from '../config/smtp.service';
 
 @Injectable()
 export class MailService {
@@ -9,14 +9,14 @@ export class MailService {
   private readonly frontendUrl: string;
 
   constructor(
-    private readonly resendService: ResendService,
+    private readonly smtpService: SmtpService,
     private readonly configService: ConfigService
   ) {
     this.frontendUrl = this.configService.get<string>('FRONTEND_URL') || 'https://panameconsulting.vercel.app';
   }
 
   async initManually(): Promise<void> {
-    await this.resendService.initManually();
+    await this.smtpService.initManually();
   }
 
   /**
@@ -36,12 +36,12 @@ export class MailService {
       contentType?: string;
     }>;
   }): Promise<boolean> {
-    if (!this.resendService.isServiceAvailable()) {
+    if (!this.smtpService.isServiceAvailable()) {
       this.logger.warn('📧 Envoi ignoré - service indisponible');
       return false;
     }
 
-    return await this.resendService.sendEmail({
+    return await this.smtpService.sendEmail({
       to: options.to,
       subject: options.subject,
       html: options.html,
@@ -608,13 +608,13 @@ export class MailService {
    * Vérifie si le service est disponible
    */
   getStatus(): { available: boolean; message: string } {
-    return this.resendService.getStatus();
+    return this.smtpService.getStatus();
   }
 
   /**
    * Teste la connexion
    */
   async testConnection(): Promise<{ success: boolean; message: string }> {
-    return await this.resendService.testConnection();
+    return await this.smtpService.testConnection();
   }
 }
