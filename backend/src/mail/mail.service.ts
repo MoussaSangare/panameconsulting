@@ -1,84 +1,22 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { createTransport, Transporter } from 'nodemailer';
+import { ResendService } from '../config/resend.service';
 
 @Injectable()
 export class MailService {
   private readonly logger = new Logger(MailService.name);
-  private transporter: Transporter;
-  private isAvailable: boolean = false;
-  private fromEmail: string = '';
+  private readonly appName: string = 'Paname Consulting';
+  private readonly frontendUrl: string;
 
-  constructor(private readonly configService: ConfigService) {
-    this.initialize();
+  constructor(
+    private readonly resendService: ResendService,
+    private readonly configService: ConfigService
+  ) {
+    this.frontendUrl = this.configService.get<string>('FRONTEND_URL') || 'https://panameconsulting.vercel.app';
   }
 
   async initManually(): Promise<void> {
-    await this.initialize();
-  }
-
-  private async initialize(): Promise<void> {
-    const emailUser = this.configService.get<string>('EMAIL_USER');
-    const emailPass = this.configService.get<string>('EMAIL_PASS');
-
-    if (!emailUser || !emailPass) {
-      this.logger.error('❌ EMAIL_USER ou EMAIL_PASS manquant');
-      this.isAvailable = false;
-      return;
-    }
-
-    this.fromEmail = `"Paname Consulting" <${emailUser}>`;
-
-    try {
-      this.logger.log('🔄 Initialisation service email...');
-      
-      this.transporter = createTransport({
-        host: 'smtp.gmail.com',
-        port: 587,
-        secure: false, // Utilise TLS
-        auth: {
-          user: emailUser,
-          pass: emailPass
-        },
-        tls: {
-          rejectUnauthorized: false
-        },
-        connectionTimeout: 10000,
-        greetingTimeout: 10000,
-        socketTimeout: 10000
-      });
-
-      await this.transporter.verify();
-      this.isAvailable = true;
-      this.logger.log('✅ Service email opérationnel');
-      
-    } catch (error: any) {
-      this.logger.error(`❌ Erreur initialisation: ${error.message}`);
-      
-      // Tentative avec port 465 (SSL)
-      try {
-        this.logger.log('🔄 Tentative avec port 465 (SSL)...');
-        
-        this.transporter = createTransport({
-          host: 'smtp.gmail.com',
-          port: 465,
-          secure: true, // SSL
-          auth: {
-            user: emailUser,
-            pass: emailPass
-          },
-          connectionTimeout: 10000,
-          greetingTimeout: 10000
-        });
-
-        await this.transporter.verify();
-        this.isAvailable = true;
-        this.logger.log('✅ Service email opérationnel (SSL:465)');
-      } catch (sslError: any) {
-        this.logger.error(`❌ Erreur SSL: ${sslError.message}`);
-        this.isAvailable = false;
-      }
-    }
+    await this.resendService.initManually();
   }
 
   /**
@@ -98,30 +36,17 @@ export class MailService {
       contentType?: string;
     }>;
   }): Promise<boolean> {
-    if (!this.isAvailable || !this.transporter) {
+    if (!this.resendService.isServiceAvailable()) {
       this.logger.warn('📧 Envoi ignoré - service indisponible');
       return false;
     }
 
-    try {
-      const mailOptions = {
-        from: this.fromEmail,
-        to: options.to,
-        subject: options.subject,
-        html: options.html,
-        replyTo: options.replyTo,
-        cc: options.cc,
-        bcc: options.bcc,
-        attachments: options.attachments
-      };
-
-      await this.transporter.sendMail(mailOptions);
-      this.logger.log(`📧 Email envoyé à: ${this.maskEmail(options.to)}`);
-      return true;
-    } catch (error: any) {
-      this.logger.error(`❌ Erreur envoi: ${error.message}`);
-      return false;
-    }
+    return await this.resendService.sendEmail({
+      to: options.to,
+      subject: options.subject,
+      html: options.html,
+      replyTo: options.replyTo
+    });
   }
 
   /**
@@ -132,8 +57,7 @@ export class MailService {
     resetToken: string, 
     firstName: string = ''
   ): Promise<boolean> {
-    const appUrl = this.configService.get<string>('FRONTEND_URL') || 'https://panameconsulting.vercel.app';
-    const resetUrl = `${appUrl}/reset-password?token=${resetToken}`;
+    const resetUrl = `${this.frontendUrl}/reset-password?token=${resetToken}`;
 
     const html = `
       <!DOCTYPE html>
@@ -141,7 +65,7 @@ export class MailService {
       <head>
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Réinitialisation de mot de passe - Paname Consulting</title>
+        <title>Réinitialisation de mot de passe - ${this.appName}</title>
         <style>
           body { 
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif; 
@@ -191,10 +115,6 @@ export class MailService {
             font-size: 15px;
             transition: all 0.2s ease;
           }
-          .button:hover {
-            transform: translateY(-1px);
-            box-shadow: 0 4px 12px rgba(14, 165, 233, 0.2);
-          }
           .footer { 
             margin-top: 40px; 
             padding-top: 25px; 
@@ -202,15 +122,6 @@ export class MailService {
             text-align: center; 
             color: #6b7280; 
             font-size: 13px; 
-          }
-          .warning {
-            background: #fef3c7;
-            border: 1px solid #f59e0b;
-            color: #92400e;
-            padding: 12px;
-            border-radius: 6px;
-            font-size: 14px;
-            margin: 20px 0;
           }
         </style>
       </head>
@@ -246,9 +157,9 @@ export class MailService {
             </p>
             
             <div class="footer">
-              <p>Cordialement,<br><strong>L'équipe Paname Consulting</strong></p>
+              <p>Cordialement,<br><strong>L'équipe ${this.appName}</strong></p>
               <p style="margin-top: 10px;">
-                <a href="${appUrl}" style="color: #0ea5e9; text-decoration: none; font-weight: 500;">
+                <a href="${this.frontendUrl}" style="color: #0ea5e9; text-decoration: none; font-weight: 500;">
                   Accéder à notre site
                 </a>
               </p>
@@ -261,7 +172,7 @@ export class MailService {
 
     return await this.sendEmail({
       to: email,
-      subject: 'Réinitialisation de votre mot de passe - Paname Consulting',
+      subject: `Réinitialisation de votre mot de passe - ${this.appName}`,
       html,
     });
   }
@@ -270,15 +181,13 @@ export class MailService {
    * Email de bienvenue
    */
   async sendWelcomeEmail(email: string, firstName: string): Promise<boolean> {
-    const appUrl = this.configService.get<string>('FRONTEND_URL') || 'https://panameconsulting.vercel.app';
-
     const html = `
       <!DOCTYPE html>
       <html>
       <head>
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Bienvenue chez Paname Consulting</title>
+        <title>Bienvenue chez ${this.appName}</title>
         <style>
           body { 
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif; 
@@ -356,10 +265,6 @@ export class MailService {
             font-size: 15px;
             transition: all 0.2s ease;
           }
-          .button:hover {
-            transform: translateY(-1px);
-            box-shadow: 0 4px 12px rgba(14, 165, 233, 0.2);
-          }
           .footer { 
             margin-top: 40px; 
             padding-top: 25px; 
@@ -373,12 +278,12 @@ export class MailService {
       <body>
         <div class="container">
           <div class="header">
-            <h1>Bienvenue chez Paname Consulting</h1>
+            <h1>Bienvenue chez ${this.appName}</h1>
             <p>Votre aventure internationale commence ici</p>
           </div>
           <div class="content">
             <p>Bonjour <strong>${firstName}</strong>,</p>
-            <p>Nous sommes ravis de vous accueillir dans la communauté <strong>Paname Consulting</strong> !</p>
+            <p>Nous sommes ravis de vous accueillir dans la communauté <strong>${this.appName}</strong> !</p>
             
             <div class="welcome-box">
               <p style="margin: 0 0 15px 0; font-size: 18px; font-weight: 600; color: #0369a1;">
@@ -417,13 +322,13 @@ export class MailService {
             </div>
 
             <div style="text-align: center; margin: 30px 0;">
-              <a href="${appUrl}" class="button">Accéder à mon espace personnel</a>
+              <a href="${this.frontendUrl}" class="button">Accéder à mon espace personnel</a>
             </div>
 
             <p>Nous sommes impatients de vous accompagner dans votre projet d'études à l'international et de vous aider à réaliser vos ambitions.</p>
             
             <div class="footer">
-              <p>Cordialement,<br><strong>L'équipe Paname Consulting</strong></p>
+              <p>Cordialement,<br><strong>L'équipe ${this.appName}</strong></p>
               <p style="margin-top: 15px;">
                 Pour toute question, n'hésitez pas à nous contacter à l'adresse :<br>
                 <a href="mailto:support@panameconsulting.com" style="color: #0ea5e9; text-decoration: none;">
@@ -439,7 +344,7 @@ export class MailService {
 
     return await this.sendEmail({
       to: email,
-      subject: 'Bienvenue chez Paname Consulting',
+      subject: `Bienvenue chez ${this.appName}`,
       html,
     });
   }
@@ -452,8 +357,7 @@ export class MailService {
     verificationToken: string, 
     firstName: string
   ): Promise<boolean> {
-    const appUrl = this.configService.get<string>('FRONTEND_URL') || 'https://panameconsulting.vercel.app';
-    const verifyUrl = `${appUrl}/verify-email?token=${verificationToken}`;
+    const verifyUrl = `${this.frontendUrl}/verify-email?token=${verificationToken}`;
 
     const html = `
       <!DOCTYPE html>
@@ -461,7 +365,7 @@ export class MailService {
       <head>
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Vérification de votre adresse email - Paname Consulting</title>
+        <title>Vérification de votre adresse email - ${this.appName}</title>
         <style>
           body { 
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif; 
@@ -503,10 +407,6 @@ export class MailService {
             font-weight: 600;
             font-size: 15px;
             transition: all 0.2s ease;
-          }
-          .button:hover {
-            transform: translateY(-1px);
-            box-shadow: 0 4px 12px rgba(16, 185, 129, 0.2);
           }
           .verification-box {
             background: #f0fdf4;
@@ -558,7 +458,7 @@ export class MailService {
             </p>
 
             <div class="footer">
-              <p>Cordialement,<br><strong>L'équipe Paname Consulting</strong></p>
+              <p>Cordialement,<br><strong>L'équipe ${this.appName}</strong></p>
               <p style="margin-top: 10px; font-size: 12px; color: #9ca3af;">
                 Si vous n'avez pas créé de compte, vous pouvez ignorer cet email en toute sécurité.
               </p>
@@ -571,7 +471,7 @@ export class MailService {
 
     return await this.sendEmail({
       to: email,
-      subject: 'Vérification de votre adresse email - Paname Consulting',
+      subject: `Vérification de votre adresse email - ${this.appName}`,
       html,
     });
   }
@@ -580,7 +480,7 @@ export class MailService {
    * Email d'alerte admin
    */
   async sendAdminAlert(subject: string, message: string): Promise<boolean> {
-    const adminEmail = process.env.EMAIL_USER || this.configService.get<string>('EMAIL_USER');
+    const adminEmail = this.configService.get<string>('EMAIL_USER');
     
     if (!adminEmail) {
       this.logger.warn('📧 Email admin non configuré');
@@ -593,7 +493,7 @@ export class MailService {
       <head>
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Alerte Administration - Paname Consulting</title>
+        <title>Alerte Administration - ${this.appName}</title>
         <style>
           body { 
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif; 
@@ -686,7 +586,7 @@ export class MailService {
             </div>
             
             <div class="footer">
-              <p>Alerte générée automatiquement par le système Paname Consulting</p>
+              <p>Alerte générée automatiquement par le système ${this.appName}</p>
               <p style="margin-top: 5px; font-size: 10px;">
                 ID: ${Date.now()}-${Math.random().toString(36).substring(2, 9)}
               </p>
@@ -705,54 +605,16 @@ export class MailService {
   }
 
   /**
-   * Masquage d'email pour les logs
-   */
-  private maskEmail(email: string): string {
-    if (!email || !email.includes('@')) return '***@***';
-    const [name, domain] = email.split('@');
-    const maskedName = name.length > 2 
-      ? name.substring(0, 2) + '***' + (name.length > 3 ? name.substring(name.length - 1) : '')
-      : '***';
-    return `${maskedName}@${domain}`;
-  }
-
-  /**
    * Vérifie si le service est disponible
    */
   getStatus(): { available: boolean; message: string } {
-    return {
-      available: this.isAvailable,
-      message: this.isAvailable 
-        ? '📧 Service email disponible' 
-        : '❌ Service email indisponible - configurez EMAIL_USER et EMAIL_PASS dans les variables d\'environnement'
-    };
+    return this.resendService.getStatus();
   }
 
   /**
-   * Teste la connexion SMTP
+   * Teste la connexion
    */
   async testConnection(): Promise<{ success: boolean; message: string }> {
-    try {
-      if (!this.transporter) {
-        await this.initialize();
-      }
-      
-      if (this.isAvailable) {
-        return {
-          success: true,
-          message: '✅ Service email opérationnel'
-        };
-      } else {
-        return {
-          success: false,
-          message: '❌ Service email non disponible'
-        };
-      }
-    } catch (error: any) {
-      return {
-        success: false,
-        message: `❌ Erreur de test: ${error.message}`
-      };
-    }
+    return await this.resendService.testConnection();
   }
 }

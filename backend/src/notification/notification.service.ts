@@ -1,6 +1,6 @@
-import { Injectable, Logger, Inject } from '@nestjs/common';
-import { createTransport, Transporter } from 'nodemailer';
+import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { ResendService } from '../config/resend.service';
 import { Rendezvous } from '../schemas/rendezvous.schema';
 import { Procedure, ProcedureStatus, StepStatus } from '../schemas/procedure.schema';
 import { Contact } from '../schemas/contact.schema';
@@ -8,89 +8,18 @@ import { Contact } from '../schemas/contact.schema';
 @Injectable()
 export class NotificationService {
   private readonly logger = new Logger(NotificationService.name);
-  private transporter: Transporter;
-  private emailServiceAvailable: boolean = false;
-  private fromEmail: string = '';
   private readonly appName: string = 'Paname Consulting';
-  private readonly frontendUrl: string = 'https://panameconsulting.vercel.app';
+  private readonly frontendUrl: string;
 
   constructor(
+    private readonly resendService: ResendService,
     private readonly configService: ConfigService
   ) {
-    this.initializeEmailService();
+    this.frontendUrl = this.configService.get<string>('FRONTEND_URL') || 'https://panameconsulting.vercel.app';
   }
 
   async initManually(): Promise<void> {
-    await this.initializeEmailService();
-  }
-
-  private async initializeEmailService(): Promise<void> {
-    const emailUser = this.configService.get<string>('EMAIL_USER') || process.env.EMAIL_USER;
-    const emailPass = this.configService.get<string>('EMAIL_PASS') || process.env.EMAIL_PASS;
-
-    if (!emailUser || !emailPass) {
-      this.logger.error('❌ EMAIL_USER ou EMAIL_PASS manquant');
-      this.emailServiceAvailable = false;
-      return;
-    }
-
-    this.fromEmail = `"${this.appName}" <${emailUser}>`;
-
-    try {
-      this.logger.log('🔄 Initialisation SMTP Gmail (Port 465)...');
-      
-      // Configuration SMTP avec port 465 (SSL)
-      this.transporter = createTransport({
-        host: 'smtp.gmail.com',
-        port: 465,
-        secure: true,
-        auth: {
-          user: emailUser,
-          pass: emailPass
-        },
-        connectionTimeout: 10000,
-        greetingTimeout: 10000,
-        socketTimeout: 10000
-      });
-
-      await this.transporter.verify();
-      this.emailServiceAvailable = true;
-      this.logger.log('✅ Service email opérationnel (SSL:465)');
-      
-    } catch (error: any) {
-      this.logger.error(`❌ Erreur port 465: ${error.message}`);
-      
-      // Essai avec port 587 (TLS)
-      try {
-        this.logger.log('🔄 Tentative port 587 (TLS)...');
-        
-        this.transporter = createTransport({
-          host: 'smtp.gmail.com',
-          port: 587,
-          secure: false,
-          auth: {
-            user: emailUser,
-            pass: emailPass
-          },
-          connectionTimeout: 10000,
-          greetingTimeout: 10000,
-          socketTimeout: 10000,
-          tls: {
-            rejectUnauthorized: false
-          }
-        });
-
-        await this.transporter.verify();
-        this.emailServiceAvailable = true;
-        this.logger.log('✅ Service email opérationnel (TLS:587)');
-        
-      } catch (altError: any) {
-        this.logger.error(`❌ Erreur port 587: ${altError.message}`);
-        this.logger.error('💡 Railway bloque probablement les ports SMTP sortants');
-        this.logger.error('💡 Solutions: 1) Utiliser SendGrid/Resend, 2) Contacter Railway, 3) Utiliser un proxy SMTP');
-        this.emailServiceAvailable = false;
-      }
-    }
+    await this.resendService.initManually();
   }
 
   private async sendEmail(
@@ -99,22 +28,23 @@ export class NotificationService {
     html: string, 
     context: string
   ): Promise<boolean> {
-    if (!this.emailServiceAvailable || !this.transporter) {
+    if (!this.resendService.isServiceAvailable()) {
       this.logger.warn(`📧 "${context}" ignorée - service indisponible`);
       return false;
     }
 
     try {
-      await this.transporter.sendMail({
-        from: this.fromEmail,
+      const sent = await this.resendService.sendEmail({
         to,
         subject,
         html
       });
       
-      this.logger.log(`📧 Email envoyé (${context}) à: ${this.maskEmail(to)}`);
-      return true;
+      if (sent) {
+        this.logger.log(`📧 Notification envoyée (${context})`);
+      }
       
+      return sent;
     } catch (error: any) {
       this.logger.error(`❌ Erreur "${context}": ${error.message}`);
       return false;
@@ -191,17 +121,10 @@ export class NotificationService {
             font-size: 15px;
             transition: all 0.2s ease;
           }
-          .button:hover {
-            transform: translateY(-1px);
-            box-shadow: 0 4px 12px rgba(14, 165, 233, 0.2);
-          }
           .website-link { 
             color: #0284c7; 
             text-decoration: none; 
             font-weight: 500;
-          }
-          .website-link:hover {
-            text-decoration: underline;
           }
           .greeting {
             font-size: 16px;
@@ -616,7 +539,7 @@ export class NotificationService {
   }
 
   async sendContactNotification(contact: Contact): Promise<boolean> {
-    const adminEmail = this.configService.get<string>('EMAIL_USER') || process.env.EMAIL_USER;
+    const adminEmail = this.configService.get<string>('EMAIL_USER');
     if (!adminEmail) {
       this.logger.warn("📧 Email admin non configuré");
       return false;
@@ -682,47 +605,11 @@ export class NotificationService {
 
   // ==================== UTILITY METHODS ====================
 
-  private maskEmail(email: string): string {
-    if (!email || !email.includes('@')) return '***@***';
-    const [name, domain] = email.split('@');
-    const maskedName = name.length > 2 
-      ? name.substring(0, 2) + '***' + (name.length > 3 ? name.substring(name.length - 1) : '')
-      : '***';
-    return `${maskedName}@${domain}`;
-  }
-
   getEmailStatus(): { available: boolean; message: string } {
-    return {
-      available: this.emailServiceAvailable,
-      message: this.emailServiceAvailable 
-        ? '📧 Service email disponible' 
-        : '❌ Service email indisponible - vérifiez EMAIL_USER et EMAIL_PASS dans les variables d\'environnement'
-    };
+    return this.resendService.getStatus();
   }
 
-  // Nouvelle méthode pour tester la connexion
   async testConnection(): Promise<{ success: boolean; message: string }> {
-    try {
-      if (!this.transporter) {
-        await this.initializeEmailService();
-      }
-      
-      if (this.emailServiceAvailable) {
-        return {
-          success: true,
-          message: '✅ Service email opérationnel'
-        };
-      } else {
-        return {
-          success: false,
-          message: '❌ Service email non disponible'
-        };
-      }
-    } catch (error: any) {
-      return {
-        success: false,
-        message: `❌ Erreur de test: ${error.message}`
-      };
-    }
+    return await this.resendService.testConnection();
   }
 }
