@@ -41,13 +41,13 @@ const productionOrigins = [
   "https://panameconsulting.vercel.app",
   "https://panameconsulting.up.railway.app",
   "https://vercel.live",
-  "http://localhost:5713",
-  "http://localhost:3000",
+  "http://localhost:5173",
+  "http://localhost:10000",
 ];
 
 const allowedOrigins = process.env.NODE_ENV === 'production' 
   ? productionOrigins 
-  : [...productionOrigins, "http://localhost:*"];
+  : [...productionOrigins, "http://localhost:*", "http://localhost:10000", "http://localhost:5173"];
 
 const cspDirectives = {
   defaultSrc: ["'self'"],
@@ -115,13 +115,22 @@ async function bootstrap() {
   );
 
   // ✅ CORS avec credentials
-  app.enableCors({
-    origin: allowedOrigins,
-    credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'Cookie', 'Set-Cookie'],
-    exposedHeaders: ['Set-Cookie'],
-  });
+app.enableCors({
+  origin: [
+    "https://panameconsulting.com",
+    "https://www.panameconsulting.com",
+    "https://panameconsulting.vercel.app",
+    "https://panameconsulting.up.railway.app",
+    "https://vercel.live",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:10000"
+  ],
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'Cookie', 'Set-Cookie'],
+  exposedHeaders: ['Set-Cookie'],
+});
 
   server.get("/", (_req: express.Request, res: express.Response) => {
     res.status(200).json({
@@ -176,10 +185,10 @@ async function bootstrap() {
   server.use(compression());
 
   // ✅ MIDDLEWARE: Cookie Parser (options séparées)
-  server.use(cookieParser(process.env.COOKIE_SECRET || 'default-secret-change-me'));
+  server.use(cookieParser(process.env.COOKIE_SECRET));
 
   // ✅ MIDDLEWARE: Configuration des cookies de session (30 minutes)
-  server.use((req: express.Request, res: express.Response, next: express.NextFunction) => {
+  server.use((_req: express.Request, res: express.Response, next: express.NextFunction) => {
     // Configurer les cookies de réponse pour qu'ils soient sécurisés
     const cookieOptions = {
       httpOnly: true,
