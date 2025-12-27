@@ -76,9 +76,7 @@ export class SmtpService implements OnModuleDestroy {
       this.logger.log(`🚀 Configuration SMTP Gmail pour ${nodeEnv.toUpperCase()}...`);
       
       const transporterConfig: SMTPTransport.Options = {
-        host: 'smtp.gmail.com',
-        port: 465,
-        secure: true,
+       service: 'gmail',
         auth: {
           user: emailUser,
           pass: emailPass,
@@ -116,9 +114,7 @@ export class SmtpService implements OnModuleDestroy {
   private async initializeWithFallback(emailUser: string, emailPass: string): Promise<void> {
     try {
       const transporterConfig: SMTPTransport.Options = {
-        host: 'smtp.gmail.com',
-        port: 587,
-        secure: false,
+        service: 'gmail',
         requireTLS: true,
         auth: {
           user: emailUser,
