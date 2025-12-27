@@ -22,7 +22,7 @@ import { SmtpService } from "./config/smtp.service";
     ConfigModule.forRoot({
       load: [configuration],
       isGlobal: true,
-      envFilePath: '.env', // ← AJOUTÉ
+      envFilePath: '.env',
     }),
 
     // 2. Base de données - CONFIGURATION AMÉLIORÉE
@@ -32,26 +32,19 @@ import { SmtpService } from "./config/smtp.service";
         const logger = new Logger('MongooseModule');
         const uri = configService.get<string>("MONGODB_URI");
 
-        // Logs détaillés pour le débogage
-        logger.log(`🔗 Configuration MongoDB...`);
-        logger.log(`📊 MONGODB_URI: ${uri ? 'Définie' : 'NON DÉFINIE'}`);
-        
         if (!uri) {
-          logger.error('❌ MONGODB_URI est non définie dans les variables d\'environnement');
-          logger.error('💡 Vérifiez les variables dans Railway: MONGODB_URI, NODE_ENV, PORT');
+          logger.error('MONGODB_URI est non définie dans les variables d\'environnement');
           throw new Error('MONGODB_URI is not defined in environment variables');
         }
 
-        
         return {
           uri,
-          retryAttempts: 5, // ← AJOUTÉ
-          retryDelay: 3000, // ← AJOUTÉ
-          serverSelectionTimeoutMS: 30000, // ← AJOUTÉ
-          socketTimeoutMS: 45000, // ← AJOUTÉ
-          bufferCommands: false, // ← AJOUTÉ
-          connectTimeoutMS: 30000, // ← AJOUTÉ
-          // Options supplémentaires pour la stabilité
+          retryAttempts: 5,
+          retryDelay: 3000,
+          serverSelectionTimeoutMS: 30000,
+          socketTimeoutMS: 45000,
+          bufferCommands: false,
+          connectTimeoutMS: 30000,
           maxPoolSize: 10,
           minPoolSize: 1,
           heartbeatFrequencyMS: 10000,
@@ -65,25 +58,26 @@ import { SmtpService } from "./config/smtp.service";
       rootPath: join(__dirname, "..", "uploads"),
       serveRoot: "/uploads",
       serveStaticOptions: {
-        index: false,           // Désactive l'indexation
-        dotfiles: 'deny',       // Bloque les fichiers cachés (.env, etc.)
+        index: false,
+        dotfiles: 'deny',
         cacheControl: true,
-        maxAge: 2592000000, // 30 jours en ms
+        maxAge: 2592000000,
       },
     }),
 
     // 4. Modules fonctionnels
-    AuthModule, // Module d'authentification (doit être avant les modules protégés)
-    UsersModule, // Gestion des utilisateurs
-    DestinationModule, // Destinations phares
-    ContactModule, // Formulaire de contact
-    MailModule, // Envoi d'emails
-    ProcedureModule, // Gestion des procédures
-    RendezvousModule, // Gestion des rendez-vous
-    NotificationModule, // Notifications
+    AuthModule,
+    UsersModule,
+    DestinationModule,
+    ContactModule,
+    MailModule,
+    ProcedureModule,
+    RendezvousModule,
+    NotificationModule,
   ],
-  controllers: [ ],
+  controllers: [],
   providers: [
+    SmtpService, // ← CORRECTION : pas besoin de configuration spéciale
     {
       provide: 'INITIALIZE_DATABASE',
       useFactory: async (configService: ConfigService) => {
@@ -91,14 +85,13 @@ import { SmtpService } from "./config/smtp.service";
         const uri = configService.get<string>("MONGODB_URI");
         
         if (!uri) {
-          logger.error('🚨 MONGODB_URI manquante au démarrage');
+          logger.error('MONGODB_URI manquante au démarrage');
         } else {
-          logger.log('✅ Configuration MongoDB chargée');
+          logger.log('Configuration MongoDB chargée');
         }
       },
       inject: [ConfigService],
     },
-     SmtpService,
   ],
   exports: [
     SmtpService,
