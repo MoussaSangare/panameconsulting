@@ -3,10 +3,14 @@ FROM node:18-alpine AS builder
 
 RUN corepack enable && corepack prepare pnpm@10.26.2 --activate
 
+RUN pnpm install nodemailer@latest @types/nodemailer@latest --save
+
+
 WORKDIR /app
 
 # Copie de tout le backend
 COPY backend/ ./
+
 
 # Installation
 RUN pnpm install --frozen-lockfile --prefer-offline
@@ -29,6 +33,8 @@ WORKDIR /app
 COPY backend/package.json backend/pnpm-lock.yaml* ./
 
 RUN pnpm install --prod --frozen-lockfile --prefer-offline
+
+RUN pnpm install nodemailer@latest @types/nodemailer@latest --save
 
 COPY --from=builder /app/dist ./dist
 

@@ -40,7 +40,7 @@ export class SmtpService implements OnModuleDestroy {
   private retryDelay: number = 2000;
   private readonly maxEmailsPerDay: number = 100;
   private emailSentTimestamps: Date[] = [];
-  private readonly cleanupInterval: number = 24 * 60 * 60 * 1000; // 24 heures
+  private readonly cleanupInterval: number = 24 * 60 * 60 * 1000;
   private cleanupTimer?: NodeJS.Timeout;
 
   constructor(private readonly configService: ConfigService) {
@@ -48,7 +48,6 @@ export class SmtpService implements OnModuleDestroy {
       this.logger.error(`Erreur d'initialisation SMTP: ${error.message}`);
     });
     
-    // Nettoyage périodique des timestamps
     this.cleanupTimer = setInterval(() => this.cleanupOldTimestamps(), this.cleanupInterval);
   }
 
@@ -65,7 +64,7 @@ export class SmtpService implements OnModuleDestroy {
     const nodeEnv = (this.configService.get<string>('NODE_ENV') || process.env.NODE_ENV || 'production').toLowerCase();
 
     if (!emailUser || !emailPass) {
-      this.logger.error('❌ EMAIL_USER ou EMAIL_PASS manquant pour SMTP');
+      this.logger.error('EMAIL_USER ou EMAIL_PASS manquant pour SMTP');
       this.isAvailable = false;
       return;
     }
@@ -73,10 +72,10 @@ export class SmtpService implements OnModuleDestroy {
     this.fromEmail = `${this.appName} <${emailUser}>`;
 
     try {
-      this.logger.log(`🚀 Configuration SMTP Gmail pour ${nodeEnv.toUpperCase()}...`);
+      this.logger.log(`Configuration SMTP Gmail pour ${nodeEnv.toUpperCase()}...`);
       
       const transporterConfig: SMTPTransport.Options = {
-       service: 'gmail',
+        service: 'gmail',
         auth: {
           user: emailUser,
           pass: emailPass,
@@ -96,14 +95,14 @@ export class SmtpService implements OnModuleDestroy {
       await this.transporter.verify();
       this.isAvailable = true;
       
-      this.logger.log('✅ Service SMTP Gmail opérationnel (Production)');
-      this.logger.log(`📧 Expéditeur: ${this.maskEmail(emailUser)}`);
+      this.logger.log('Service SMTP Gmail opérationnel (Production)');
+      this.logger.log(`Expéditeur: ${this.maskEmail(emailUser)}`);
       
     } catch (error: any) {
-      this.logger.error(`❌ Erreur initialisation SMTP: ${error.message}`);
+      this.logger.error(`Erreur initialisation SMTP: ${error.message}`);
       
       if (error.code === 'ECONNREFUSED') {
-        this.logger.warn('🔄 Tentative avec port alternatif (587)...');
+        this.logger.warn('Tentative avec port alternatif (587)...');
         await this.initializeWithFallback(emailUser, emailPass);
       } else {
         this.isAvailable = false;
@@ -128,34 +127,32 @@ export class SmtpService implements OnModuleDestroy {
 
       await this.transporter.verify();
       this.isAvailable = true;
-      this.logger.log('✅ Service SMTP Gmail opérationnel via port 587 (STARTTLS)');
+      this.logger.log('Service SMTP Gmail opérationnel via port 587 (STARTTLS)');
       
     } catch (fallbackError: any) {
-      this.logger.error(`❌ Échec configuration alternative: ${fallbackError.message}`);
+      this.logger.error(`Echec configuration alternative: ${fallbackError.message}`);
       this.isAvailable = false;
     }
   }
 
   async initManually(): Promise<void> {
-    this.logger.log('📧 Initialisation manuelle du service SMTP...');
+    this.logger.log('Initialisation manuelle du service SMTP...');
     await this.initialize();
   }
 
   async sendEmail(options: EmailOptions): Promise<{ success: boolean; messageId?: string; error?: string }> {
     if (!this.isAvailable || !this.transporter) {
-      const message = '📧 Email ignoré - service SMTP indisponible';
+      const message = 'Email ignoré - service SMTP indisponible';
       this.logger.warn(message);
       return { success: false, error: message };
     }
 
-    // Vérification du rate limiting
     if (!this.canSendEmail()) {
-      const message = '📧 Limite quotidienne d\'emails atteinte';
+      const message = 'Limite quotidienne d\'emails atteinte';
       this.logger.warn(message);
       return { success: false, error: message };
     }
 
-    // Rate limiting pour éviter le flood
     await this.rateLimit();
 
     let lastError: any;
@@ -186,10 +183,9 @@ export class SmtpService implements OnModuleDestroy {
 
         const info = await this.transporter.sendMail(mailOptions);
         
-        // Succès : incrémenter les compteurs
         this.emailSentTimestamps.push(new Date());
         
-        this.logger.log(`📧 Email envoyé (tentative ${attempt}/${this.retryAttempts}) à: ${this.maskRecipient(options.to)}`);
+        this.logger.log(`Email envoyé (tentative ${attempt}/${this.retryAttempts}) à: ${this.maskRecipient(options.to)}`);
         this.logger.debug(`Message ID: ${info.messageId}`);
         
         return { 
@@ -204,13 +200,13 @@ export class SmtpService implements OnModuleDestroy {
         
         if (attempt < this.retryAttempts) {
           const delay = this.retryDelay * Math.pow(2, attempt - 1);
-          this.logger.warn(`⏳ Nouvelle tentative dans ${delay}ms...`);
+          this.logger.warn(`Nouvelle tentative dans ${delay}ms...`);
           await new Promise(resolve => setTimeout(resolve, delay));
         }
       }
     }
 
-    this.logger.error(`❌ Échec après ${this.retryAttempts} tentatives pour: ${options.subject}`);
+    this.logger.error(`Echec après ${this.retryAttempts} tentatives pour: ${options.subject}`);
     
     return {
       success: false,
@@ -224,29 +220,29 @@ export class SmtpService implements OnModuleDestroy {
     
     switch (errorCode) {
       case 'EAUTH':
-        this.logger.error(`🔐 Erreur auth (tentative ${attempt}): Vérifiez EMAIL_USER/EMAIL_PASS`);
+        this.logger.error(`Erreur auth (tentative ${attempt}): Vérifiez EMAIL_USER/EMAIL_PASS`);
         break;
       case 'EENVELOPE':
-        this.logger.error(`📮 Erreur enveloppe (tentative ${attempt}): ${errorMessage}`);
+        this.logger.error(`Erreur enveloppe (tentative ${attempt}): ${errorMessage}`);
         break;
       case 'EMESSAGE':
-        this.logger.error(`✉️ Erreur message (tentative ${attempt}): ${errorMessage}`);
+        this.logger.error(`Erreur message (tentative ${attempt}): ${errorMessage}`);
         break;
       case 'ECONNECTION':
-        this.logger.error(`🌐 Erreur connexion (tentative ${attempt}): ${errorMessage}`);
+        this.logger.error(`Erreur connexion (tentative ${attempt}): ${errorMessage}`);
         break;
       case 'ETIMEDOUT':
-        this.logger.error(`⏱️ Timeout (tentative ${attempt}): ${errorMessage}`);
+        this.logger.error(`Timeout (tentative ${attempt}): ${errorMessage}`);
         break;
       case 'ESOCKET':
-        this.logger.error(`🔌 Erreur socket (tentative ${attempt}): ${errorMessage}`);
+        this.logger.error(`Erreur socket (tentative ${attempt}): ${errorMessage}`);
         break;
       default:
-        this.logger.error(`❌ Erreur SMTP ${errorCode} (tentative ${attempt}): ${errorMessage}`);
+        this.logger.error(`Erreur SMTP ${errorCode} (tentative ${attempt}): ${errorMessage}`);
     }
     
     if (error.responseCode && error.responseCode >= 400) {
-      this.logger.error(`📊 Code réponse SMTP: ${error.responseCode}`);
+      this.logger.error(`Code réponse SMTP: ${error.responseCode}`);
     }
   }
 
@@ -265,7 +261,7 @@ export class SmtpService implements OnModuleDestroy {
     );
     
     if (this.emailSentTimestamps.length >= this.maxEmailsPerDay) {
-      this.logger.warn(`🚫 Limite quotidienne atteinte: ${this.emailSentTimestamps.length}/${this.maxEmailsPerDay} emails`);
+      this.logger.warn(`Limite quotidienne atteinte: ${this.emailSentTimestamps.length}/${this.maxEmailsPerDay} emails`);
       return false;
     }
     
@@ -283,7 +279,7 @@ export class SmtpService implements OnModuleDestroy {
     const after = this.emailSentTimestamps.length;
     
     if (before !== after) {
-      this.logger.debug(`🧹 Nettoyage timestamps: ${before - after} anciennes entrées supprimées`);
+      this.logger.debug(`Nettoyage timestamps: ${before - after} anciennes entrées supprimées`);
     }
   }
 
@@ -326,8 +322,8 @@ export class SmtpService implements OnModuleDestroy {
     return {
       available: this.isAvailable,
       message: this.isAvailable 
-        ? '✅ SMTP Gmail opérationnel'
-        : '❌ Service SMTP indisponible',
+        ? 'SMTP Gmail operationnel'
+        : 'Service SMTP indisponible',
       host: options?.host || 'N/A',
       port: options?.port || 0,
       secure: options?.secure || false,
@@ -347,17 +343,17 @@ export class SmtpService implements OnModuleDestroy {
         
         return {
           success: true,
-          message: `✅ SMTP Gmail opérationnel\n` +
-                  `📧 Expéditeur: ${this.maskEmail(this.fromEmail)}\n` +
-                  `🔌 Hôte: ${options.host}:${options.port}\n` +
-                  `🔐 Sécurité: ${options.secure ? 'SSL/TLS' : 'STARTTLS'}\n` +
-                  `📊 Emails aujourd'hui: ${this.emailSentTimestamps.length}/${this.maxEmailsPerDay}`
+          message: `SMTP Gmail operationnel\n` +
+                  `Expéditeur: ${this.maskEmail(this.fromEmail)}\n` +
+                  `Hôte: ${options.host}:${options.port}\n` +
+                  `Securite: ${options.secure ? 'SSL/TLS' : 'STARTTLS'}\n` +
+                  `Emails aujourd'hui: ${this.emailSentTimestamps.length}/${this.maxEmailsPerDay}`
         };
       }
       
       return {
         success: false,
-        message: '❌ Service SMTP indisponible. Vérifiez:\n' +
+        message: 'Service SMTP indisponible. Vérifiez:\n' +
                 '1. EMAIL_USER et EMAIL_PASS sont définis\n' +
                 '2. Le mot de passe d\'application Google est valide\n' +
                 '3. L\'accès SMTP est autorisé dans votre compte Google'
@@ -365,7 +361,7 @@ export class SmtpService implements OnModuleDestroy {
     } catch (error: any) {
       return {
         success: false,
-        message: `❌ Erreur de test SMTP: ${error.message}\n` +
+        message: `Erreur de test SMTP: ${error.message}\n` +
                 `Code: ${error.code || 'N/A'}\n` +
                 `Conseil: ${this.getErrorAdvice(error)}`
       };
@@ -411,9 +407,9 @@ export class SmtpService implements OnModuleDestroy {
     if (this.transporter) {
       try {
         await this.transporter.close();
-        this.logger.log('🔌 Connexions SMTP fermées proprement');
+        this.logger.log('Connexions SMTP fermées proprement');
       } catch (error: any) {
-        this.logger.warn(`⚠️ Erreur lors de la fermeture SMTP: ${error.message}`);
+        this.logger.warn(`Erreur lors de la fermeture SMTP: ${error.message}`);
       }
     }
   }
