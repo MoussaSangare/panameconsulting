@@ -1,7 +1,7 @@
 import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import * as nodemailer from 'nodemailer';
-import SMTPTransport = require("nodemailer/lib/smtp-transport");
+import nodemailer from 'nodemailer';
+import SMTPTransport from "nodemailer/lib/smtp-transport";
 
 export interface EmailOptions {
   to: string | string[];
