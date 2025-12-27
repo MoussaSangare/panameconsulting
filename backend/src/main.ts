@@ -16,6 +16,7 @@ import * as compression from "compression";
 import * as cookieParser from "cookie-parser";
 import { join } from "path";
 import { AppModule } from "./app.module";
+import rateLimit from "express-rate-limit";
 
 // 📦 ÉTENDRE L'INTERFACE REQUEST D'EXPRESS
 declare global {
@@ -25,6 +26,7 @@ declare global {
       isPublicRoute?: boolean;
       requestId?: string;
       startTime?: number;
+      isAdminRoute?: boolean;
     }
   }
 }
@@ -41,11 +43,16 @@ const productionOrigins = [
   "https://panameconsulting.up.railway.app",
   "https://vercel.live",
   "http://localhost:5713",
-  "http://localhost:10000",
+  "http://localhost:3000",
 ];
 
+const developmentOrigins = [
+  "http://localhost:3000",
+  "http://localhost:5713",
+  "http://localhost:8080",
+];
 
-const allowedOrigins = productionOrigins;
+const allowedOrigins = isProduction ? productionOrigins : developmentOrigins;
 
 // Fonction pour générer un ID de requête unique
 const generateRequestId = (): string => {
@@ -67,9 +74,51 @@ const isOriginAllowed = (origin: string, allowedList: string[]): boolean => {
   });
 };
 
+// Fonction pour normaliser les adresses IP (IPv4 et IPv6)
+const normalizeIpForRateLimit = (req: express.Request): string => {
+  let ip = req.ip;
+  
+  // Si l'IP est undefined, essayer de la récupérer autrement
+  if (!ip) {
+    ip = req.socket.remoteAddress;
+  }
+  
+  // Si toujours undefined, retourner une valeur par défaut
+  if (!ip) {
+    return 'unknown-ip';
+  }
+  
+  // Gérer les adresses IPv6
+  if (ip.includes(':')) {
+    // Pour les adresses IPv6, on normalise pour éviter le contournement
+    // Enlever le préfixe ::ffff: pour les IPv4 mappées en IPv6
+    if (ip.startsWith('::ffff:')) {
+      return ip.substring(7); // Retourne l'IPv4
+    }
+    
+    // Pour les vraies IPv6, on peut prendre le préfixe /64
+    // Cela regroupe les adresses dans le même sous-réseau
+    const parts = ip.split(':');
+    
+    // Si c'est une adresse IPv6 compressée, la décompresser
+    if (ip.includes('::')) {
+      // Simplification: pour éviter la complexité, on utilise une approche plus simple
+      // On retourne l'IP complète pour l'instant
+      return `ipv6:${ip}`;
+    }
+    
+    // Prendre les 4 premiers segments (64 bits) pour regrouper
+    if (parts.length >= 4) {
+      return `ipv6:${parts.slice(0, 4).join(':')}::/64`;
+    }
+  }
+  
+  return ip;
+};
+
 async function bootstrap() {
   try {
-    logger.log("🚀 Démarrage du serveur API...");
+    logger.log("🚀 Starting API server...");
 
     // 🔧 Configuration Express
     const server = express();
@@ -130,11 +179,11 @@ async function bootstrap() {
     // ✅ MIDDLEWARE: Sécurité Helmet
     const cspDirectives = {
       defaultSrc: ["'self'"],
-      scriptSrc: ["'self'", "'unsafe-inline'", "https://cdn.tailwindcss.com"],
-      styleSrc: ["'self'", "'unsafe-inline'", "https://cdn.tailwindcss.com", "https://fonts.googleapis.com"],
-      fontSrc: ["'self'", "https:", "https://fonts.gstatic.com"],
+      scriptSrc: ["'self'", "'unsafe-inline'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
       imgSrc: ["'self'", "data:", "https:"],
       connectSrc: ["'self'", ...allowedOrigins],
+      fontSrc: ["'self'", "https:"],
       frameSrc: ["'self'", "https://vercel.live"],
       objectSrc: ["'none'"],
       mediaSrc: ["'self'"],
@@ -189,20 +238,31 @@ async function bootstrap() {
       next();
     });
 
-    // ✅ CONFIGURATION CORS - CORRIGÉE
+    // ✅ CONFIGURATION CORS
     app.enableCors({
       origin: (origin, callback) => {
-        // CORRECTION : Toujours autoriser les requêtes sans origine
+        // Autoriser les requêtes sans origine en développement
+        if (!origin && !isProduction) {
+          return callback(null, true);
+        }
+
+        // Autoriser les requêtes sans origine pour les webhooks et certaines API
         if (!origin) {
-          return callback(null, true);
+          // Vérifier si c'est une route publique
+          const publicRoutes = ['/health', '/api', '/webhooks'];
+          const currentReq = (app as any).httpAdapter?.getInstance()?.request;
+          const requestPath = currentReq?.originalUrl || '';
+          
+          const isPublic = publicRoutes.some(route => 
+            requestPath.startsWith(route)
+          );
+          
+          if (isPublic) {
+            return callback(null, true);
+          }
+          return callback(new Error('Origin required'), false);
         }
 
-        // En développement, tout autoriser
-        if (!isProduction) {
-          return callback(null, true);
-        }
-
-        // En production, vérifier les origines autorisées
         if (isOriginAllowed(origin, allowedOrigins)) {
           logger.debug(`✅ Origin allowed: ${origin}`);
           return callback(null, true);
@@ -272,26 +332,10 @@ async function bootstrap() {
       next();
     });
 
-    // ✅ ROUTES DE BASE AVEC STYLE TAILWIND CSS
-    const getStatusBadge = () => {
-      return isProduction 
-        ? `<span class="px-3 py-1 bg-red-500/20 text-red-300 rounded-full text-sm font-medium">PRODUCTION</span>`
-        : `<span class="px-3 py-1 bg-emerald-500/20 text-emerald-300 rounded-full text-sm font-medium">DEVELOPMENT</span>`;
-    };
-
-    const getMemoryUsage = () => {
-      const usage = process.memoryUsage();
-      return {
-        heapUsed: Math.round(usage.heapUsed / 1024 / 1024),
-        heapTotal: Math.round(usage.heapTotal / 1024 / 1024),
-        rss: Math.round(usage.rss / 1024 / 1024)
-      };
-    };
-
-    // Route racine avec design Tailwind CSS
+    // ✅ ROUTES DE BASE (Express direct pour éviter les problèmes de path-to-regexp)
+    
+    // Route racine
     server.get("/", (_req: express.Request, res: express.Response) => {
-      const memory = getMemoryUsage();
-      
       res.setHeader('Content-Type', 'text/html');
       res.status(200).send(`
         <!DOCTYPE html>
@@ -299,372 +343,83 @@ async function bootstrap() {
         <head>
           <meta charset="UTF-8">
           <meta name="viewport" content="width=device-width, initial-scale=1.0">
-          <title>🚀 API Paname Consulting - Votre partenaire immigration</title>
-          
-          <!-- Tailwind CSS CDN -->
-          <script src="https://cdn.tailwindcss.com"></script>
-          <script>
-            tailwind.config = {
-              theme: {
-                extend: {
-                  colors: {
-                    sky: {
-                      500: '#0ea5e9',
-                      600: '#0284c7',
-                    }
-                  },
-                  animation: {
-                    'pulse-slow': 'pulse 3s ease-in-out infinite',
-                    'float': 'float 6s ease-in-out infinite',
-                    'gradient': 'gradient 8s ease infinite',
-                  },
-                  keyframes: {
-                    float: {
-                      '0%, 100%': { transform: 'translateY(0)' },
-                      '50%': { transform: 'translateY(-10px)' }
-                    },
-                    gradient: {
-                      '0%, 100%': { backgroundPosition: '0% 50%' },
-                      '50%': { backgroundPosition: '100% 50%' }
-                    }
-                  }
-                }
-              }
-            }
-          </script>
-          
-          <!-- Google Fonts -->
-          <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
-          
+          <title>API Paname Consulting</title>
           <style>
-            * {
-              font-family: 'Inter', sans-serif;
+            body { 
+              font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+              margin: 0; padding: 2rem; 
+              background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+              color: white; min-height: 100vh;
             }
-            .gradient-bg {
-              background: linear-gradient(-45deg, #0ea5e9, #0284c7, #0ea5e9, #0284c7);
-              background-size: 400% 400%;
-              animation: gradient 15s ease infinite;
+            .container { max-width: 600px; margin: 0 auto; text-align: center; }
+            h1 { margin-bottom: 1rem; }
+            .status { 
+              background: rgba(255,255,255,0.1); 
+              padding: 1.5rem; border-radius: 8px; 
+              margin: 1rem 0; 
             }
-            .glass-card {
-              background: rgba(255, 255, 255, 0.05);
-              backdrop-filter: blur(10px);
-              border: 1px solid rgba(255, 255, 255, 0.1);
+            .links { margin-top: 2rem; }
+            .links a { 
+              color: #ffd700; 
+              margin: 0 1rem; 
+              text-decoration: none;
+              font-weight: bold;
             }
-            .glow {
-              box-shadow: 0 0 20px rgba(14, 165, 233, 0.3);
-            }
-            .hover-lift {
-              transition: transform 0.3s ease, box-shadow 0.3s ease;
-            }
-            .hover-lift:hover {
-              transform: translateY(-5px);
-              box-shadow: 0 10px 25px rgba(14, 165, 233, 0.2);
-            }
+            .links a:hover { text-decoration: underline; }
           </style>
         </head>
-        <body class="bg-gray-900 text-gray-100 min-h-screen">
-          <!-- Background Gradient -->
-          <div class="fixed inset-0 gradient-bg opacity-30 -z-10"></div>
-          
-          <!-- Animated Background Elements -->
-          <div class="fixed inset-0 overflow-hidden -z-10">
-            <div class="absolute -top-40 -right-40 w-96 h-96 bg-sky-500/20 rounded-full blur-3xl"></div>
-            <div class="absolute -bottom-40 -left-40 w-96 h-96 bg-sky-600/20 rounded-full blur-3xl"></div>
-            <div class="absolute top-1/2 left-1/4 w-64 h-64 bg-sky-400/10 rounded-full blur-2xl animate-pulse-slow"></div>
-          </div>
-          
-          <!-- Main Container -->
-          <div class="container mx-auto px-4 py-8 max-w-6xl">
-            <!-- Header -->
-            <header class="text-center mb-12 animate-float">
-              <div class="inline-block p-4 glass-card rounded-2xl mb-6 glow">
-                <div class="text-6xl">🚀</div>
-              </div>
-              <h1 class="text-5xl md:text-6xl font-bold mb-4 bg-clip-text text-transparent bg-linear-to-r from-white to-sky-300 font-['Poppins']">
-                API Paname Consulting
-              </h1>
-              <p class="text-xl text-gray-300 max-w-2xl mx-auto">
-                Plateforme backend sécurisée pour la gestion des démarches d'immigration et des procédures administratives
-              </p>
-            </header>
-
-            <!-- Main Status Card -->
-            <div class="glass-card rounded-2xl p-8 mb-8 glow">
-              <div class="flex items-center justify-between mb-8">
-                <h2 class="text-3xl font-bold text-white flex items-center gap-3">
-                  <span class="w-4 h-4 bg-green-500 rounded-full animate-pulse"></span>
-                  Status du Serveur
-                </h2>
-                ${getStatusBadge()}
-              </div>
-              
-              <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-                <!-- Version -->
-                <div class="bg-gray-800/50 rounded-xl p-6">
-                  <div class="flex items-center gap-3 mb-4">
-                    <div class="p-2 bg-sky-500/20 rounded-lg">
-                      <span class="text-sky-400 text-xl">📦</span>
-                    </div>
-                    <h3 class="font-semibold text-gray-300">Version</h3>
-                  </div>
-                  <p class="text-2xl font-bold">${process.env.npm_package_version || '1.0.0'}</p>
-                  <p class="text-sm text-gray-400 mt-2">Dernière mise à jour</p>
-                </div>
-                
-                <!-- Uptime -->
-                <div class="bg-gray-800/50 rounded-xl p-6">
-                  <div class="flex items-center gap-3 mb-4">
-                    <div class="p-2 bg-sky-500/20 rounded-lg">
-                      <span class="text-sky-400 text-xl">⏱️</span>
-                    </div>
-                    <h3 class="font-semibold text-gray-300">Uptime</h3>
-                  </div>
-                  <p class="text-2xl font-bold">${Math.round(process.uptime())}s</p>
-                  <p class="text-sm text-gray-400 mt-2">Temps de fonctionnement</p>
-                </div>
-                
-                <!-- Memory -->
-                <div class="bg-gray-800/50 rounded-xl p-6">
-                  <div class="flex items-center gap-3 mb-4">
-                    <div class="p-2 bg-sky-500/20 rounded-lg">
-                      <span class="text-sky-400 text-xl">💾</span>
-                    </div>
-                    <h3 class="font-semibold text-gray-300">Mémoire</h3>
-                  </div>
-                  <p class="text-2xl font-bold">${memory.heapUsed} MB</p>
-                  <p class="text-sm text-gray-400 mt-2">Utilisée / ${memory.heapTotal} MB</p>
-                </div>
-                
-                <!-- Node Version -->
-                <div class="bg-gray-800/50 rounded-xl p-6">
-                  <div class="flex items-center gap-3 mb-4">
-                    <div class="p-2 bg-sky-500/20 rounded-lg">
-                      <span class="text-sky-400 text-xl">⚡</span>
-                    </div>
-                    <h3 class="font-semibold text-gray-300">Node.js</h3>
-                  </div>
-                  <p class="text-2xl font-bold">${process.version.replace('v', '')}</p>
-                  <p class="text-sm text-gray-400 mt-2">Version du runtime</p>
-                </div>
-              </div>
-              
-              <!-- Timestamp -->
-              <div class="bg-gray-800/30 rounded-xl p-4">
-                <div class="flex items-center justify-between">
-                  <div class="flex items-center gap-3">
-                    <span class="text-sky-400">📅</span>
-                    <span class="text-gray-300">Dernière mise à jour</span>
-                  </div>
-                  <span class="font-mono text-sky-300">${new Date().toLocaleString('fr-FR', { 
-                    weekday: 'long', 
-                    year: 'numeric', 
-                    month: 'long', 
-                    day: 'numeric',
-                    hour: '2-digit',
-                    minute: '2-digit',
-                    second: '2-digit'
-                  })}</span>
-                </div>
-              </div>
+        <body>
+          <div class="container">
+            <h1>🚀 API Paname Consulting</h1>
+            <div class="status">
+              <p><strong>Status:</strong> ✅ En ligne</p>
+              <p><strong>Environnement:</strong> ${isProduction ? 'PRODUCTION' : 'DEVELOPMENT'}</p>
+              <p><strong>Version:</strong> ${process.env.npm_package_version || '1.0.0'}</p>
+              <p><strong>Timestamp:</strong> ${new Date().toLocaleString()}</p>
+              <p><strong>Uptime:</strong> ${Math.round(process.uptime())} seconds</p>
             </div>
-
-            <!-- Quick Actions -->
-            <h3 class="text-2xl font-bold mb-6 text-white">Accès Rapide</h3>
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-12">
-              <!-- Health Check -->
-              <a href="/health" 
-                 class="group glass-card rounded-xl p-6 hover-lift border border-gray-700 hover:border-sky-500/50">
-                <div class="flex items-start justify-between mb-4">
-                  <div class="p-3 bg-sky-500/20 rounded-lg group-hover:bg-sky-500/30 transition-colors">
-                    <span class="text-2xl text-sky-400">🏥</span>
-                  </div>
-                  <span class="text-sky-400 opacity-0 group-hover:opacity-100 transition-opacity">→</span>
-                </div>
-                <h4 class="font-bold text-lg mb-2 text-white">Health Check</h4>
-                <p class="text-gray-400 text-sm">Vérifiez l'état complet du serveur et des services</p>
-              </a>
-              
-              <!-- API Documentation -->
-              <a href="/api" 
-                 class="group glass-card rounded-xl p-6 hover-lift border border-gray-700 hover:border-sky-500/50">
-                <div class="flex items-start justify-between mb-4">
-                  <div class="p-3 bg-sky-500/20 rounded-lg group-hover:bg-sky-500/30 transition-colors">
-                    <span class="text-2xl text-sky-400">📚</span>
-                  </div>
-                  <span class="text-sky-400 opacity-0 group-hover:opacity-100 transition-opacity">→</span>
-                </div>
-                <h4 class="font-bold text-lg mb-2 text-white">Documentation API</h4>
-                <p class="text-gray-400 text-sm">Découvrez tous les endpoints disponibles</p>
-              </a>
-              
-              <!-- Contact Support -->
-              <a href="mailto:panameconsulting906@gmail.com" 
-                 class="group glass-card rounded-xl p-6 hover-lift border border-gray-700 hover:border-sky-500/50">
-                <div class="flex items-start justify-between mb-4">
-                  <div class="p-3 bg-sky-500/20 rounded-lg group-hover:bg-sky-500/30 transition-colors">
-                    <span class="text-2xl text-sky-400">💌</span>
-                  </div>
-                  <span class="text-sky-400 opacity-0 group-hover:opacity-100 transition-opacity">→</span>
-                </div>
-                <h4 class="font-bold text-lg mb-2 text-white">Support Technique</h4>
-                <p class="text-gray-400 text-sm">Contactez notre équipe pour assistance</p>
-              </a>
+            <div class="links">
+              <a href="/health">Health Check</a>
+              <a href="/api">API Info</a>
             </div>
-
-            <!-- API Endpoints -->
-            <div class="glass-card rounded-2xl p-8 mb-8">
-              <h3 class="text-2xl font-bold mb-6 text-white flex items-center gap-3">
-                <span class="text-sky-400">🔧</span>
-                Endpoints Principaux
-              </h3>
-              <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div class="bg-gray-800/30 rounded-lg p-4 hover:bg-gray-800/50 transition-colors">
-                  <div class="flex items-center gap-3 mb-2">
-                    <span class="text-green-400">✓</span>
-                    <code class="text-sky-300 font-mono">/api/auth</code>
-                  </div>
-                  <p class="text-sm text-gray-400">Authentification & Autorisation</p>
-                </div>
-                <div class="bg-gray-800/30 rounded-lg p-4 hover:bg-gray-800/50 transition-colors">
-                  <div class="flex items-center gap-3 mb-2">
-                    <span class="text-green-400">✓</span>
-                    <code class="text-sky-300 font-mono">/api/users</code>
-                  </div>
-                  <p class="text-sm text-gray-400">Gestion des utilisateurs</p>
-                </div>
-                <div class="bg-gray-800/30 rounded-lg p-4 hover:bg-gray-800/50 transition-colors">
-                  <div class="flex items-center gap-3 mb-2">
-                    <span class="text-green-400">✓</span>
-                    <code class="text-sky-300 font-mono">/api/procedures</code>
-                  </div>
-                  <p class="text-sm text-gray-400">Procédures administratives</p>
-                </div>
-                <div class="bg-gray-800/30 rounded-lg p-4 hover:bg-gray-800/50 transition-colors">
-                  <div class="flex items-center gap-3 mb-2">
-                    <span class="text-green-400">✓</span>
-                    <code class="text-sky-300 font-mono">/api/contact</code>
-                  </div>
-                  <p class="text-sm text-gray-400">Formulaire de contact</p>
-                </div>
-              </div>
-            </div>
-
-            <!-- Footer -->
-            <footer class="mt-12 pt-8 border-t border-gray-800">
-              <div class="flex flex-col md:flex-row justify-between items-center gap-6">
-                <div>
-                  <h4 class="font-bold text-lg mb-2">Paname Consulting</h4>
-                  <p class="text-gray-400 text-sm">Votre partenaire pour l'immigration en France</p>
-                </div>
-                
-                <div class="flex items-center gap-6">
-                  <div class="text-center">
-                    <div class="text-2xl mb-2">🔒</div>
-                    <p class="text-xs text-gray-400">Sécurité</p>
-                  </div>
-                  <div class="text-center">
-                    <div class="text-2xl mb-2">⚡</div>
-                    <p class="text-xs text-gray-400">Performance</p>
-                  </div>
-                  <div class="text-center">
-                    <div class="text-2xl mb-2">🛡️</div>
-                    <p class="text-xs text-gray-400">Fiabilité</p>
-                  </div>
-                </div>
-                
-                <div class="text-center md:text-right">
-                  <p class="text-gray-500 text-sm">© ${new Date().getFullYear()} Paname Consulting</p>
-                  <p class="text-gray-600 text-xs mt-1">Tous droits réservés</p>
-                </div>
-              </div>
-              
-              <div class="mt-8 text-center text-gray-600 text-sm">
-                <p>Powered by NestJS • Express • TypeScript • Tailwind CSS</p>
-                <p class="mt-2">Serveur ID: ${process.pid} • Port: ${process.env.PORT || 10000}</p>
-              </div>
-            </footer>
           </div>
         </body>
         </html>
       `);
     });
 
-    // Health check (optimisé)
+    // Health check
     server.get("/health", (_req: express.Request, res: express.Response) => {
-      const memory = getMemoryUsage();
-      
       res.status(200).json({
         status: "healthy",
         timestamp: new Date().toISOString(),
         uptime: process.uptime(),
         environment: isProduction ? "production" : "development",
         memory: {
-          heapUsed: memory.heapUsed,
-          heapTotal: memory.heapTotal,
-          rss: memory.rss
+          heapUsed: Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
+          heapTotal: Math.round(process.memoryUsage().heapTotal / 1024 / 1024),
         },
         node: {
           version: process.version,
           pid: process.pid,
-          platform: process.platform,
-          arch: process.arch
         },
-        server: {
-          requestId: _req.requestId,
-          host: process.env.HOST || "0.0.0.0",
-          port: process.env.PORT || 10000
-        }
       });
     });
 
-    // API Info (optimisé)
+    // API Info
     server.get("/api", (_req: express.Request, res: express.Response) => {
       res.status(200).json({
         service: "paname-consulting-api",
         version: process.env.npm_package_version || "1.0.0",
-        documentation: "Consultez les endpoints ci-dessous",
         endpoints: {
-          auth: {
-            path: "/api/auth",
-            methods: ["POST", "GET"],
-            description: "Authentification et gestion des tokens"
-          },
-          users: {
-            path: "/api/users",
-            methods: ["GET", "POST", "PUT", "DELETE"],
-            description: "Gestion des utilisateurs"
-          },
-          procedures: {
-            path: "/api/procedures",
-            methods: ["GET", "POST", "PUT", "DELETE"],
-            description: "Gestion des procédures administratives"
-          },
-          contact: {
-            path: "/api/contact",
-            methods: ["POST"],
-            description: "Formulaire de contact"
-          },
-          destinations: {
-            path: "/api/destinations",
-            methods: ["GET"],
-            description: "Destinations disponibles"
-          },
-          rendezvous: {
-            path: "/api/rendezvous",
-            methods: ["GET", "POST", "PUT", "DELETE"],
-            description: "Gestion des rendez-vous"
-          }
+          auth: "/api/auth",
+          users: "/api/users",
+          procedures: "/api/procedures",
+          contact: "/api/contact",
+          destinations: "/api/destinations",
+          rendezvous: "/api/rendezvous",
         },
-        support: {
-          email: "panameconsulting906@gmail.com",
-          status: "active"
-        },
-        security: {
-          cors: "enabled",
-          helmet: "enabled",
-          rate_limiting: "disabled (temp)",
-          validation: "enabled"
-        }
+        support: "panameconsulting906@gmail.com",
       });
     });
 
@@ -675,7 +430,7 @@ async function bootstrap() {
     [uploadsDir, logsDir].forEach(dir => {
       if (!fs.existsSync(dir)) {
         fs.mkdirSync(dir, { recursive: true });
-        logger.log(`📁 Répertoire créé: ${dir}`);
+        logger.log(`Directory created: ${dir}`);
       }
     });
 
@@ -692,7 +447,8 @@ async function bootstrap() {
       }),
     );
 
-    // ✅ CONFIGURATION GLOBALE
+    // ✅ CONFIGURATION GLOBALE - CORRIGÉ POUR PATH-TO-REGEXP
+    // CORRECTION IMPORTANTE : Utiliser des routes nommées ou des routes spécifiques
     app.setGlobalPrefix("api");
 
     // ✅ VALIDATION GLOBALE
@@ -722,43 +478,110 @@ async function bootstrap() {
       }),
     );
 
-    // ✅ RATE LIMITING SIMPLIFIÉ
-    logger.log("⚠️ Rate limiting temporairement désactivé pour le diagnostic");
+    // ✅ RATE LIMITING - CORRECTION DE L'ERREUR ERR_ERL_KEY_GEN_IPV6
+
+    // Middleware pour détecter les routes admin
+    app.use((req: express.Request, res: express.Response, next: express.NextFunction) => {
+      const adminRoutes = [
+        '/api/users/stats',
+        '/api/users/toggle-status',
+        '/api/users/maintenance',
+        '/api/users/admin-reset-password',
+        '/api/procedures/admin',
+        '/api/auth/logout-all',
+        '/api/contact/stats',
+      ];
+      
+      const isAdminRoute = adminRoutes.some(route => 
+        req.path.startsWith(route)
+      );
+      
+      req.isAdminRoute = isAdminRoute;
+      
+      next();
+    });
+
+    // Rate limiter pour utilisateurs normaux - AVEC CORRECTION POUR IPv6
+    const userLimiter = rateLimit({
+      windowMs: 30 * 60 * 1000, // 30 minutes
+      max: 5000,
+      message: {
+        status: 429,
+        message: 'Trop de requêtes (5,000 req/30min)',
+        limit: 5000,
+        window: "30 minutes"
+      },
+      standardHeaders: true,
+      legacyHeaders: false,
+      skipSuccessfulRequests: false,
+      keyGenerator: (req: express.Request) => {
+        // Utiliser la fonction de normalisation pour traiter correctement IPv6
+        const normalizedIp = normalizeIpForRateLimit(req);
+        return `user_${normalizedIp}`;
+      },
+      handler: (_req: express.Request, res: express.Response, _next, options) => {
+        res.status(options.statusCode).json(options.message);
+      },
+      // Conserver la validation activée
+      validate: true,
+    });
+
+    // Rate limiter pour admin - AVEC CORRECTION POUR IPv6
+    const adminLimiter = rateLimit({
+      windowMs: 30 * 60 * 1000, // 30 minutes
+      max: 25000,
+      message: {
+        status: 429,
+        message: 'Trop de requêtes (25,000 req/30min)',
+        limit: 25000,
+        window: "30 minutes"
+      },
+      standardHeaders: true,
+      legacyHeaders: false,
+      skipSuccessfulRequests: false,
+      keyGenerator: (req: express.Request) => {
+        // Utiliser la fonction de normalisation pour traiter correctement IPv6
+        const normalizedIp = normalizeIpForRateLimit(req);
+        return `admin_${normalizedIp}`;
+      },
+      handler: (_req: express.Request, res: express.Response, _next, options) => {
+        res.status(options.statusCode).json(options.message);
+      },
+      // Conserver la validation activée
+      validate: true,
+    });
+
+    // Appliquer le rate limiting approprié
+    app.use((req: express.Request, res: express.Response, next: express.NextFunction) => {
+      if (req.isAdminRoute) {
+        return adminLimiter(req, res, next);
+      } else {
+        return userLimiter(req, res, next);
+      }
+    });
 
     // ✅ DÉMARRAGE DU SERVEUR
     const port = parseInt(process.env.PORT || "10000", 10);
     const host = process.env.HOST || "0.0.0.0";
 
-    logger.log(`🔄 Tentative de démarrage sur ${host}:${port}...`);
-    
     await app.listen(port, host);
 
     // ✅ LOG DE DÉMARRAGE
     logger.log("=".repeat(60));
-    logger.log(`🎉 Serveur démarré avec succès !`);
+    logger.log(`🚀 Server started successfully!`);
     logger.log(`📍 URL: http://${host === '0.0.0.0' ? 'localhost' : host}:${port}`);
-    logger.log(`🎨 Interface: Tailwind CSS avec thème Sky 500/600`);
-    logger.log(`⚙️  Environnement: ${isProduction ? 'PRODUCTION' : 'DEVELOPMENT'}`);
-    logger.log(`📊 Node.js: ${process.version}`);
-    logger.log(`🌐 CORS: ${allowedOrigins.length} origines autorisées`);
-    logger.log(`🔒 Sécurité: Helmet, Validation activés`);
+    logger.log(`⚙️  Environment: ${isProduction ? 'PRODUCTION' : 'DEVELOPMENT'}`);
+    logger.log(`📊 Node: ${process.version}`);
+    logger.log(`🌐 CORS: ${allowedOrigins.length} allowed origins`);
+    logger.log(`🔒 Security: Helmet, Rate Limiting, Validation enabled`);
     logger.log("=".repeat(60));
 
-    // ✅ LOG SUPPLEMENTAIRE
-    logger.log(`💡 Conseil: Visitez http://${host === '0.0.0.0' ? 'localhost' : host}:${port} pour voir l'interface`);
-    logger.log(`📋 API disponible sur: http://${host === '0.0.0.0' ? 'localhost' : host}:${port}/api`);
-    logger.log(`🌍 CORS configuré pour: localhost:5173, localhost:3000, etc.`);
-
   } catch (error: unknown) {
-    logger.error("❌ Échec du démarrage du serveur", {
-      error: error instanceof Error ? error.message : 'Erreur inconnue',
-      stack: error instanceof Error ? error.stack : undefined,
+    logger.error("❌ Failed to start server", {
+      error: error instanceof Error ? error.message : 'Unknown error',
       timestamp: new Date().toISOString(),
       pid: process.pid,
     });
-    
-    // Attendre un peu pour que les logs soient écrits
-    await new Promise(resolve => setTimeout(resolve, 1000));
     
     process.exit(1);
   }
@@ -767,41 +590,39 @@ async function bootstrap() {
 // ✅ GESTION DES ERREURS GLOBALES
 process.on("uncaughtException", (error: Error) => {
   const logger = new Logger("UncaughtException");
-  logger.error("⚠️ Exception non capturée", {
+  logger.error("⚠️ Uncaught Exception", {
     name: error.name,
     message: error.message,
-    stack: error.stack,
     timestamp: new Date().toISOString(),
   });
   
-  setTimeout(() => {
+  if (process.env.NODE_ENV === 'production') {
     process.exit(1);
-  }, 1000);
+  }
 });
 
 process.on("unhandledRejection", (reason: any, _promise: Promise<any>) => {
   const logger = new Logger("UnhandledRejection");
-  logger.error("⚠️ Rejet de promesse non géré", {
+  logger.error("⚠️ Unhandled Promise Rejection", {
     reason: reason instanceof Error ? reason.message : String(reason),
-    stack: reason instanceof Error ? reason.stack : undefined,
     timestamp: new Date().toISOString(),
   });
 });
 
 process.on("SIGTERM", () => {
   const logger = new Logger("SIGTERM");
-  logger.log("📩 Signal SIGTERM reçu, arrêt gracieux...");
+  logger.log("📩 Received SIGTERM, shutting down gracefully...");
   setTimeout(() => {
-    logger.log("👋 Arrêt gracieux terminé");
+    logger.log("👋 Graceful shutdown complete");
     process.exit(0);
   }, 10000).unref();
 });
 
 process.on("SIGINT", () => {
   const logger = new Logger("SIGINT");
-  logger.log("📩 Signal SIGINT (Ctrl+C) reçu, arrêt gracieux...");
+  logger.log("📩 Received SIGINT (Ctrl+C), shutting down gracefully...");
   setTimeout(() => {
-    logger.log("👋 Arrêt gracieux terminé");
+    logger.log(" Graceful shutdown complete");
     process.exit(0);
   }, 10000).unref();
 });
@@ -809,13 +630,9 @@ process.on("SIGINT", () => {
 // ✅ DÉMARRAGE
 bootstrap().catch((error: unknown) => {
   const logger = new Logger("Bootstrap");
-  logger.error("💥 Échec du bootstrap", {
-    error: error instanceof Error ? error.message : 'Erreur inconnue',
-    stack: error instanceof Error ? error.stack : undefined,
+  logger.error("💥 Bootstrap failed", {
+    error: error instanceof Error ? error.message : 'Unknown error',
     timestamp: new Date().toISOString(),
   });
-  
-  setTimeout(() => {
-    process.exit(1);
-  }, 1000);
+  process.exit(1);
 });
