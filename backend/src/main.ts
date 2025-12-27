@@ -2,6 +2,7 @@ import {
   ValidationPipe,
   Logger,
   BadRequestException,
+  RequestMethod,
 } from "@nestjs/common";
 import { NestFactory } from "@nestjs/core";
 import {
@@ -32,7 +33,7 @@ declare global {
 const isProduction = process.env.NODE_ENV === 'production';
 const logger = new Logger("Bootstrap");
 
-// 🌐 ORIGINES AUTORISÉES UNIQUEMENT
+// 🌐 ORIGINES AUTORISÉES
 const productionOrigins = [
   "https://panameconsulting.com",
   "https://www.panameconsulting.com",
@@ -43,7 +44,7 @@ const productionOrigins = [
   "http://localhost:10000",
 ];
 
-// Utiliser la même liste pour tous les environnements
+
 const allowedOrigins = productionOrigins;
 
 // Fonction pour générer un ID de requête unique
@@ -51,11 +52,24 @@ const generateRequestId = (): string => {
   return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 };
 
+// Fonction pour vérifier les origines avec wildcards
+const isOriginAllowed = (origin: string, allowedList: string[]): boolean => {
+  if (!origin) return false;
+  
+  return allowedList.some(allowedOrigin => {
+    if (allowedOrigin.includes('*')) {
+      const pattern = allowedOrigin
+        .replace(/\./g, '\\.')
+        .replace(/\*/g, '.*');
+      return new RegExp(`^${pattern}$`).test(origin);
+    }
+    return origin === allowedOrigin;
+  });
+};
+
 async function bootstrap() {
   try {
     logger.log("🚀 Démarrage du serveur API...");
-    logger.log(`🌍 Environnement: ${isProduction ? 'PRODUCTION' : 'DEVELOPMENT'}`);
-    logger.log(`📋 Origines autorisées: ${JSON.stringify(allowedOrigins)}`);
 
     // 🔧 Configuration Express
     const server = express();
@@ -175,29 +189,37 @@ async function bootstrap() {
       next();
     });
 
-    // ✅ CONFIGURATION CORS STRICTE
+    // ✅ CONFIGURATION CORS - CORRIGÉE
     app.enableCors({
       origin: (origin, callback) => {
-        // CORRECTION : Autoriser les requêtes sans origine (curl, scripts, etc.)
+        // CORRECTION : Toujours autoriser les requêtes sans origine
         if (!origin) {
-          logger.debug(`✅ No origin (server-to-server request)`);
           return callback(null, true);
         }
 
-        // Vérifier si l'origine est dans la liste autorisée
-        const isAllowed = allowedOrigins.includes(origin);
-        
-        if (isAllowed) {
+        // En développement, tout autoriser
+        if (!isProduction) {
+          return callback(null, true);
+        }
+
+        // En production, vérifier les origines autorisées
+        if (isOriginAllowed(origin, allowedOrigins)) {
           logger.debug(`✅ Origin allowed: ${origin}`);
           return callback(null, true);
         }
 
-        // Bloquer toutes les autres origines
         logger.warn(`❌ Origin blocked: ${origin}`);
-        logger.warn(`📋 Allowed origins are: ${JSON.stringify(allowedOrigins)}`);
-        return callback(new Error(`Origin ${origin} not allowed by CORS`), false);
+        return callback(new Error('Not allowed by CORS'), false);
       },
-      methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD'],
+      methods: [
+        RequestMethod.GET,
+        RequestMethod.POST,
+        RequestMethod.PUT,
+        RequestMethod.PATCH,
+        RequestMethod.DELETE,
+        RequestMethod.OPTIONS,
+        RequestMethod.HEAD,
+      ].map(m => RequestMethod[m]),
       allowedHeaders: [
         "Authorization",
         "Content-Type",
@@ -446,28 +468,6 @@ async function bootstrap() {
               </div>
             </div>
 
-            <!-- CORS Configuration -->
-            <div class="glass-card rounded-2xl p-8 mb-8">
-              <h3 class="text-2xl font-bold mb-6 text-white flex items-center gap-3">
-                <span class="text-sky-400">🔒</span>
-                Configuration CORS Stricte
-              </h3>
-              <div class="bg-gray-800/30 rounded-xl p-6">
-                <h4 class="font-bold text-lg mb-4 text-white">Origines autorisées :</h4>
-                <div class="space-y-3">
-                  ${allowedOrigins.map(origin => `
-                    <div class="flex items-center gap-3 p-3 bg-gray-800/50 rounded-lg">
-                      <span class="text-green-400">✓</span>
-                      <code class="text-sky-300 font-mono">${origin}</code>
-                    </div>
-                  `).join('')}
-                </div>
-                <p class="text-sm text-gray-400 mt-4">
-                  Toutes les autres origines sont automatiquement bloquées.
-                </p>
-              </div>
-            </div>
-
             <!-- Quick Actions -->
             <h3 class="text-2xl font-bold mb-6 text-white">Accès Rapide</h3>
             <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-12">
@@ -598,12 +598,6 @@ async function bootstrap() {
         timestamp: new Date().toISOString(),
         uptime: process.uptime(),
         environment: isProduction ? "production" : "development",
-        cors: {
-          enabled: true,
-          strict: true,
-          allowed_origins: allowedOrigins,
-          total_allowed: allowedOrigins.length
-        },
         memory: {
           heapUsed: memory.heapUsed,
           heapTotal: memory.heapTotal,
@@ -628,8 +622,7 @@ async function bootstrap() {
       res.status(200).json({
         service: "paname-consulting-api",
         version: process.env.npm_package_version || "1.0.0",
-        cors_policy: "strict",
-        allowed_origins: allowedOrigins,
+        documentation: "Consultez les endpoints ci-dessous",
         endpoints: {
           auth: {
             path: "/api/auth",
@@ -667,7 +660,7 @@ async function bootstrap() {
           status: "active"
         },
         security: {
-          cors: "enabled (strict mode)",
+          cors: "enabled",
           helmet: "enabled",
           rate_limiting: "disabled (temp)",
           validation: "enabled"
@@ -737,7 +730,6 @@ async function bootstrap() {
     const host = process.env.HOST || "0.0.0.0";
 
     logger.log(`🔄 Tentative de démarrage sur ${host}:${port}...`);
-    logger.log(`🔒 CORS en mode strict - seulement ${allowedOrigins.length} origine(s) autorisée(s)`);
     
     await app.listen(port, host);
 
@@ -745,17 +737,17 @@ async function bootstrap() {
     logger.log("=".repeat(60));
     logger.log(`🎉 Serveur démarré avec succès !`);
     logger.log(`📍 URL: http://${host === '0.0.0.0' ? 'localhost' : host}:${port}`);
-    logger.log(`🔒 CORS STRICT: Seules les origines suivantes sont autorisées :`);
-    allowedOrigins.forEach(origin => logger.log(`   ✅ ${origin}`));
+    logger.log(`🎨 Interface: Tailwind CSS avec thème Sky 500/600`);
     logger.log(`⚙️  Environnement: ${isProduction ? 'PRODUCTION' : 'DEVELOPMENT'}`);
     logger.log(`📊 Node.js: ${process.version}`);
+    logger.log(`🌐 CORS: ${allowedOrigins.length} origines autorisées`);
     logger.log(`🔒 Sécurité: Helmet, Validation activés`);
     logger.log("=".repeat(60));
 
     // ✅ LOG SUPPLEMENTAIRE
     logger.log(`💡 Conseil: Visitez http://${host === '0.0.0.0' ? 'localhost' : host}:${port} pour voir l'interface`);
     logger.log(`📋 API disponible sur: http://${host === '0.0.0.0' ? 'localhost' : host}:${port}/api`);
-    logger.log(`⚠️ ATTENTION: Seules les origines listées sont autorisées.`);
+    logger.log(`🌍 CORS configuré pour: localhost:5173, localhost:3000, etc.`);
 
   } catch (error: unknown) {
     logger.error("❌ Échec du démarrage du serveur", {
