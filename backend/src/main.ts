@@ -2,6 +2,7 @@ import {
   ValidationPipe,
   Logger,
   BadRequestException,
+  RequestMethod,
 } from "@nestjs/common";
 import { NestFactory } from "@nestjs/core";
 import {
@@ -22,13 +23,17 @@ declare global {
     interface Request {
       invalidJson?: boolean;
       isPublicRoute?: boolean;
+      requestId?: string;
+      startTime?: number;
     }
   }
 }
 
-const isProduction = true;
+// 🔧 Configuration
+const isProduction = process.env.NODE_ENV === 'production';
+const logger = new Logger("Bootstrap");
 
-// 🌐 ORIGINES AUTORISÉES EN PRODUCTION EXCLUSIVE
+// 🌐 ORIGINES AUTORISÉES
 const productionOrigins = [
   "https://panameconsulting.com",
   "https://www.panameconsulting.com",
@@ -36,338 +41,344 @@ const productionOrigins = [
   "https://panameconsulting.up.railway.app",
   "https://vercel.live",
   "http://localhost:5713",
+  "http://localhost:3000",
 ];
 
-// Fonction pour vérifier si une origine correspond à un pattern avec wildcard
-function isOriginAllowed(origin: string, allowedOrigins: string[]): boolean {
-  return allowedOrigins.some(allowedOrigin => {
+const developmentOrigins = [
+  "http://localhost:3000",
+  "http://localhost:5713",
+  "http://localhost:8080",
+];
+
+const allowedOrigins = isProduction ? productionOrigins : developmentOrigins;
+
+// Fonction pour générer un ID de requête unique
+const generateRequestId = (): string => {
+  return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+};
+
+// Fonction pour vérifier les origines avec wildcards
+const isOriginAllowed = (origin: string, allowedList: string[]): boolean => {
+  if (!origin) return false;
+  
+  return allowedList.some(allowedOrigin => {
     if (allowedOrigin.includes('*')) {
       const pattern = allowedOrigin
         .replace(/\./g, '\\.')
         .replace(/\*/g, '.*');
-      const regex = new RegExp(`^${pattern}$`);
-      return regex.test(origin);
+      return new RegExp(`^${pattern}$`).test(origin);
     }
     return origin === allowedOrigin;
   });
-}
+};
 
 async function bootstrap() {
-  const logger = new Logger("Bootstrap");
-
-  // 🔧 Configuration de sécurité et performance
-  const server = express();
-
-  // ✅ COMPRESSION GZIP POUR LES RÉPONSES
-  server.use(compression());
-
-  // ==================== MIDDLEWARES DE PARSING CRITIQUES ====================
-  // ✅ PARSING DES COOKIES (ESSENTIEL POUR L'AUTH)
-  server.use(cookieParser());
-
-  // ✅ PARSING DU JSON (LIMITÉ À 10MB)
-  server.use(express.json({
-    limit: '10mb',
-    verify: (req: express.Request, res: express.Response, buf: Buffer, encoding: BufferEncoding) => {
-      try {
-        if (buf && buf.length) {
-          JSON.parse(buf.toString(encoding || 'utf8'));
-        }
-      } catch (e) {
-        // Ajouter un flag à la requête pour indiquer un JSON invalide
-        req.invalidJson = true;
-      }
-    }
-  }));
-
-  // ✅ PARSING DES DONNÉES URL-ENCODED
-  server.use(express.urlencoded({
-    limit: '10mb',
-    extended: true,
-    parameterLimit: 1000
-  }));
-
-  // ✅ PARSING DES DONNÉES TEXT/PLAIN
-  server.use(express.text({
-    limit: '1mb',
-    type: 'text/plain'
-  }));
-
-  // ✅ CRÉATION DE L'APPLICATION AVEC HELMET DÈS LE DÉBUT
-  const app = await NestFactory.create<NestExpressApplication>(
-    AppModule,
-    new ExpressAdapter(server),
-    {
-      logger: ["error", "warn", "log"],
-      bufferLogs: true,
-    },
-  );
-
-  // 🔐 CONFIGURATION DE SÉCURITÉ HELMET - APPLIQUÉE AVANT TOUTES LES ROUTES
-  app.use(
-    helmet({
-      contentSecurityPolicy: {
-        directives: {
-          defaultSrc: ["'self'"],
-          scriptSrc: ["'self'", "'unsafe-inline'"],
-          styleSrc: ["'self'", "'unsafe-inline'"],
-          imgSrc: ["'self'", "data:", "https:"],
-          connectSrc: ["'self'", ...productionOrigins],
-          fontSrc: ["'self'", "https:"],
-          objectSrc: ["'none'"],
-          mediaSrc: ["'self'"],
-          frameSrc: ["'self'", "https://vercel.live", "https://www.google.com"],
-          baseUri: ["'self'"],
-          formAction: ["'self'"],
-        },
-      },
-      crossOriginResourcePolicy: { policy: "cross-origin" },
-      crossOriginEmbedderPolicy: false,
-      crossOriginOpenerPolicy: { policy: "same-origin" },
-      referrerPolicy: { policy: "strict-origin-when-cross-origin" },
-      hsts: {
-        maxAge: 31536000,
-        includeSubDomains: true,
-        preload: true
-      },
-      frameguard: { action: 'deny' },
-      hidePoweredBy: true,
-    }),
-  );
-
-  // ✅ MIDDLEWARE POUR VALIDER LE JSON
-  app.use((req: express.Request, res: express.Response, next: express.NextFunction) => {
-    if (req.invalidJson) {
-      return res.status(400).json({
-        error: 'Invalid JSON payload',
-        message: 'Le corps de la requête contient du JSON invalide'
-      });
-    }
-    next();
-  });
-
-  // ✅ HEADERS DE SÉCURITÉ ADDITIONNELS
-  app.use((_req: express.Request, res: express.Response, next: express.NextFunction) => {
-    res.removeHeader("X-Powered-By");
-    res.setHeader("X-Content-Type-Options", "nosniff");
-    res.setHeader("X-Frame-Options", "DENY");
-    res.setHeader("X-XSS-Protection", "1; mode=block");
-    res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains; preload");
-    res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
-    res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=(), interest-cohort=()");
-    next();
-  });
-
-  // ✅ MIDDLEWARE POUR IDENTIFIER LES ROUTES PUBLIQUES
-  app.use((req: express.Request, res: express.Response, next: express.NextFunction) => {
-    const publicRoutes = ['/', '/health', '/api'];
-    
-    // Marquer les routes publiques
-    if (publicRoutes.includes(req.path)) {
-      req.isPublicRoute = true;
-    }
-    
-    next();
-  });
-
-  // ✅ MIDDLEWARE DE LOGGING DES REQUÊTES
-  app.use((req: express.Request, res: express.Response, next: express.NextFunction) => {
-    const start = Date.now();
-    const originalEnd = res.end;
-    
-    (res as any).end = function(...args: any[]) {
-      const duration = Date.now() - start;
-      logger.log(`${req.method} ${req.originalUrl} ${res.statusCode} - ${duration}ms - Origin: ${req.headers.origin || 'none'}`);
-      return originalEnd.apply(res, args);
-    };
-    
-    next();
-  });
-
-  // ✅ CONFIGURATION CORS STRICTE
-  logger.log(`Configuration CORS pour environnement: PRODUCTION EXCLUSIVE`);
-  logger.log(`Parsing middleware: ✅ JSON, URL-encoded, Cookies activés`);
-  logger.log(`Origines autorisées: ${productionOrigins.length} origines`);
-
-  app.enableCors({
-    origin: (origin, callback) => {
-      // 🔒 Autoriser les requêtes sans origine UNIQUEMENT pour les routes publiques
-      if (!origin) {
-        // Note: Nous ne pouvons pas accéder à req ici, donc on utilise une approche différente
-        // On permettra les routes publiques sans origine via le middleware suivant
-        logger.debug(`Requête sans origine détectée - sera gérée par le middleware`);
-        callback(null, true); // On autorise temporairement
-        return;
-      }
-
-      // 🔒 Vérification stricte des origines
-      const isAllowed = isOriginAllowed(origin, productionOrigins);
-
-      if (isAllowed) {
-        logger.debug(`✅ Origine autorisée: ${origin}`);
-        callback(null, true);
-      } else {
-        logger.warn(`❌ Origine non autorisée: ${origin}`);
-        logger.warn(`   Origines autorisées: ${productionOrigins.join(', ')}`);
-        callback(new Error(`Origine non autorisée: ${origin}`), false);
-      }
-    },
-    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allowedHeaders: [
-      "Authorization",
-      "Content-Type",
-      "Accept",
-      "Origin",
-      "X-Requested-With",
-      "Cookie",
-      "Set-Cookie",
-      "Access-Control-Allow-Credentials"
-    ],
-    credentials: true,
-    maxAge: 86400,
-    exposedHeaders: [
-      "Authorization",
-      "Set-Cookie",
-      "Access-Control-Allow-Origin",
-      "Access-Control-Allow-Credentials"
-    ],
-    optionsSuccessStatus: 204,
-  });
-
-  // ✅ MIDDLEWARE POUR GÉRER LES ROUTES SANS ORIGINE
-  app.use((req: express.Request, res: express.Response, next: express.NextFunction) => {
-    const publicRoutes = ['/', '/health', '/api'];
-    const origin = req.headers.origin;
-    
-    // Si pas d'origine ET que c'est une route publique
-    if (!origin && publicRoutes.includes(req.path)) {
-      // Autoriser l'accès aux routes publiques
-      return next();
-    }
-    
-    // Si pas d'origine ET que c'est une route protégée
-    if (!origin && !publicRoutes.includes(req.path)) {
-      logger.warn(`❌ Accès refusé: Requête sans origine pour route protégée: ${req.path}`);
-      return res.status(403).json({
-        error: 'Access Denied',
-        message: 'Origine requise pour cette route',
-        timestamp: new Date().toISOString()
-      });
-    }
-    
-    next();
-  });
-
-  // ✅ ROUTE RACINE SIMPLE
-  server.get("/", (_req: express.Request, res: express.Response) => {
-    res.status(200).send(`
-      <!DOCTYPE html>
-      <html lang="fr">
-      <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>API Paname Consulting</title>
-        <style>
-          body { 
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            margin: 0; padding: 2rem; 
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white; min-height: 100vh;
-          }
-          .container { max-width: 600px; margin: 0 auto; text-align: center; }
-          h1 { margin-bottom: 1rem; }
-          .status { 
-            background: rgba(255,255,255,0.1); 
-            padding: 1.5rem; border-radius: 8px; 
-            margin: 1rem 0; 
-          }
-          .links { margin-top: 2rem; }
-          .links a { 
-            color: #ffd700; 
-            margin: 0 1rem; 
-            text-decoration: none;
-            font-weight: bold;
-          }
-          .links a:hover { text-decoration: underline; }
-        </style>
-      </head>
-      <body>
-        <div class="container">
-          <h1>🚀 API Paname Consulting</h1>
-          <div class="status">
-            <p><strong>Status:</strong> ✅ En ligne</p>
-            <p><strong>Environnement:</strong> PRODUCTION</p>
-            <p><strong>Version:</strong> ${process.env.npm_package_version || '1.0.0'}</p>
-            <p><strong>Timestamp:</strong> ${new Date().toLocaleString()}</p>
-            <p><strong>Parsing:</strong> ✅ JSON, URL-encoded, Cookies, Text</p>
-          </div>
-        </div>
-      </body>
-      </html>
-    `);
-  });
-
-  // ✅ HEALTH CHECK ENDPOINT
-  server.get("/health", (_req: express.Request, res: express.Response) => {
-    res.status(200).json({
-      status: "healthy",
-      timestamp: new Date().toISOString(),
-      uptime: process.uptime(),
-      memory: process.memoryUsage(),
-      parsing: {
-        json: "enabled",
-        urlencoded: "enabled",
-        cookies: "enabled",
-        text: "enabled"
-      },
-      cors: {
-        allowedOrigins: productionOrigins,
-        credentials: "enabled"
-      }
-    });
-  });
-
-  // ✅ API INFO ROUTE
-  server.get("/api", (_req: express.Request, res: express.Response) => {
-    res.status(200).json({
-      status: "success",
-      service: "paname-consulting-api",
-      version: process.env.npm_package_version || "1.0.0",
-      timestamp: new Date().toISOString(),
-      environment: "production",
-      support: "panameconsulting906@gmail.com",
-      uptime: process.uptime(),
-      parsing: {
-        json: "enabled",
-        urlencoded: "enabled",
-        cookies: "enabled"
-      },
-      cors: {
-        allowedOrigins: productionOrigins
-      }
-    });
-  });
-
-  // ✅ MIDDLEWARE POUR GÉRER MANUELLEMENT LES HEADERS CORS (OPTIONS)
-  app.use((req: express.Request, res: express.Response, next: express.NextFunction) => {
-    // Répondre immédiatement aux requêtes OPTIONS (pré-vol CORS)
-    if (req.method === "OPTIONS") {
-      const origin = req.headers.origin;
-      if (origin && isOriginAllowed(origin, productionOrigins)) {
-        res.header("Access-Control-Allow-Origin", origin);
-      }
-      res.header("Access-Control-Allow-Credentials", "true");
-      res.header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
-      res.header("Access-Control-Allow-Headers", "Authorization, Content-Type, Accept, Origin, X-Requested-With, Cookie, Access-Control-Allow-Credentials");
-      res.header("Access-Control-Expose-Headers", "Authorization, X-RateLimit-Limit, X-RateLimit-Remaining, Set-Cookie, Access-Control-Allow-Origin");
-      res.header("Access-Control-Max-Age", "86400");
-      return res.status(200).end();
-    }
-    
-    next();
-  });
-
   try {
+    logger.log("🚀 Starting API server...");
+
+    // 🔧 Configuration Express
+    const server = express();
+
+    // ✅ MIDDLEWARE: ID de requête
+    server.use((req: express.Request, _res: express.Response, next) => {
+      req.requestId = generateRequestId();
+      req.startTime = Date.now();
+      next();
+    });
+
+    // ✅ MIDDLEWARE: Compression GZIP
+    server.use(compression());
+
+    // ✅ MIDDLEWARE: Cookie Parser
+    server.use(cookieParser(process.env.COOKIE_SECRET));
+
+    // ✅ MIDDLEWARE: Parsing JSON avec validation
+    server.use(express.json({
+      limit: '10mb',
+      verify: (req: express.Request, _res: express.Response, buf: Buffer, encoding: BufferEncoding) => {
+        try {
+          if (buf && buf.length) {
+            JSON.parse(buf.toString(encoding || 'utf8'));
+          }
+        } catch {
+          req.invalidJson = true;
+        }
+      }
+    }));
+
+    // ✅ MIDDLEWARE: URL-encoded data
+    server.use(express.urlencoded({
+      limit: '10mb',
+      extended: true,
+      parameterLimit: 1000
+    }));
+
+    // ✅ MIDDLEWARE: Text data
+    server.use(express.text({
+      limit: '1mb',
+      type: 'text/plain'
+    }));
+
+    // ✅ CRÉATION DE L'APPLICATION NEST
+    const app = await NestFactory.create<NestExpressApplication>(
+      AppModule,
+      new ExpressAdapter(server),
+      {
+        logger: isProduction 
+          ? ['error', 'warn', 'log'] 
+          : ['error', 'warn', 'log', 'debug', 'verbose'],
+        bufferLogs: true,
+        abortOnError: false,
+      },
+    );
+
+    // ✅ MIDDLEWARE: Sécurité Helmet
+    const cspDirectives = {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", "'unsafe-inline'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      imgSrc: ["'self'", "data:", "https:"],
+      connectSrc: ["'self'", ...allowedOrigins],
+      fontSrc: ["'self'", "https:"],
+      frameSrc: ["'self'", "https://vercel.live"],
+      objectSrc: ["'none'"],
+      mediaSrc: ["'self'"],
+      baseUri: ["'self'"],
+      formAction: ["'self'"],
+    };
+
+    app.use(
+      helmet({
+        contentSecurityPolicy: {
+          directives: cspDirectives,
+        },
+        crossOriginResourcePolicy: { policy: "cross-origin" },
+        crossOriginEmbedderPolicy: false,
+        crossOriginOpenerPolicy: { policy: "same-origin" },
+        referrerPolicy: { policy: "strict-origin-when-cross-origin" },
+        hsts: {
+          maxAge: 31536000,
+          includeSubDomains: true,
+          preload: true
+        },
+        frameguard: { action: 'deny' },
+        hidePoweredBy: true,
+        noSniff: true,
+        xssFilter: true,
+      }),
+    );
+
+    // ✅ MIDDLEWARE: Headers de sécurité additionnels
+    app.use((_req: express.Request, res: express.Response, next) => {
+      res.removeHeader("X-Powered-By");
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      res.setHeader("X-Frame-Options", "DENY");
+      res.setHeader("X-XSS-Protection", "1; mode=block");
+      res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains; preload");
+      res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+      res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=(), interest-cohort=()");
+      res.setHeader("X-Request-ID", _req.requestId || '');
+      next();
+    });
+
+    // ✅ MIDDLEWARE: Validation JSON
+    app.use((req: express.Request, res: express.Response, next) => {
+      if (req.invalidJson) {
+        return res.status(400).json({
+          error: 'Invalid JSON payload',
+          message: 'Le corps de la requête contient du JSON invalide',
+          requestId: req.requestId,
+          timestamp: new Date().toISOString(),
+        });
+      }
+      next();
+    });
+
+    // ✅ CONFIGURATION CORS
+    app.enableCors({
+      origin: (origin, callback) => {
+        // Autoriser les requêtes sans origine en développement
+        if (!origin && !isProduction) {
+          return callback(null, true);
+        }
+
+        // Autoriser les requêtes sans origine pour les webhooks et certaines API
+        if (!origin) {
+          // Vérifier si c'est une route publique
+          const publicRoutes = ['/health', '/api', '/webhooks'];
+          const currentReq = (app as any).httpAdapter?.getInstance()?.request;
+          const requestPath = currentReq?.originalUrl || '';
+          
+          const isPublic = publicRoutes.some(route => 
+            requestPath.startsWith(route)
+          );
+          
+          if (isPublic) {
+            return callback(null, true);
+          }
+          return callback(new Error('Origin required'), false);
+        }
+
+        if (isOriginAllowed(origin, allowedOrigins)) {
+          logger.debug(`✅ Origin allowed: ${origin}`);
+          return callback(null, true);
+        }
+
+        logger.warn(`❌ Origin blocked: ${origin}`);
+        return callback(new Error('Not allowed by CORS'), false);
+      },
+      methods: [
+        RequestMethod.GET,
+        RequestMethod.POST,
+        RequestMethod.PUT,
+        RequestMethod.PATCH,
+        RequestMethod.DELETE,
+        RequestMethod.OPTIONS,
+        RequestMethod.HEAD,
+      ].map(m => RequestMethod[m]),
+      allowedHeaders: [
+        "Authorization",
+        "Content-Type",
+        "Accept",
+        "Origin",
+        "X-Requested-With",
+        "X-Request-ID",
+        "Cookie",
+        "Set-Cookie",
+        "Access-Control-Allow-Credentials",
+      ],
+      credentials: true,
+      maxAge: 86400,
+      exposedHeaders: [
+        "Authorization",
+        "Set-Cookie",
+        "X-Request-ID",
+      ],
+      optionsSuccessStatus: 204,
+      preflightContinue: false,
+    });
+
+    // ✅ MIDDLEWARE: Logging des requêtes
+    app.use((req: express.Request, res: express.Response, next) => {
+      const startTime = req.startTime || Date.now();
+      
+      const originalEnd = res.end;
+      res.end = function(...args: any[]) {
+        const duration = Date.now() - startTime;
+        const logData = {
+          requestId: req.requestId,
+          method: req.method,
+          url: req.originalUrl,
+          status: res.statusCode,
+          duration: `${duration}ms`,
+          userAgent: req.headers['user-agent']?.substring(0, 100) || 'unknown',
+          origin: req.headers.origin || 'none',
+          ip: req.ip || req.socket.remoteAddress,
+        };
+
+        if (res.statusCode >= 400) {
+          logger.warn(`Request error: ${req.method} ${req.originalUrl} ${res.statusCode} - ${duration}ms`);
+        } else {
+          logger.log(`Request: ${req.method} ${req.originalUrl} ${res.statusCode} - ${duration}ms`);
+        }
+
+        return originalEnd.apply(res, args);
+      };
+
+      next();
+    });
+
+    // ✅ ROUTES DE BASE (Express direct pour éviter les problèmes de path-to-regexp)
+    
+    // Route racine
+    server.get("/", (_req: express.Request, res: express.Response) => {
+      res.setHeader('Content-Type', 'text/html');
+      res.status(200).send(`
+        <!DOCTYPE html>
+        <html lang="fr">
+        <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>API Paname Consulting</title>
+          <style>
+            body { 
+              font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+              margin: 0; padding: 2rem; 
+              background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+              color: white; min-height: 100vh;
+            }
+            .container { max-width: 600px; margin: 0 auto; text-align: center; }
+            h1 { margin-bottom: 1rem; }
+            .status { 
+              background: rgba(255,255,255,0.1); 
+              padding: 1.5rem; border-radius: 8px; 
+              margin: 1rem 0; 
+            }
+            .links { margin-top: 2rem; }
+            .links a { 
+              color: #ffd700; 
+              margin: 0 1rem; 
+              text-decoration: none;
+              font-weight: bold;
+            }
+            .links a:hover { text-decoration: underline; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <h1>🚀 API Paname Consulting</h1>
+            <div class="status">
+              <p><strong>Status:</strong> ✅ En ligne</p>
+              <p><strong>Environnement:</strong> ${isProduction ? 'PRODUCTION' : 'DEVELOPMENT'}</p>
+              <p><strong>Version:</strong> ${process.env.npm_package_version || '1.0.0'}</p>
+              <p><strong>Timestamp:</strong> ${new Date().toLocaleString()}</p>
+              <p><strong>Uptime:</strong> ${Math.round(process.uptime())} seconds</p>
+            </div>
+            <div class="links">
+              <a href="/health">Health Check</a>
+              <a href="/api">API Info</a>
+            </div>
+          </div>
+        </body>
+        </html>
+      `);
+    });
+
+    // Health check
+    server.get("/health", (_req: express.Request, res: express.Response) => {
+      res.status(200).json({
+        status: "healthy",
+        timestamp: new Date().toISOString(),
+        uptime: process.uptime(),
+        environment: isProduction ? "production" : "development",
+        memory: {
+          heapUsed: Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
+          heapTotal: Math.round(process.memoryUsage().heapTotal / 1024 / 1024),
+        },
+        node: {
+          version: process.version,
+          pid: process.pid,
+        },
+      });
+    });
+
+    // API Info
+    server.get("/api", (_req: express.Request, res: express.Response) => {
+      res.status(200).json({
+        service: "paname-consulting-api",
+        version: process.env.npm_package_version || "1.0.0",
+        endpoints: {
+          auth: "/api/auth",
+          users: "/api/users",
+          procedures: "/api/procedures",
+          contact: "/api/contact",
+          destinations: "/api/destinations",
+          rendezvous: "/api/rendezvous",
+        },
+        support: "panameconsulting906@gmail.com",
+      });
+    });
+
     // ✅ CRÉATION DES DOSSIERS NÉCESSAIRES
     const uploadsDir = join(__dirname, "..", "uploads");
     const logsDir = join(__dirname, "..", "logs");
@@ -375,11 +386,11 @@ async function bootstrap() {
     [uploadsDir, logsDir].forEach(dir => {
       if (!fs.existsSync(dir)) {
         fs.mkdirSync(dir, { recursive: true });
-        logger.log(`Dossier créé: ${dir}`);
+        logger.log(`Directory created: ${dir}`);
       }
     });
 
-    // ✅ CONFIGURATION DES FICHIERS STATIQUES
+    // ✅ FICHIERS STATIQUES
     app.use(
       "/uploads",
       express.static(uploadsDir, {
@@ -392,11 +403,10 @@ async function bootstrap() {
       }),
     );
 
-    // ✅ CONFIGURATION GLOBALE
-    app.setGlobalPrefix("api", {
-      exclude: ['/', '/health', '/api']
-    });
-    
+    // ✅ CONFIGURATION GLOBALE - CORRIGÉ POUR PATH-TO-REGEXP
+    // CORRECTION IMPORTANTE : Utiliser des routes nommées ou des routes spécifiques
+    app.setGlobalPrefix("api");
+
     // ✅ VALIDATION GLOBALE
     app.useGlobalPipes(
       new ValidationPipe({
@@ -424,166 +434,156 @@ async function bootstrap() {
       }),
     );
 
-    // ✅ RATE LIMITING AVEC DÉTECTION PAR RÔLE
+    // ✅ RATE LIMITING
     const rateLimit = require("express-rate-limit");
 
     // Middleware pour détecter les routes admin
     app.use((req: express.Request, res: express.Response, next: express.NextFunction) => {
-      // Liste des préfixes de routes admin
-      const adminRoutePrefixes = [
+      const adminRoutes = [
         '/api/users/stats',
-        '/api/users/:id/toggle-status',
-        '/api/users/maintenance-',
-        '/api/users/:id/admin-reset-password',
-        '/api/procedures/admin/',
+        '/api/users/toggle-status',
+        '/api/users/maintenance',
+        '/api/users/admin-reset-password',
+        '/api/procedures/admin',
         '/api/auth/logout-all',
-        '/api/contact', // Attention: GET seulement pour admin, POST pour tous
         '/api/contact/stats',
-        '/api/contact/:id/',
-        '/api/destinations', // Attention: GET pour tous, POST/PUT/DELETE pour admin
-        '/api/rendezvous', // Attention: POST pour tous, GET admin
-        '/api/rendezvous/:id/status',
-        '/api/rendezvous/:id/confirm'
       ];
       
-      // Détecter si c'est une route admin
-      const isAdminRoute = adminRoutePrefixes.some(prefix => {
-        if (req.method === 'GET' && req.path === '/api/contact') {
-          return true; // GET /api/contact est admin
-        }
-        if (req.method === 'GET' && req.path === '/api/rendezvous') {
-          return true; // GET /api/rendezvous est admin
-        }
-        if (req.method === 'GET' && req.path.startsWith('/api/destinations') && req.path !== '/api/destinations/all') {
-          return true; // GET /api/destinations (sans /all) est admin
-        }
-        return req.path.startsWith(prefix);
-      });
+      const isAdminRoute = adminRoutes.some(route => 
+        req.path.startsWith(route)
+      );
       
-      // Ajouter un flag à la requête
       (req as any).isAdminRoute = isAdminRoute;
       
       next();
     });
 
-    // ✅ RATE LIMIT UNIQUE AVEC LOGIQUE CONDITIONNELLE
-    app.use(
-      rateLimit({
-        windowMs: 30 * 60 * 1000, // 30 minutes
-        max: (req: express.Request) => {
-          // ✅ ADMIN: 25,000 requêtes
-          if ((req as any).isAdminRoute) {
-            return 25000;
-          }
-          // ✅ UTILISATEURS NORMAUX: 5,000 requêtes
-          return 5000;
-        },
-        message: (req: express.Request) => {
-          const limit = (req as any).isAdminRoute ? 25000 : 5000;
-          return {
-            status: 429,
-            message: `Trop de requêtes (${limit} req/30min), veuillez réessayer plus tard.`,
-            limit: limit,
-            window: "30 minutes"
-          };
-        },
-        standardHeaders: true,
-        legacyHeaders: false,
-        skipSuccessfulRequests: false,
-        keyGenerator: (req: express.Request) => {
-          const ip = req.ip || req.headers['x-forwarded-for'] || 'unknown';
-          // Différencier les clés par type d'utilisateur
-          return (req as any).isAdminRoute ? `admin_${ip}` : `user_${ip}`;
-        }
-      }),
-    );
+    // Rate limiter pour utilisateurs normaux
+    const userLimiter = rateLimit({
+      windowMs: 30 * 60 * 1000, // 30 minutes
+      max: 5000,
+      message: {
+        status: 429,
+        message: 'Trop de requêtes (5,000 req/30min)',
+        limit: 5000,
+        window: "30 minutes"
+      },
+      standardHeaders: true,
+      legacyHeaders: false,
+      skipSuccessfulRequests: false,
+      keyGenerator: (req: express.Request) => {
+        const ip = req.ip || req.socket.remoteAddress || 'unknown';
+        return `user_${ip}`;
+      },
+      handler: (_req: express.Request, res: express.Response, _next, options) => {
+        res.status(options.statusCode).json(options.message);
+      },
+    });
 
-    const port = process.env.PORT || 10000;
-    const host = "0.0.0.0";
+    // Rate limiter pour admin
+    const adminLimiter = rateLimit({
+      windowMs: 30 * 60 * 1000, // 30 minutes
+      max: 25000,
+      message: {
+        status: 429,
+        message: 'Trop de requêtes (25,000 req/30min)',
+        limit: 25000,
+        window: "30 minutes"
+      },
+      standardHeaders: true,
+      legacyHeaders: false,
+      skipSuccessfulRequests: false,
+      keyGenerator: (req: express.Request) => {
+        const ip = req.ip || req.socket.remoteAddress || 'unknown';
+        return `admin_${ip}`;
+      },
+      handler: (_req: express.Request, res: express.Response, _next, options) => {
+        res.status(options.statusCode).json(options.message);
+      },
+    });
 
-    // ✅ LOG DE DÉMARRAGE DÉTAILLÉ
-    logger.log(`========================================`);
-    logger.log(`🚀 Application: Paname Consulting API`);
-    logger.log(`📍 Environnement: PRODUCTION EXCLUSIVE`);
-    logger.log(`🌐 Host: ${host}`);
-    logger.log(`🚪 Port: ${port}`);
-    logger.log(`📁 Dossier uploads: ${uploadsDir}`);
-    logger.log(`🔒 Mode production: ${isProduction}`);
-    logger.log(`🔐 CORS activé: ${productionOrigins.length} origines`);
-    logger.log(`📝 Parsing middleware: ✅ Activé`);
-    logger.log(`🍪 Cookie parser: ✅ Activé`);
-    logger.log(`========================================`);
-    
-    // ✅ LISTE DES ORIGINES AUTORISÉES
-    logger.log(`🌍 Origines CORS autorisées:`);
-    productionOrigins.forEach(origin => {
-      logger.log(`   • ${origin}`);
+    // Appliquer le rate limiting approprié
+    app.use((req: express.Request, res: express.Response, next: express.NextFunction) => {
+      if ((req as any).isAdminRoute) {
+        return adminLimiter(req, res, next);
+      } else {
+        return userLimiter(req, res, next);
+      }
     });
 
     // ✅ DÉMARRAGE DU SERVEUR
+    const port = parseInt(process.env.PORT || "10000", 10);
+    const host = process.env.HOST || "0.0.0.0";
+
     await app.listen(port, host);
 
-    logger.log(`✅ Serveur démarré sur http://${host}:${port}`);
-    logger.log(`✅ Health check: http://${host}:${port}/health`);
-    logger.log(`✅ Parsing middleware: JSON, URL-encoded, Cookies activés`);
-    
-    // ✅ INFORMATION DE MONITORING
-    const memoryUsage = process.memoryUsage();
-    logger.log(`📊 Mémoire utilisée: ${Math.round(memoryUsage.heapUsed / 1024 / 1024)}MB / ${Math.round(memoryUsage.heapTotal / 1024 / 1024)}MB`);
+    // ✅ LOG DE DÉMARRAGE
+    logger.log("=".repeat(60));
+    logger.log(`🚀 Server started successfully!`);
+    logger.log(`📍 URL: http://${host === '0.0.0.0' ? 'localhost' : host}:${port}`);
+    logger.log(`⚙️  Environment: ${isProduction ? 'PRODUCTION' : 'DEVELOPMENT'}`);
+    logger.log(`📊 Node: ${process.version}`);
+    logger.log(`🌐 CORS: ${allowedOrigins.length} allowed origins`);
+    logger.log(`🔒 Security: Helmet, Rate Limiting, Validation enabled`);
+    logger.log("=".repeat(60));
 
   } catch (error: unknown) {
-    // ✅ LOG SÉCURISÉ SANS DONNÉES SENSIBLES
-    logger.error("❌ Erreur fatale au démarrage", {
-      message: error instanceof Error ? error.message : "Erreur inconnue",
+    logger.error("❌ Failed to start server", {
+      error: error instanceof Error ? error.message : 'Unknown error',
       timestamp: new Date().toISOString(),
-      environment: "production",
+      pid: process.pid,
     });
     
     process.exit(1);
   }
 }
 
-// ✅ GESTION D'ERREUR GLOBALE
+// ✅ GESTION DES ERREURS GLOBALES
 process.on("uncaughtException", (error: Error) => {
   const logger = new Logger("UncaughtException");
-  
-  logger.error("⚠️ Erreur non gérée détectée", {
+  logger.error("⚠️ Uncaught Exception", {
+    name: error.name,
     message: error.message,
     timestamp: new Date().toISOString(),
-    pid: process.pid,
   });
+  
+  if (process.env.NODE_ENV === 'production') {
+    process.exit(1);
+  }
 });
 
 process.on("unhandledRejection", (reason: any, _promise: Promise<any>) => {
   const logger = new Logger("UnhandledRejection");
-  
-  logger.error("⚠️ Promise rejection non gérée", {
-    reason: reason instanceof Error ? reason.message : "Raison inconnue",
+  logger.error("⚠️ Unhandled Promise Rejection", {
+    reason: reason instanceof Error ? reason.message : String(reason),
     timestamp: new Date().toISOString(),
-    pid: process.pid,
   });
 });
 
-// ✅ GESTION DES SIGNAUX DE TERMINAISON
 process.on("SIGTERM", () => {
   const logger = new Logger("SIGTERM");
-  logger.log("📩 Signal SIGTERM reçu, arrêt gracieux...");
-  process.exit(0);
+  logger.log("📩 Received SIGTERM, shutting down gracefully...");
+  setTimeout(() => {
+    logger.log("👋 Graceful shutdown complete");
+    process.exit(0);
+  }, 10000).unref();
 });
 
 process.on("SIGINT", () => {
   const logger = new Logger("SIGINT");
-  logger.log("📩 Signal SIGINT reçu (Ctrl+C), arrêt gracieux...");
-  process.exit(0);
+  logger.log("📩 Received SIGINT (Ctrl+C), shutting down gracefully...");
+  setTimeout(() => {
+    logger.log("👋 Graceful shutdown complete");
+    process.exit(0);
+  }, 10000).unref();
 });
 
-// ✅ DÉMARRAGE AVEC GESTION D'ERREUR
+// ✅ DÉMARRAGE
 bootstrap().catch((error: unknown) => {
   const logger = new Logger("Bootstrap");
-  logger.error("💥 Échec critique du bootstrap", {
-    message: error instanceof Error ? error.message : "Erreur inconnue",
+  logger.error("💥 Bootstrap failed", {
+    error: error instanceof Error ? error.message : 'Unknown error',
     timestamp: new Date().toISOString(),
-    pid: process.pid,
   });
   process.exit(1);
 });
