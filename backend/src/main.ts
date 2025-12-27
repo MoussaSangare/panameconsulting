@@ -633,6 +633,8 @@ bootstrap().catch((error: unknown) => {
   logger.error("💥 Bootstrap failed", {
     error: error instanceof Error ? error.message : 'Unknown error',
     timestamp: new Date().toISOString(),
+    stack: error instanceof Error ? error.stack : undefined,
+    
   });
   process.exit(1);
 });
