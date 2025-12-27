@@ -1,5 +1,4 @@
-// strategies/jwt.strategy.ts
-import { ExtractJwt, Strategy } from 'passport-jwt';
+import { ExtractJwt, Strategy, StrategyOptions } from 'passport-jwt';
 import { PassportStrategy } from '@nestjs/passport';
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -9,63 +8,75 @@ import { AuthConstants } from '../auth.constants';
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
   constructor(
-    private configService: ConfigService,
-    private usersService: UsersService,
+    configService: ConfigService,
+    private readonly usersService: UsersService,
   ) {
-    super({
+    const jwtSecret = configService.get<string>('JWT_SECRET') || process.env.JWT_SECRET;
+    
+    if (!jwtSecret) {
+      throw new Error('JWT_SECRET is not defined in environment variables');
+    }
+
+    const strategyOptions: StrategyOptions = {
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
       ignoreExpiration: false,
-      secretOrKey: configService.get('JWT_SECRET'),
-    });
+      secretOrKey: jwtSecret,
+    };
+
+    super(strategyOptions);
   }
 
-  async validate(payload: any) {
+  async validate(payload: any): Promise<any> {
     try {
-      // ✅ Vérifier que le payload contient un ID utilisateur valide
       if (!payload.sub) {
         throw new UnauthorizedException('Token invalide: ID utilisateur manquant');
       }
 
-      // ✅ Vérifier d'abord l'accès avec la méthode complète
       const accessCheck = await this.usersService.checkUserAccess(payload.sub);
       
       if (!accessCheck.canAccess) {
-        // Gérer les différents types d'erreurs d'accès
-        if (accessCheck.reason?.includes('Compte désactivé')) {
+        const reason = accessCheck.reason || '';
+        
+        if (reason.includes('Compte désactivé')) {
           throw new UnauthorizedException(AuthConstants.ERROR_MESSAGES.COMPTE_DESACTIVE);
-        } else if (accessCheck.reason?.includes('Mode maintenance')) {
+        } else if (reason.includes('Mode maintenance')) {
           throw new UnauthorizedException(AuthConstants.ERROR_MESSAGES.MAINTENANCE_MODE);
-        } else if (accessCheck.reason?.includes('Déconnecté temporairement')) {
-          // Extraire les heures restantes si disponibles
-          const remainingHours = accessCheck.details?.remainingHours || 24;
+        } else if (reason.includes('Déconnecté temporairement')) {
+          const remainingHours = (accessCheck.details as any)?.remainingHours || 24;
           throw new UnauthorizedException(
             `${AuthConstants.ERROR_MESSAGES.COMPTE_TEMPORAIREMENT_DECONNECTE}:${remainingHours}`
           );
         } else {
-          throw new UnauthorizedException(accessCheck.reason || "Accès refusé");
+          throw new UnauthorizedException(reason || "Accès refusé");
         }
       }
 
-      // ✅ Retourner les informations utilisateur formatées avec id comme propriété principale
-      return {
-        id: payload.sub,               // ID MongoDB (propriété principale)
-        sub: payload.sub,               // Pour compatibilité JWT standard
-        userId: payload.sub,           // Alias supplémentaire
+      const userData = {
+        id: accessCheck.user.id || payload.sub, 
+        sub: payload.sub,
+        userId: payload.sub,
         email: accessCheck.user.email,
         role: accessCheck.user.role,
         firstName: accessCheck.user.firstName,
         lastName: accessCheck.user.lastName,
         isActive: accessCheck.user.isActive,
         telephone: accessCheck.user.telephone, 
-        // Ajouter les timestamps JWT si disponibles
         iat: payload.iat,
         exp: payload.exp,
       };
-    } catch (error) {
-      // ✅ Log détaillé des erreurs
-      console.error(`JWT Validation Error: ${error.message}`, {
+
+      return userData;
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error 
+        ? error.message 
+        : 'Unknown error occurred';
+      const errorStack = error instanceof Error 
+        ? error.stack 
+        : undefined;
+      
+      console.error(`JWT Validation Error: ${errorMessage}`, {
         userId: payload?.sub || 'unknown',
-        error: error.stack
+        error: errorStack
       });
       
       if (error instanceof UnauthorizedException) {

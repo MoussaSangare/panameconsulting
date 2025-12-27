@@ -8,13 +8,33 @@ const RENDEZVOUS_STATUS = {
   PENDING: 'En attente',
   CONFIRMED: 'Confirmé',
   COMPLETED: 'Terminé',
-  CANCELLED: 'Annulé'
+  CANCELLED: 'Annulé',
+  EXPIRED: 'Expiré'
 } as const;
 
 const ADMIN_OPINION = {
   FAVORABLE: 'Favorable',
   UNFAVORABLE: 'Défavorable'
 } as const;
+
+const DESTINATIONS = [
+  'France',
+  'Canada',
+  'Belgique',
+  'Suisse',
+  'États-Unis',
+  'Autre'
+] as const;
+
+const FILIERES = [
+  'Informatique',
+  'Médecine',
+  'Droit',
+  'Commerce',
+  'Ingénierie',
+  'Architecture',
+  'Autre'
+] as const;
 
 export class UpdateRendezvousDto extends PartialType(CreateRendezvousDto) {
   @ApiProperty({
@@ -50,7 +70,27 @@ export class UpdateRendezvousDto extends PartialType(CreateRendezvousDto) {
   })
   avisAdmin?: string;
 
-  // Validation conditionnelle pour les champs "Autre" (cohérent avec create DTO)
+  @ApiProperty({
+    enum: DESTINATIONS,
+    example: 'France',
+    description: 'Destination mise à jour',
+    required: false,
+  })
+  @IsOptional()
+  @IsEnum(DESTINATIONS, { message: 'Destination invalide' })
+  destination?: string;
+
+  @ApiProperty({
+    enum: FILIERES,
+    example: 'Informatique',
+    description: 'Filière mise à jour',
+    required: false,
+  })
+  @IsOptional()
+  @IsEnum(FILIERES, { message: 'Filière invalide' })
+  filiere?: string;
+
+  // Validation conditionnelle pour les champs "Autre"
   @ValidateIf((o) => o.destination === 'Autre')
   @IsNotEmpty({ message: 'La destination personnalisée est obligatoire quand "Autre" est sélectionné' })
   destinationAutre?: string;

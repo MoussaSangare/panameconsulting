@@ -1,30 +1,68 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as nodemailer from 'nodemailer';
-import SMTPTransport from 'nodemailer/lib/smtp-transport';
+import SMTPTransport = require("nodemailer/lib/smtp-transport");
+
+export interface EmailOptions {
+  to: string | string[];
+  subject: string;
+  html: string;
+  text?: string;
+  replyTo?: string;
+  cc?: string[];
+  bcc?: string[];
+  attachments?: Array<{
+    filename: string;
+    content?: Buffer | string;
+    path?: string;
+    contentType?: string;
+  }>;
+  priority?: 'high' | 'normal' | 'low';
+}
+
+export interface SmtpStatus {
+  available: boolean;
+  message: string;
+  host: string;
+  port: number;
+  secure: boolean;
+  fromEmail: string;
+}
 
 @Injectable()
-export class SmtpService {
+export class SmtpService implements OnModuleDestroy {
   private readonly logger = new Logger(SmtpService.name);
-  private transporter: nodemailer.Transporter<SMTPTransport.SentMessageInfo>;
+  private transporter!: nodemailer.Transporter<SMTPTransport.SentMessageInfo>;
   private isAvailable: boolean = false;
   private fromEmail: string = '';
   private readonly appName: string = 'Paname Consulting';
   private retryAttempts: number = 3;
-  private retryDelay: number = 2000; // 2 secondes
+  private retryDelay: number = 2000;
+  private readonly maxEmailsPerDay: number = 100;
+  private emailSentTimestamps: Date[] = [];
+  private readonly cleanupInterval: number = 24 * 60 * 60 * 1000; // 24 heures
+  private cleanupTimer?: NodeJS.Timeout;
 
   constructor(private readonly configService: ConfigService) {
-    this.initialize();
+    this.initialize().catch(error => {
+      this.logger.error(`Erreur d'initialisation SMTP: ${error.message}`);
+    });
+    
+    // Nettoyage périodique des timestamps
+    this.cleanupTimer = setInterval(() => this.cleanupOldTimestamps(), this.cleanupInterval);
   }
 
-  async initManually(): Promise<void> {
-    await this.initialize();
+  async onModuleDestroy(): Promise<void> {
+    if (this.cleanupTimer) {
+      clearInterval(this.cleanupTimer);
+    }
+    await this.close();
   }
 
   private async initialize(): Promise<void> {
     const emailUser = this.configService.get<string>('EMAIL_USER') || process.env.EMAIL_USER;
     const emailPass = this.configService.get<string>('EMAIL_PASS') || process.env.EMAIL_PASS;
-    const nodeEnv = this.configService.get<string>('NODE_ENV') || 'production' || process.env.NODE_ENV ;
+    const nodeEnv = (this.configService.get<string>('NODE_ENV') || process.env.NODE_ENV || 'production').toLowerCase();
 
     if (!emailUser || !emailPass) {
       this.logger.error('❌ EMAIL_USER ou EMAIL_PASS manquant pour SMTP');
@@ -37,39 +75,26 @@ export class SmtpService {
     try {
       this.logger.log(`🚀 Configuration SMTP Gmail pour ${nodeEnv.toUpperCase()}...`);
       
-      // Configuration optimisée production Gmail
       const transporterConfig: SMTPTransport.Options = {
         host: 'smtp.gmail.com',
-        port: 465, // Port sécurisé recommandé en production
-        secure: true, // SSL obligatoire pour le port 465
+        port: 465,
+        secure: true,
         auth: {
           user: emailUser,
           pass: emailPass,
         },
-        // Optimisations production
-        connectionTimeout: 15000, // 15 secondes
+        connectionTimeout: 15000,
         greetingTimeout: 10000,
-        socketTimeout: 30000, // 30 secondes pour les emails longs
-        // DKIM et sécurité
-        dkim: {
-          domainName: this.extractDomain(emailUser),
-          keySelector: 'default',
-          privateKey: '', // À configurer si vous avez DKIM
-        },
-        // TLS recommandé
+        socketTimeout: 30000,
         requireTLS: true,
         tls: {
-          rejectUnauthorized: true, // Toujours vérifier le certificat en prod
+          rejectUnauthorized: false,
           minVersion: 'TLSv1.2',
-        },
-        // Debug seulement en développement
-        debug: nodeEnv === 'development',
-        logger: nodeEnv === 'development',
+        }
       };
 
       this.transporter = nodemailer.createTransport(transporterConfig);
 
-      // Vérification robuste de la connexion
       await this.transporter.verify();
       this.isAvailable = true;
       
@@ -79,7 +104,6 @@ export class SmtpService {
     } catch (error: any) {
       this.logger.error(`❌ Erreur initialisation SMTP: ${error.message}`);
       
-      // Tentative avec port alternatif en cas d'échec
       if (error.code === 'ECONNREFUSED') {
         this.logger.warn('🔄 Tentative avec port alternatif (587)...');
         await this.initializeWithFallback(emailUser, emailPass);
@@ -93,7 +117,7 @@ export class SmtpService {
     try {
       const transporterConfig: SMTPTransport.Options = {
         host: 'smtp.gmail.com',
-        port: 587, // Port alternatif STARTTLS
+        port: 587,
         secure: false,
         requireTLS: true,
         auth: {
@@ -116,28 +140,26 @@ export class SmtpService {
     }
   }
 
-  async sendEmail(options: {
-    to: string | string[];
-    subject: string;
-    html: string;
-    text?: string;
-    replyTo?: string;
-    cc?: string[];
-    bcc?: string[];
-    attachments?: Array<{
-      filename: string;
-      content?: Buffer | string;
-      path?: string;
-      contentType?: string;
-    }>;
-    priority?: 'high' | 'normal' | 'low';
-  }): Promise<boolean> {
+  async initManually(): Promise<void> {
+    this.logger.log('📧 Initialisation manuelle du service SMTP...');
+    await this.initialize();
+  }
+
+  async sendEmail(options: EmailOptions): Promise<{ success: boolean; messageId?: string; error?: string }> {
     if (!this.isAvailable || !this.transporter) {
-      this.logger.warn(`📧 Email ignoré - service SMTP indisponible`);
-      return false;
+      const message = '📧 Email ignoré - service SMTP indisponible';
+      this.logger.warn(message);
+      return { success: false, error: message };
     }
 
-    // Limite de débit pour respecter les limites Gmail
+    // Vérification du rate limiting
+    if (!this.canSendEmail()) {
+      const message = '📧 Limite quotidienne d\'emails atteinte';
+      this.logger.warn(message);
+      return { success: false, error: message };
+    }
+
+    // Rate limiting pour éviter le flood
     await this.rateLimit();
 
     let lastError: any;
@@ -154,38 +176,36 @@ export class SmtpService {
           cc: options.cc,
           bcc: options.bcc,
           attachments: options.attachments,
-          // Headers optimisés production
           headers: {
             'X-Priority': options.priority === 'high' ? '1' : '3',
             'X-MSMail-Priority': options.priority === 'high' ? 'High' : 'Normal',
             'Importance': options.priority === 'high' ? 'high' : 'normal',
             'X-Mailer': `${this.appName} Mailer`,
-            'X-Auto-Response-Suppress': 'All', // Supprime les réponses automatiques
-            'Precedence': 'bulk', // Pour les emails transactionnels
+            'X-Auto-Response-Suppress': 'All',
+            'Precedence': 'bulk',
           },
-          // Encodage
           encoding: 'utf-8',
-          // Priorité
           priority: options.priority || 'normal',
         };
 
         const info = await this.transporter.sendMail(mailOptions);
         
-        this.logger.log(`📧 Email envoyé (tentative ${attempt}/${this.retryAttempts}) à: ${this.maskEmail(options.to)}`);
-        this.logger.debug(`Message ID: ${info.messageId}, Response: ${info.response?.substring(0, 100)}`);
+        // Succès : incrémenter les compteurs
+        this.emailSentTimestamps.push(new Date());
         
-        // Suivi des envois réussis
-        this.trackSuccess();
+        this.logger.log(`📧 Email envoyé (tentative ${attempt}/${this.retryAttempts}) à: ${this.maskRecipient(options.to)}`);
+        this.logger.debug(`Message ID: ${info.messageId}`);
         
-        return true;
+        return { 
+          success: true, 
+          messageId: info.messageId 
+        };
         
       } catch (error: any) {
         lastError = error;
         
-        // Log détaillé selon le type d'erreur
         this.logEmailError(error, attempt);
         
-        // Attente exponentielle avant nouvelle tentative
         if (attempt < this.retryAttempts) {
           const delay = this.retryDelay * Math.pow(2, attempt - 1);
           this.logger.warn(`⏳ Nouvelle tentative dans ${delay}ms...`);
@@ -194,11 +214,12 @@ export class SmtpService {
       }
     }
 
-    // Toutes les tentatives ont échoué
     this.logger.error(`❌ Échec après ${this.retryAttempts} tentatives pour: ${options.subject}`);
-    this.trackFailure(lastError);
     
-    return false;
+    return {
+      success: false,
+      error: lastError?.message || 'Erreur inconnue lors de l\'envoi de l\'email'
+    };
   }
 
   private logEmailError(error: any, attempt: number): void {
@@ -228,42 +249,45 @@ export class SmtpService {
         this.logger.error(`❌ Erreur SMTP ${errorCode} (tentative ${attempt}): ${errorMessage}`);
     }
     
-    // Log supplémentaire si c'est une erreur Gmail spécifique
     if (error.responseCode && error.responseCode >= 400) {
-      this.logger.error(`📊 Code réponse SMTP: ${error.responseCode} - ${error.response}`);
+      this.logger.error(`📊 Code réponse SMTP: ${error.responseCode}`);
     }
   }
 
   private async rateLimit(): Promise<void> {
-    // Implémentation simple de rate limiting
-    // Gmail limite à ~100 emails/jour pour les comptes gratuits
-    // Dans une vraie prod, utiliseriez un système plus sophistiqué
-    const emailsPerSecond = 0.1; // ~9 emails/minute max
-    
-    // Petit délai pour éviter le flood
-    await new Promise(resolve => setTimeout(resolve, 1000 / emailsPerSecond));
+    const emailsPerSecond = 0.1;
+    const delay = Math.floor(1000 / emailsPerSecond);
+    await new Promise(resolve => setTimeout(resolve, delay));
   }
 
-  private trackSuccess(): void {
-    // Ici vous pourriez logger les succès dans une base de données
-    // ou des métriques pour monitoring
-    // this.logger.debug('📈 Email envoyé avec succès - métrique incrémentée');
+  private canSendEmail(): boolean {
+    const now = new Date();
+    const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+    
+    this.emailSentTimestamps = this.emailSentTimestamps.filter(
+      timestamp => timestamp > oneDayAgo
+    );
+    
+    if (this.emailSentTimestamps.length >= this.maxEmailsPerDay) {
+      this.logger.warn(`🚫 Limite quotidienne atteinte: ${this.emailSentTimestamps.length}/${this.maxEmailsPerDay} emails`);
+      return false;
+    }
+    
+    return true;
   }
 
-  private trackFailure(error: any): void {
-    // Log des échecs pour monitoring/alerting
-    const errorData = {
-      timestamp: new Date().toISOString(),
-      errorCode: error.code,
-      errorMessage: error.message,
-      service: 'SMTP',
-    };
+  private cleanupOldTimestamps(): void {
+    const now = new Date();
+    const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
     
-    this.logger.error(`📉 Échec email tracé: ${JSON.stringify(errorData)}`);
+    const before = this.emailSentTimestamps.length;
+    this.emailSentTimestamps = this.emailSentTimestamps.filter(
+      timestamp => timestamp > oneDayAgo
+    );
+    const after = this.emailSentTimestamps.length;
     
-    // En production, vous pourriez envoyer une alerte
-    if (error.code === 'EAUTH' || error.code === 'ECONNECTION') {
-      this.logger.warn('🚨 Erreur critique SMTP - vérification requise');
+    if (before !== after) {
+      this.logger.debug(`🧹 Nettoyage timestamps: ${before - after} anciennes entrées supprimées`);
     }
   }
 
@@ -286,30 +310,32 @@ export class SmtpService {
       .trim();
   }
 
-  private extractDomain(email: string): string {
-    return email.split('@')[1] || 'panameconsulting.com';
-  }
-
-  private maskEmail(email: string | string[]): string {
-    if (Array.isArray(email)) {
-      return email.map(e => this.maskEmail(e)).join(', ');
-    }
-    
+  private maskEmail(email: string): string {
     if (!email?.includes('@')) return '***@***';
     const [name, domain] = email.split('@');
     const masked = name.length > 2 ? name.substring(0, 2) + '***' : '***';
     return `${masked}@${domain}`;
   }
 
-  getStatus(): { available: boolean; message: string } {
-    const status = this.isAvailable ? '✅' : '❌';
-    const details = this.isAvailable 
-      ? `SMTP Gmail opérationnel`
-      : 'Service SMTP indisponible';
+  private maskRecipient(recipient: string | string[]): string {
+    if (Array.isArray(recipient)) {
+      return recipient.map(e => this.maskEmail(e)).join(', ');
+    }
+    return this.maskEmail(recipient);
+  }
+
+  getStatus(): SmtpStatus {
+    const options = this.transporter?.options as SMTPTransport.Options;
     
     return {
       available: this.isAvailable,
-      message: `${status} ${details}`
+      message: this.isAvailable 
+        ? '✅ SMTP Gmail opérationnel'
+        : '❌ Service SMTP indisponible',
+      host: options?.host || 'N/A',
+      port: options?.port || 0,
+      secure: options?.secure || false,
+      fromEmail: this.fromEmail,
     };
   }
 
@@ -320,7 +346,7 @@ export class SmtpService {
       }
       
       if (this.isAvailable && this.transporter) {
-        const verified = await this.transporter.verify();
+        await this.transporter.verify();
         const options = this.transporter.options as SMTPTransport.Options;
         
         return {
@@ -328,7 +354,8 @@ export class SmtpService {
           message: `✅ SMTP Gmail opérationnel\n` +
                   `📧 Expéditeur: ${this.maskEmail(this.fromEmail)}\n` +
                   `🔌 Hôte: ${options.host}:${options.port}\n` +
-                  `🔐 Sécurité: ${options.secure ? 'SSL/TLS' : 'STARTTLS'}`
+                  `🔐 Sécurité: ${options.secure ? 'SSL/TLS' : 'STARTTLS'}\n` +
+                  `📊 Emails aujourd'hui: ${this.emailSentTimestamps.length}/${this.maxEmailsPerDay}`
         };
       }
       
@@ -370,31 +397,27 @@ export class SmtpService {
     return this.isAvailable;
   }
 
-  // Méthode pour monitoring
-  getMetrics(): {
-    available: boolean;
-    host: string;
-    port: number;
-    secure: boolean;
+  getEmailStats(): {
+    totalToday: number;
+    limit: number;
+    available: number;
+    isAvailable: boolean;
   } {
-    const options = this.transporter?.options as SMTPTransport.Options;
-    
     return {
-      available: this.isAvailable,
-      host: options?.host || 'N/A',
-      port: options?.port || 0,
-      secure: options?.secure || false,
+      totalToday: this.emailSentTimestamps.length,
+      limit: this.maxEmailsPerDay,
+      available: Math.max(0, this.maxEmailsPerDay - this.emailSentTimestamps.length),
+      isAvailable: this.isAvailable,
     };
   }
 
-  // Nettoyage propre
   async close(): Promise<void> {
     if (this.transporter) {
       try {
-        this.transporter.close();
+        await this.transporter.close();
         this.logger.log('🔌 Connexions SMTP fermées proprement');
-      } catch (error) {
-        this.logger.warn('⚠️ Erreur lors de la fermeture SMTP:', error);
+      } catch (error: any) {
+        this.logger.warn(`⚠️ Erreur lors de la fermeture SMTP: ${error.message}`);
       }
     }
   }

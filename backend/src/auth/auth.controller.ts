@@ -18,7 +18,7 @@ import { LocalAuthGuard } from "../shared/guards/local-auth.guard";
 import { ThrottleGuard } from "../shared/guards/throttle.guard";
 import { LoggingInterceptor } from "../shared/interceptors/logging.interceptor";
 import { Roles } from "../shared/decorators/roles.decorator";
-import { UserRole } from "../schemas/user.schema";
+import { UserRole } from "../enums/user-role.enum";
 import { AuthService } from "./auth.service";
 import { UsersService } from "../users/users.service";
 import { ForgotPasswordDto } from "./dto/forgot-password.dto";
@@ -58,11 +58,11 @@ export class AuthController {
   @ApiOperation({ summary: "Connexion utilisateur" })
   @ApiResponse({ status: 200, description: "Connexion réussie" })
   @ApiResponse({ status: 401, description: "Identifiants invalides" })
-  async login(@Body() loginDto: LoginDto, @Request() req: { user: any }, @Res() res: Response) {
+  async login(@Body() _loginDto: LoginDto, @Request() req: { user: any }, @Res() res: Response) {
     if (!req.user) {
       return res.status(401).json({
         message: "Email ou mot de passe incorrect",
-        code: "INVALID CREDENTIALS",
+        code: "INVALID_CREDENTIALS",
         timestamp: new Date().toISOString()
       });
     }
@@ -240,7 +240,7 @@ export class AuthController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.ADMIN)
   @ApiOperation({ summary: "Déconnexion de tous les utilisateurs non-admin" })
-  async logoutAll(@Request() req: any, @Res() res: Response) {
+  async logoutAll(@Request() _req: any, @Res() res: Response) {
     try {
       const result = await this.authService.logoutAll();
 
@@ -278,15 +278,14 @@ export class AuthController {
     try {
       const user = await this.authService.getProfile(userId);
 
-      // ✅ RETOURNER LES DONNÉES COMPLÈTES SANS MASQUAGE
       return {
-        id: user._id?.toString() || userId,
-        email: user.email, // ✅ COMPLET
+        id: user.id || userId, 
+        email: user.email,
         firstName: user.firstName,
         lastName: user.lastName,
         role: user.role,
         isAdmin: user.role === UserRole.ADMIN,
-        telephone: user.telephone, // ✅ COMPLET
+        telephone: user.telephone,
         isActive: user.isActive,
       };
     } catch (error: any) {
@@ -294,8 +293,6 @@ export class AuthController {
       throw error;
     }
   }
-
-
 
   @Post("update-password")
   @UseGuards(JwtAuthGuard)
@@ -309,7 +306,7 @@ export class AuthController {
       confirmNewPassword: string;
     },
   ) {
-    const userId = req.user?.id;
+    const userId = req.user?.id; 
 
     if (!body.currentPassword || body.currentPassword.trim() === '') {
       throw new BadRequestException("Le mot de passe actuel est requis");
@@ -383,45 +380,8 @@ export class AuthController {
     res.clearCookie("access_token", cookieOptions);
   }
 
-
-  
-  private maskPhone(phone: string): string {
-    if (!phone || typeof phone !== 'string') return '***';
-    if (phone.length <= 4) return '***';
-    return `***${phone.substring(phone.length - 4)}`;
-  }
-
   private maskUserId(userId: string): string {
     if (!userId || typeof userId !== 'string' || userId.length <= 6) return 'user_***';
     return `user_${userId.substring(0, 3)}***${userId.substring(userId.length - 3)}`;
   }
-
-
-   private maskEmail(email: string): string {
-  if (!email || typeof email !== 'string') return '***@***';
-  
-  const trimmedEmail = email.trim();
-  const [name, domain] = trimmedEmail.split('@');
-  
-  if (!name || !domain || name.length === 0 || domain.length === 0) {
-    return '***@***';
-  }
-  
-  // Masquer le nom (garder première lettre et dernière)
-  const maskedName = name.length <= 2 
-    ? name.charAt(0) + '*'
-    : name.charAt(0) + '***' + (name.length > 1 ? name.charAt(name.length - 1) : '');
-  
-  // Masquer partiellement le domaine
-  const domainParts = domain.split('.');
-  if (domainParts.length < 2) return `${maskedName}@***`;
-  
-  const maskedDomain = domainParts.length === 2 
-    ? '***.' + domainParts[1]
-    : '***.' + domainParts.slice(-2).join('.');
-  
-  return `${maskedName}@${maskedDomain}`;
-  }
-
-  
 }

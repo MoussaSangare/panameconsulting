@@ -83,7 +83,7 @@ export class User extends Document {
   @Prop({ 
     type: Date,
     index: true,
-    expires: 86400 // ⚠️ Correction: option Mongoose pour TTL
+    expires: 86400 
   })
   logoutUntil?: Date;
 

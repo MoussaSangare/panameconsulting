@@ -20,7 +20,7 @@ import { CreateProcedureDto } from './dto/create-procedure.dto';
 import { UpdateProcedureDto } from './dto/update-procedure.dto';
 import { UpdateStepDto } from './dto/update-step.dto';
 import { NotificationService } from '../notification/notification.service';
-import { UserRole } from '../schemas/user.schema';
+import { UserRole } from '../enums/user-role.enum';
 
 // ✅ Interface pour l'utilisateur authentifié
 interface AuthenticatedUser {
@@ -518,7 +518,8 @@ export class ProcedureService {
     this.logger.debug(`Liste procédures utilisateur: ${maskedEmail}, Page: ${page}`);
 
     const skip = (page - 1) * limit;
-    const query = { email: email.toLowerCase(), isDeleted: false };
+    // ✅ RETIRER le filtre isDeleted: false pour voir les procédures annulées
+    const query = { email: email.toLowerCase() };
 
     const [data, total] = await Promise.all([
       this.procedureModel
@@ -558,22 +559,30 @@ export class ProcedureService {
       throw new ForbiddenException('Vous ne pouvez annuler que vos propres procédures');
     }
 
-    if ([ProcedureStatus.COMPLETED, ProcedureStatus.CANCELLED].includes(procedure.statut)) {
+    if ([ProcedureStatus.COMPLETED, ProcedureStatus.CANCELLED, ProcedureStatus.REJECTED].includes(procedure.statut)) {
       throw new BadRequestException('Procédure déjà finalisée');
     }
 
-    procedure.isDeleted = true;
-    procedure.deletedAt = new Date();
-    procedure.deletionReason = reason || "Annulée par l'utilisateur";
+    // ✅ CORRECTION: Ne pas mettre isDeleted: true, seulement changer le statut
     procedure.statut = ProcedureStatus.CANCELLED;
+    procedure.raisonRejet = reason || "Annulée par l'utilisateur";
+    
+    // ✅ Mettre à jour toutes les étapes
     procedure.steps.forEach((step) => {
       if ([StepStatus.IN_PROGRESS, StepStatus.PENDING].includes(step.statut)) {
         step.statut = StepStatus.CANCELLED;
+        step.raisonRefus = reason || "Annulée par l'utilisateur";
         step.dateMaj = new Date();
+        step.dateCompletion = new Date();
+      } else if (step.statut === StepStatus.COMPLETED) {
+        // Garder les étapes terminées comme telles
+        step.statut = StepStatus.COMPLETED;
       }
     });
 
-    const savedProcedure = await procedure.save();
+    // ✅ Appeler save() avec validation
+    const savedProcedure = await procedure.save({ validateBeforeSave: true });
+
     await this.notificationService.sendCancellationNotification(savedProcedure);
 
     this.logger.log(`Procédure annulée: ${maskedId} par: ${maskedEmail}`);
@@ -586,7 +595,8 @@ export class ProcedureService {
     this.logger.debug(`Liste procédures actives - Page: ${page}, Limit: ${limit}`);
 
     const skip = (page - 1) * limit;
-    const query: Record<string, unknown> = { isDeleted: false };
+    // ✅ RETIRER le filtre isDeleted: false pour voir toutes les procédures
+    const query: Record<string, unknown> = {};
 
     if (email) {
       query.email = email.toLowerCase();
@@ -623,21 +633,22 @@ export class ProcedureService {
     const procedure = await this.procedureModel.findById(id);
     if (!procedure) throw new NotFoundException('Procédure non trouvée');
 
-    procedure.isDeleted = true;
-    procedure.deletedAt = new Date();
-    procedure.deletionReason = reason || "Supprimée par l'administrateur";
+    // ✅ CORRECTION: Ne pas mettre isDeleted: true, seulement changer le statut
     procedure.statut = ProcedureStatus.CANCELLED;
+    procedure.raisonRejet = reason || "Annulée par l'administrateur";
 
     procedure.steps.forEach((step) => {
       if ([StepStatus.IN_PROGRESS, StepStatus.PENDING].includes(step.statut)) {
         step.statut = StepStatus.CANCELLED;
+        step.raisonRefus = reason || "Annulée par l'administrateur";
         step.dateMaj = new Date();
+        step.dateCompletion = new Date();
       }
     });
 
-    const savedProcedure = await procedure.save();
+    const savedProcedure = await procedure.save({ validateBeforeSave: true });
 
-    this.logger.log(`Procédure marquée comme supprimée: ${maskedId}`);
+    this.logger.log(`Procédure annulée (admin): ${maskedId}`);
     return savedProcedure;
   }
 
@@ -646,14 +657,14 @@ export class ProcedureService {
 
     const [byStatus, byDestination, total] = await Promise.all([
       this.procedureModel.aggregate([
-        { $match: { isDeleted: false } },
+        // ✅ RETIRER le filtre isDeleted: false pour inclure toutes les procédures
         { $group: { _id: '$statut', count: { $sum: 1 } } },
       ]),
       this.procedureModel.aggregate([
-        { $match: { isDeleted: false } },
+        // ✅ RETIRER le filtre isDeleted: false pour inclure toutes les procédures
         { $group: { _id: '$destination', count: { $sum: 1 } } },
       ]),
-      this.procedureModel.countDocuments({ isDeleted: false }),
+      this.procedureModel.countDocuments(),
     ]);
 
     this.logger.debug(`Statistiques calculées - Total: ${total}`);

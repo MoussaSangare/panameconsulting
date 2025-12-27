@@ -169,7 +169,8 @@ export class ProcedureController {
     @Req() req: AuthenticatedRequest,
     @Body() cancelDto: CancelProcedureDto,
   ) {
-    this.logger.log(`Annulation procédure - ID: ${this.maskId(id)}`);
+    const maskedEmail = this.maskEmail(req.user.email);
+    this.logger.log(`Annulation procédure - ID: ${this.maskId(id)}, User: ${maskedEmail}`);
     return this.procedureService.cancelProcedure(id, req.user.email, cancelDto.reason);
   }
 

@@ -17,67 +17,67 @@ export class RefreshTokenService {
     refresh_token: string,
     expiresAt: Date,
   ): Promise<RefreshToken> {
-    this.logger.log(`Creating refresh token for user ${this.maskUserId(userId)}`);
+    // ✅ Pas besoin d'extraire - userId est déjà une string
+    this.logger.log(`🆕 Création d'un refresh token pour l'utilisateur ${this.maskUserId(userId)}`);
     
     const refreshToken = await this.refreshTokenModel.create({
-      user: userId,
+      user: userId, // ✅ userId est déjà une string id
       token: refresh_token,
       expiresAt,
       isActive: true,
     });
 
-    this.logger.log(`Refresh token created successfully for user ${this.maskUserId(userId)}`);
+    this.logger.log(`✅ Refresh token créé avec succès pour l'utilisateur ${this.maskUserId(userId)}`);
     return refreshToken;
   }
 
   async deactivateAllForUser(userId: string): Promise<void> {
-    this.logger.log(`Deactivating all refresh tokens for user ${this.maskUserId(userId)}`);
+    this.logger.log(`🔐 Désactivation de tous les refresh tokens pour l'utilisateur ${this.maskUserId(userId)}`);
     
     const result = await this.refreshTokenModel
       .updateMany(
-        { user: userId, isActive: true },
+        { user: userId, isActive: true }, // ✅ userId est déjà une string id
         { 
           isActive: false, 
           deactivatedAt: new Date(),
-          revocationReason: "user_logout_all"
+          revocationReason: "logout all"
         }
       )
       .exec();
 
-    this.logger.log(`Deactivated ${result.modifiedCount} refresh tokens for user ${this.maskUserId(userId)}`);
+    this.logger.log(`✅ ${result.modifiedCount} refresh token(s) désactivé(s) pour l'utilisateur ${this.maskUserId(userId)}`);
   }
 
-  // ✅ NOUVELLE MÉTHODE : Désactiver les refresh tokens pour plusieurs utilisateurs
   async deactivateByUserIds(userIds: string[]): Promise<{ deactivatedCount: number }> {
     if (!userIds || userIds.length === 0) {
-      this.logger.log("Aucun userId fourni pour la désactivation");
+      this.logger.log("📭 Aucun userId fourni pour la désactivation");
       return { deactivatedCount: 0 };
     }
 
-    this.logger.log(`Deactivating refresh tokens for ${userIds.length} users`);
+    this.logger.log(`🔐 Désactivation des refresh tokens pour ${userIds.length} utilisateur(s)`);
     
     const result = await this.refreshTokenModel
       .updateMany(
         { 
-          user: { $in: userIds },
+          user: { $in: userIds }, // ✅ userIds sont déjà des string id
           isActive: true 
         },
         { 
           isActive: false, 
           deactivatedAt: new Date(),
-          revocationReason: "admin_bulk_deactivate"
+          revocationReason: "admin bulk deactivate"
         }
       )
       .exec();
 
     const maskedIds = userIds.map(id => this.maskUserId(id)).join(', ');
-    this.logger.log(`Deactivated ${result.modifiedCount} refresh tokens for users: ${maskedIds}`);
+    this.logger.log(`✅ ${result.modifiedCount} refresh token(s) désactivé(s) pour les utilisateurs: ${maskedIds}`);
     
     return { deactivatedCount: result.modifiedCount };
   }
 
   async isValid(refresh_token: string): Promise<boolean> {
-    this.logger.debug(`Validating refresh token: ${this.maskToken(refresh_token)}`);
+    this.logger.debug(`🔍 Validation du refresh token: ${this.maskToken(refresh_token)}`);
     
     const doc = await this.refreshTokenModel
       .findOne({
@@ -88,13 +88,13 @@ export class RefreshTokenService {
       .exec();
 
     const isValid = !!doc;
-    this.logger.debug(`Refresh token validation result: ${isValid}`);
+    this.logger.debug(`Résultat de validation du refresh token: ${isValid ? 'VALIDE' : 'INVALIDE'}`);
     
     return isValid;
   }
 
   async deactivateByToken(refresh_token: string): Promise<void> {
-    this.logger.log(`Deactivating refresh token: ${this.maskToken(refresh_token)}`);
+    this.logger.log(`🔐 Désactivation du refresh token: ${this.maskToken(refresh_token)}`);
     
     const result = await this.refreshTokenModel
       .updateOne(
@@ -102,47 +102,64 @@ export class RefreshTokenService {
         { 
           isActive: false, 
           deactivatedAt: new Date(),
-          revocationReason: "token_refresh"
+          revocationReason: "token refresh"
         }
       )
       .exec();
 
     if (result.modifiedCount > 0) {
-      this.logger.log(`Successfully deactivated refresh token: ${this.maskToken(refresh_token)}`);
+      this.logger.log(`✅ Refresh token désactivé avec succès: ${this.maskToken(refresh_token)}`);
     } else {
-      this.logger.warn(`No refresh token found to deactivate: ${this.maskToken(refresh_token)}`);
+      this.logger.warn(`⚠️ Aucun refresh token trouvé pour désactivation: ${this.maskToken(refresh_token)}`);
     }
   }
 
   async deleteByToken(refresh_token: string): Promise<void> {
-    this.logger.log(`Deleting refresh token: ${this.maskToken(refresh_token)}`);
+    this.logger.log(`🗑️ Suppression du refresh token: ${this.maskToken(refresh_token)}`);
     
     const result = await this.refreshTokenModel.deleteOne({ token: refresh_token }).exec();
 
     if (result.deletedCount > 0) {
-      this.logger.log(`Successfully deleted refresh token: ${this.maskToken(refresh_token)}`);
+      this.logger.log(`✅ Refresh token supprimé avec succès: ${this.maskToken(refresh_token)}`);
     } else {
-      this.logger.warn(`No refresh token found to delete: ${this.maskToken(refresh_token)}`);
+      this.logger.warn(`⚠️ Aucun refresh token trouvé pour suppression: ${this.maskToken(refresh_token)}`);
     }
   }
 
   async deleteAllForUser(userId: string): Promise<void> {
-    this.logger.log(`Deleting all refresh tokens for user ${this.maskUserId(userId)}`);
+    this.logger.log(`🗑️ Suppression de tous les refresh tokens pour l'utilisateur ${this.maskUserId(userId)}`);
     
     const result = await this.refreshTokenModel.deleteMany({ user: userId }).exec();
 
-    this.logger.log(`Deleted ${result.deletedCount} refresh tokens for user ${this.maskUserId(userId)}`);
+    this.logger.log(`✅ ${result.deletedCount} refresh token(s) supprimé(s) pour l'utilisateur ${this.maskUserId(userId)}`);
   }
 
-  // ✅ Méthodes utilitaires pour le logging sécurisé
+  // ✅ Suppression de extractUserId - plus nécessaire
+  // private extractUserId(userId: any): string {
+  //   // Supprimé car nous utilisons déjà id partout
+  // }
+
   private maskUserId(userId: string): string {
-    if (!userId) return 'user_***';
-    if (userId.length <= 8) return userId;
-    return `${userId.substring(0, 4)}***${userId.substring(userId.length - 4)}`;
+    if (!userId || typeof userId !== 'string' || userId.length <= 6) {
+      return 'user_***';
+    }
+    
+    const firstPart = userId.substring(0, 3);
+    const lastPart = userId.substring(userId.length - 3);
+    const middle = '***';
+    
+    return `user_${firstPart}${middle}${lastPart}`;
   }
 
   private maskToken(token: string): string {
-    if (!token || token.length < 10) return '***';
-    return `${token.substring(0, 6)}...${token.substring(token.length - 4)}`;
+    if (!token || typeof token !== 'string' || token.length < 10) {
+      return '***';
+    }
+    
+    const firstPart = token.substring(0, 6);
+    const lastPart = token.substring(token.length - 4);
+    const middle = '...';
+    
+    return `${firstPart}${middle}${lastPart}`;
   }
 }

@@ -34,17 +34,19 @@ export class NotificationService {
     }
 
     try {
-      const sent = await this.smtpService.sendEmail({
+      const result = await this.smtpService.sendEmail({
         to,
         subject,
         html
       });
       
-      if (sent) {
+      if (result.success) {
         this.logger.log(`📧 Notification envoyée (${context})`);
+      } else {
+        this.logger.error(`❌ Échec envoi notification (${context}): ${result.error || 'Erreur inconnue'}`);
       }
       
-      return sent;
+      return result.success;
     } catch (error: any) {
       this.logger.error(`❌ Erreur "${context}": ${error.message}`);
       return false;

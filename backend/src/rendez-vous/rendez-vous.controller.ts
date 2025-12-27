@@ -30,7 +30,8 @@ const RENDEZVOUS_STATUS = {
   PENDING: 'En attente',
   CONFIRMED: 'Confirmé',
   COMPLETED: 'Terminé',
-  CANCELLED: 'Annulé'
+  CANCELLED: 'Annulé',
+  EXPIRED: 'Expiré'
 } as const;
 
 const ADMIN_OPINION = {
@@ -43,6 +44,70 @@ const ADMIN_OPINION = {
 @Controller('rendezvous')
 export class RendezvousController {
   private readonly logger = new Logger(RendezvousController.name);
+
+  // Méthode utilitaire pour masquer les données sensibles dans les logs
+  private maskSensitiveData(data: any): any {
+    if (!data) return data;
+    
+    const masked = { ...data };
+    
+    // Masquer l'email
+    if (masked.email) {
+      const [localPart, domain] = masked.email.split('@');
+      if (localPart && domain) {
+        const maskedLocal = localPart.length <= 2 
+          ? localPart.charAt(0) + '*'
+          : localPart.charAt(0) + '***' + localPart.charAt(localPart.length - 1);
+        masked.email = `${maskedLocal}@${domain}`;
+      }
+    }
+    
+    // Masquer le téléphone (garder les 4 derniers chiffres)
+    if (masked.telephone) {
+      const phoneStr = String(masked.telephone);
+      if (phoneStr.length > 4) {
+        masked.telephone = '***' + phoneStr.slice(-4);
+      } else {
+        masked.telephone = '***';
+      }
+    }
+    
+    // Masquer le prénom et nom (garder première lettre)
+    if (masked.firstName) {
+      masked.firstName = masked.firstName.length <= 1 
+        ? masked.firstName.charAt(0) + '*'
+        : masked.firstName.charAt(0) + '***';
+    }
+    
+    if (masked.lastName) {
+      masked.lastName = masked.lastName.length <= 1 
+        ? masked.lastName.charAt(0) + '*'
+        : masked.lastName.charAt(0) + '***';
+    }
+    
+    // Masquer ID partiellement
+    if (masked._id || masked.id) {
+      const idStr = String(masked._id || masked.id);
+      if (idStr.length > 8) {
+        masked._id = idStr.substring(0, 4) + '***' + idStr.slice(-4);
+        masked.id = masked._id;
+      }
+    }
+    
+    return masked;
+  }
+
+  // Méthode pour masquer un email simple
+  private maskEmail(email: string): string {
+    if (!email) return '***';
+    const [localPart, domain] = email.split('@');
+    if (!localPart || !domain) return '***';
+    
+    if (localPart.length <= 2) {
+      return `${localPart.charAt(0)}***@${domain}`;
+    }
+    return `${localPart.charAt(0)}***${localPart.charAt(localPart.length - 1)}@${domain}`;
+  }
 
   constructor(private readonly rendezvousService: RendezvousService) {}
 
@@ -81,12 +146,14 @@ export class RendezvousController {
     @Body() createDto: CreateRendezvousDto,
     @Req() req: AuthenticatedRequest
   ) {
-    this.logger.log('Création rendez-vous par utilisateur');
+    const maskedEmail = this.maskEmail(createDto.email);
+    this.logger.log(`Création rendez-vous par utilisateur: ${maskedEmail}`);
     
     const userEmail = req.user?.email;
     const isAdmin = req.user?.role === UserRole.ADMIN;
     
     if (!userEmail) {
+      this.logger.error('Email utilisateur non trouvé dans le token');
       throw new BadRequestException('Email utilisateur non trouvé dans le token');
     }
 
@@ -96,16 +163,28 @@ export class RendezvousController {
       const normalizedUserEmail = userEmail.toLowerCase().trim();
       
       if (normalizedDtoEmail !== normalizedUserEmail) {
+        const maskedDtoEmail = this.maskEmail(normalizedDtoEmail);
+        const maskedUserEmail = this.maskEmail(normalizedUserEmail);
+        this.logger.warn(`Tentative de création avec email différent: ${maskedDtoEmail} vs ${maskedUserEmail}`);
         throw new ForbiddenException('Vous ne pouvez créer un rendez-vous que pour votre propre compte');
       }
     }
 
     try {
       const result = await this.rendezvousService.create(createDto, userEmail, isAdmin);
-      this.logger.log('Rendez-vous créé avec succès');
+      
+      // Convertir le résultat en objet simple pour le masquage
+      const resultObject = result && typeof result === 'object' ? 
+        (result as any).toObject ? (result as any).toObject() : 
+        { ...result } : 
+        {};
+      
+      const maskedResult = this.maskSensitiveData(resultObject);
+      this.logger.log(`Rendez-vous créé avec succès: ${JSON.stringify(maskedResult)}`);
       return result;
     } catch (error) {
-      this.logger.error('Erreur création rendez-vous');
+      const maskedData = this.maskSensitiveData(createDto);
+      this.logger.error(`Erreur création rendez-vous: ${error.message}, Données: ${JSON.stringify(maskedData)}`);
       throw error;
     }
   }
@@ -191,21 +270,26 @@ export class RendezvousController {
     @Query('search') search?: string,
   ) {
     if (req.user?.role !== UserRole.ADMIN) {
+      this.logger.warn('Tentative d\'accès admin non autorisé');
       throw new ForbiddenException('Accès réservé aux administrateurs');
     }
     
     // Validation des paramètres
     if (page < 1) {
+      this.logger.warn(`Numéro de page invalide: ${page}`);
       throw new BadRequestException('Le numéro de page doit être supérieur à 0');
     }
     if (limit < 1 || limit > 100) {
+      this.logger.warn(`Limite invalide: ${limit}`);
       throw new BadRequestException('La limite doit être entre 1 et 100');
     }
     if (status && !Object.values(RENDEZVOUS_STATUS).includes(status as any)) {
+      this.logger.warn(`Statut invalide: ${status}`);
       throw new BadRequestException(`Statut invalide. Valeurs autorisées: ${Object.values(RENDEZVOUS_STATUS).join(', ')}`);
     }
 
-    this.logger.log('Liste rendez-vous admin');
+    const maskedSearch = search ? this.maskEmail(search) : search;
+    this.logger.log(`Liste rendez-vous admin - Page: ${page}, Limite: ${limit}, Statut: ${status}, Date: ${date}, Recherche: ${maskedSearch}`);
     
     return this.rendezvousService.findAll(page, limit, status, date, search);
   }
@@ -275,18 +359,27 @@ export class RendezvousController {
   ) {
     // Récupérer l'email de l'utilisateur depuis le token JWT
     const userEmail = req.user?.email;
+    const maskedUserEmail = this.maskEmail(userEmail || '');
     
-    this.logger.log('Recherche rendez-vous pour utilisateur');
+    this.logger.log(`Recherche rendez-vous pour utilisateur: ${maskedUserEmail}`);
     
     if (!userEmail) {
+      this.logger.error('Email utilisateur non trouvé dans le token');
       throw new BadRequestException('Email utilisateur non trouvé dans le token');
     }
   
     // Validation des paramètres
-    if (page < 1) throw new BadRequestException('Page invalide');
-    if (limit < 1 || limit > 100) throw new BadRequestException('Limite invalide');
+    if (page < 1) {
+      this.logger.warn(`Page invalide: ${page} pour utilisateur: ${maskedUserEmail}`);
+      throw new BadRequestException('Page invalide');
+    }
+    if (limit < 1 || limit > 100) {
+      this.logger.warn(`Limite invalide: ${limit} pour utilisateur: ${maskedUserEmail}`);
+      throw new BadRequestException('Limite invalide');
+    }
     
     if (status && !Object.values(RENDEZVOUS_STATUS).includes(status as any)) {
+      this.logger.warn(`Statut invalide: ${status} pour utilisateur: ${maskedUserEmail}`);
       throw new BadRequestException(`Statut invalide. Valeurs autorisées: ${Object.values(RENDEZVOUS_STATUS).join(', ')}`);
     }
 
@@ -315,16 +408,18 @@ export class RendezvousController {
   @ApiResponse({ status: 400, description: 'Date requise ou invalide' })
   async getAvailableSlots(@Query('date') date: string) {
     if (!date) {
+      this.logger.warn('Date non fournie pour la recherche de créneaux');
       throw new BadRequestException('La date est requise pour cette requête');
     }
 
     // Validation du format de date
     const dateRegex = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$/;
     if (!dateRegex.test(date)) {
+      this.logger.warn(`Format de date invalide: ${date}`);
       throw new BadRequestException('Format de date invalide (YYYY-MM-DD requis)');
     }
 
-    this.logger.log('Recherche créneaux disponibles');
+    this.logger.log(`Recherche créneaux disponibles pour la date: ${date}`);
     return this.rendezvousService.getAvailableSlots(date);
   }
 
@@ -368,26 +463,32 @@ export class RendezvousController {
   @ApiResponse({ status: 404, description: 'Rendez-vous non trouvé' })
   async findOne(@Param('id') id: string, @Req() req: AuthenticatedRequest) {
     if (!id || id.trim() === '') {
+      this.logger.warn('ID de rendez-vous non fourni');
       throw new BadRequestException('ID du rendez-vous requis');
     }
 
     if (id === 'stats') {
+      this.logger.warn('ID de rendez-vous invalide: stats');
       throw new BadRequestException('Invalid rendezvous ID');
     }
 
     const userEmail = req.user?.email;
     const isAdmin = req.user?.role === UserRole.ADMIN;
+    const maskedId = id.length > 8 ? id.substring(0, 4) + '***' + id.slice(-4) : '***';
+    const maskedUserEmail = this.maskEmail(userEmail || '');
     
     if (!isAdmin && !userEmail) {
+      this.logger.error('Email utilisateur non trouvé dans le token');
       throw new BadRequestException('Email utilisateur non trouvé dans le token');
     }
 
-    this.logger.log('Recherche rendez-vous par ID');
+    this.logger.log(`Recherche rendez-vous par ID: ${maskedId} pour utilisateur: ${maskedUserEmail}`);
 
     const rendezvous = await this.rendezvousService.findOne(id, userEmail, isAdmin);
     
     if (!rendezvous) {
-      throw new NotFoundException(`Rendez-vous avec l'ID ${id} non trouvé`);
+      this.logger.warn(`Rendez-vous non trouvé avec ID: ${maskedId}`);
+      throw new NotFoundException(`Rendez-vous avec l'ID ${maskedId} non trouvé`);
     }
 
     return rendezvous;
@@ -397,7 +498,7 @@ export class RendezvousController {
   @UseGuards(JwtAuthGuard)
   @ApiOperation({ 
     summary: 'Mettre à jour un rendez-vous',
-    description: 'Modifier les informations d\'un rendez-vous existant (compte requis)'
+    description: 'Modifier les informations d\'un rendez-vous existant (compte requis). IMPORTANT : Un rendez-vous ne peut être marqué comme "Terminé" que si sa date/heure est passée ou aujourd\'hui.'
   })
   @ApiParam({ 
     name: 'id', 
@@ -425,7 +526,10 @@ export class RendezvousController {
       }
     }
   })
-  @ApiResponse({ status: 400, description: 'Données invalides ou créneau non disponible' })
+  @ApiResponse({ 
+    status: 400, 
+    description: 'Données invalides, créneau non disponible, ou tentative de marquer un rendez-vous futur comme terminé'
+  })
   @ApiResponse({ status: 401, description: 'Non authentifié' })
   @ApiResponse({ status: 403, description: 'Non autorisé à modifier ce rendez-vous ou pas de compte' })
   @ApiResponse({ status: 404, description: 'Rendez-vous non trouvé' })
@@ -435,17 +539,31 @@ export class RendezvousController {
     @Req() req: AuthenticatedRequest,
   ) {
     if (!id || id.trim() === '') {
+      this.logger.warn('ID de rendez-vous non fourni pour la mise à jour');
       throw new BadRequestException('ID du rendez-vous requis');
     }
 
     const userEmail = req.user?.email;
     const isAdmin = req.user?.role === UserRole.ADMIN;
+    const maskedId = id.length > 8 ? id.substring(0, 4) + '***' + id.slice(-4) : '***';
+    const maskedUserEmail = this.maskEmail(userEmail || '');
+    const maskedUpdateData = this.maskSensitiveData(updateDto);
     
     if (!isAdmin && !userEmail) {
+      this.logger.error('Email utilisateur non trouvé dans le token');
       throw new BadRequestException('Email utilisateur non trouvé dans le token');
     }
 
-    this.logger.log('Modification rendez-vous');
+    // Validation supplémentaire pour le statut "Terminé" dans updateDto
+    if (updateDto.status === RENDEZVOUS_STATUS.COMPLETED) {
+      // Vérifier que l'avis admin est fourni si statut "Terminé"
+      if (!isAdmin) {
+        this.logger.warn(`Tentative non autorisée de marquer comme terminé par utilisateur: ${maskedUserEmail}`);
+        throw new ForbiddenException('Seuls les administrateurs peuvent marquer un rendez-vous comme terminé');
+      }
+    }
+
+    this.logger.log(`Modification rendez-vous ID: ${maskedId} par utilisateur: ${maskedUserEmail}, Données: ${JSON.stringify(maskedUpdateData)}`);
     
     return this.rendezvousService.update(id, updateDto, userEmail, isAdmin);
   }
@@ -455,7 +573,7 @@ export class RendezvousController {
   @Roles(UserRole.ADMIN)
   @ApiOperation({ 
     summary: 'Mettre à jour le statut d\'un rendez-vous (admin)',
-    description: 'Changer le statut d\'un rendez-vous (admin uniquement)'
+    description: 'Changer le statut d\'un rendez-vous (admin uniquement). IMPORTANT : Un rendez-vous ne peut être marqué comme "Terminé" que si sa date/heure est passée ou aujourd\'hui.'
   })
   @ApiParam({ 
     name: 'id', 
@@ -474,7 +592,10 @@ export class RendezvousController {
       }
     }
   })
-  @ApiResponse({ status: 400, description: 'Statut invalide ou avis admin manquant pour "Terminé"' })
+  @ApiResponse({ 
+    status: 400, 
+    description: 'Statut invalide, avis admin manquant pour "Terminé", ou tentative de marquer un rendez-vous futur comme terminé'
+  })
   @ApiResponse({ status: 401, description: 'Non authentifié' })
   @ApiResponse({ status: 403, description: 'Non autorisé (admin uniquement)' })
   @ApiResponse({ status: 404, description: 'Rendez-vous non trouvé' })
@@ -485,20 +606,41 @@ export class RendezvousController {
     @Body('avisAdmin') avisAdmin?: string,
   ) {
     if (!id || id.trim() === '') {
+      this.logger.warn('ID de rendez-vous non fourni pour le changement de statut');
       throw new BadRequestException('ID du rendez-vous requis');
     }
 
     if (!status || status.trim() === '') {
+      this.logger.warn('Statut non fourni pour le changement de statut');
       throw new BadRequestException('Le statut est requis');
     }
 
     if (!Object.values(RENDEZVOUS_STATUS).includes(status as any)) {
+      this.logger.warn(`Statut invalide: ${status}`);
       throw new BadRequestException(`Statut invalide. Valeurs autorisées: ${Object.values(RENDEZVOUS_STATUS).join(', ')}`);
     }
 
+    // Validation supplémentaire pour le statut "Terminé"
+    if (status === RENDEZVOUS_STATUS.COMPLETED) {
+      // L'avis admin est obligatoire pour "Terminé"
+      if (!avisAdmin || avisAdmin.trim() === '') {
+        this.logger.warn('Avis admin manquant pour le statut "Terminé"');
+        throw new BadRequestException('L\'avis admin est obligatoire pour marquer un rendez-vous comme terminé');
+      }
+      
+      // Vérifier que l'avis admin est valide
+      if (!Object.values(ADMIN_OPINION).includes(avisAdmin as any)) {
+        this.logger.warn(`Avis admin invalide: ${avisAdmin}`);
+        throw new BadRequestException(`Avis admin invalide. Valeurs autorisées: ${Object.values(ADMIN_OPINION).join(', ')}`);
+      }
+    }
+
     const userEmail = req.user?.email;
+    const maskedId = id.length > 8 ? id.substring(0, 4) + '***' + id.slice(-4) : '***';
+    const maskedUserEmail = this.maskEmail(userEmail || '');
+    const maskedAvis = avisAdmin ? '***' : 'non fourni';
     
-    this.logger.log('Changement statut rendez-vous');
+    this.logger.log(`Changement statut rendez-vous ID: ${maskedId} par admin: ${maskedUserEmail}, Statut: ${status}, Avis: ${maskedAvis}`);
     
     return this.rendezvousService.updateStatus(id, status, avisAdmin, userEmail);
   }
@@ -534,17 +676,21 @@ export class RendezvousController {
   @ApiResponse({ status: 404, description: 'Rendez-vous non trouvé' })
   async remove(@Param('id') id: string, @Req() req: AuthenticatedRequest) {
     if (!id || id.trim() === '') {
+      this.logger.warn('ID de rendez-vous non fourni pour l\'annulation');
       throw new BadRequestException('ID du rendez-vous requis');
     }
 
     const userEmail = req.user?.email;
     const isAdmin = req.user?.role === UserRole.ADMIN;
+    const maskedId = id.length > 8 ? id.substring(0, 4) + '***' + id.slice(-4) : '***';
+    const maskedUserEmail = this.maskEmail(userEmail || '');
     
     if (!isAdmin && !userEmail) {
+      this.logger.error('Email utilisateur non trouvé dans le token pour l\'annulation');
       throw new BadRequestException('Email utilisateur non trouvé dans le token');
     }
 
-    this.logger.log('Suppression rendez-vous');
+    this.logger.log(`Suppression rendez-vous ID: ${maskedId} par ${isAdmin ? 'admin' : 'utilisateur'}: ${maskedUserEmail}`);
     
     return this.rendezvousService.removeWithPolicy(id, userEmail, isAdmin);
   }
@@ -578,13 +724,88 @@ export class RendezvousController {
   @ApiResponse({ status: 404, description: 'Rendez-vous non trouvé' })
   async confirmRendezvous(@Param('id') id: string, @Req() req: AuthenticatedRequest) {
     if (!id || id.trim() === '') {
+      this.logger.warn('ID de rendez-vous non fourni pour la confirmation');
       throw new BadRequestException('ID du rendez-vous requis');
     }
 
     const userEmail = req.user?.email;
+    const maskedId = id.length > 8 ? id.substring(0, 4) + '***' + id.slice(-4) : '***';
+    const maskedUserEmail = this.maskEmail(userEmail || '');
     
-    this.logger.log('Confirmation rendez-vous');
+    this.logger.log(`Confirmation rendez-vous ID: ${maskedId} par admin: ${maskedUserEmail}`);
     
     return this.rendezvousService.confirmByUser(id, userEmail, true);
+  }
+
+  @Get(':id/check-availability')
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ 
+    summary: 'Vérifier la disponibilité en temps réel',
+    description: 'Vérifier si un créneau est disponible pour modification'
+  })
+  @ApiParam({ 
+    name: 'id', 
+    description: 'ID du rendez-vous', 
+    example: '507f1f77bcf86cd799439011' 
+  })
+  @ApiQuery({ 
+    name: 'date', 
+    required: false, 
+    type: String, 
+    description: 'Nouvelle date (format: YYYY-MM-DD)',
+    example: '2024-12-26'
+  })
+  @ApiQuery({ 
+    name: 'time', 
+    required: false, 
+    type: String, 
+    description: 'Nouvelle heure (format: HH:MM)',
+    example: '11:00'
+  })
+  @ApiResponse({ 
+    status: 200, 
+    description: 'Disponibilité vérifiée',
+    schema: {
+      example: {
+        available: true,
+        message: 'Créneau disponible'
+      }
+    }
+  })
+  async checkAvailability(
+    @Param('id') id: string,
+    @Req() req: AuthenticatedRequest,
+    @Query('date') date?: string,
+    @Query('time') time?: string,
+  ) {
+    if (!id) {
+      this.logger.warn('ID de rendez-vous non fourni pour la vérification de disponibilité');
+      throw new BadRequestException('ID du rendez-vous requis');
+    }
+
+    if (!date && !time) {
+      this.logger.warn('Date et heure non fournies pour la vérification de disponibilité');
+      throw new BadRequestException('Date ou heure requise pour la vérification');
+    }
+
+    const rdv = await this.rendezvousService.findOne(id, req.user?.email, req.user?.role === UserRole.ADMIN);
+    if (!rdv) {
+      const maskedId = id.length > 8 ? id.substring(0, 4) + '***' + id.slice(-4) : '***';
+      this.logger.warn(`Rendez-vous non trouvé pour vérification de disponibilité: ${maskedId}`);
+      throw new NotFoundException('Rendez-vous non trouvé');
+    }
+
+    const checkDate = date || rdv.date;
+    const checkTime = time || rdv.time;
+    const maskedId = id.length > 8 ? id.substring(0, 4) + '***' + id.slice(-4) : '***';
+
+    this.logger.log(`Vérification disponibilité pour rendez-vous ID: ${maskedId}, Date: ${checkDate}, Heure: ${checkTime}`);
+
+    const isAvailable = await this.rendezvousService.checkRealTimeAvailability(checkDate, checkTime, id);
+
+    return {
+      available: isAvailable,
+      message: isAvailable ? 'Créneau disponible' : 'Créneau déjà pris'
+    };
   }
 }

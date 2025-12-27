@@ -41,12 +41,17 @@ export class MailService {
       return false;
     }
 
-    return await this.smtpService.sendEmail({
+    const result = await this.smtpService.sendEmail({
       to: options.to,
       subject: options.subject,
       html: options.html,
-      replyTo: options.replyTo
+      replyTo: options.replyTo,
+      cc: options.cc,
+      bcc: options.bcc,
+      attachments: options.attachments
     });
+
+    return result.success;
   }
 
   /**

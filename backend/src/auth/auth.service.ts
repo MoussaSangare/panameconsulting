@@ -14,7 +14,8 @@ import { randomUUID } from "crypto";
 import { MailService } from "../mail/mail.service";
 import { ResetToken } from "../schemas/reset-token.schema";
 import { Session } from "../schemas/session.schema";
-import { User, UserRole } from "../schemas/user.schema";
+import { User } from "../schemas/user.schema";
+import { UserRole } from "../enums/user-role.enum";
 import { UsersService } from "../users/users.service";
 import { RegisterDto } from "./dto/register.dto";
 import { RevokedTokenService } from "./revoked-token.service";
@@ -50,29 +51,8 @@ export class AuthService {
     @InjectModel(User.name) private userModel: Model<User>,
   ) {}
 
-  private convertObjectIdToString(id: any): string {
-    if (!id) {
-      throw new Error("ID utilisateur manquant");
-    }
-
-    if (id instanceof Types.ObjectId) {
-      return id.toString();
-    }
-
-    if (typeof id === "string") {
-      if (isValidObjectId(id)) {
-        return id;
-      }
-      throw new Error(`Format ID string invalide.`);
-    }
-
-    const stringId = String(id);
-    if (isValidObjectId(stringId)) {
-      return stringId;
-    }
-
-    throw new Error(`Impossible de convertir l'ID.`);
-  }
+  // Supprimer convertObjectIdToString car nous n'utilisons plus _id
+  // Remplacé par des références directes à l'ID
 
   private getLoginAttempts(email: string): {
     attempts: number;
@@ -154,7 +134,9 @@ export class AuthService {
     }
 
     const newUser = await this.usersService.create(registerDto);
-    const userId = this.convertObjectIdToString(newUser._id);
+    // ✅ UTILISATION DE id AU LIEU DE _id
+    const userId = newUser.id;
+
     const jtiAccess = randomUUID();
     const jtiRefresh = randomUUID();
 
@@ -231,9 +213,10 @@ export class AuthService {
 }
 
   async login(user: User) {
-  const jtiAccess = randomUUID();
-const jtiRefresh = randomUUID();
-    const userId = this.convertObjectIdToString(user._id);
+    const jtiAccess = randomUUID();
+    const jtiRefresh = randomUUID();
+    // ✅ UTILISATION DE id AU LIEU DE _id
+    const userId = user.id;
 
     const accessPayload = {
       sub: userId,
@@ -318,10 +301,11 @@ const jtiRefresh = randomUUID();
         throw new UnauthorizedException("Utilisateur non trouvé");
       }
 
-      const userId = this.convertObjectIdToString(user._id);
+      // ✅ UTILISATION DE id AU LIEU DE _id
+      const userId = user.id;
 
-     const jtiAccess = randomUUID();
-const jtiRefresh = randomUUID();
+      const jtiAccess = randomUUID();
+      const jtiRefresh = randomUUID();
 
       const new_access_token = this.jwtService.sign(
         {
@@ -390,9 +374,7 @@ const jtiRefresh = randomUUID();
     }
   }
 
- 
-
-  async logoutAll(): Promise<{
+ async logoutAll(): Promise<{
   success: boolean;
   message: string;
   stats: {
@@ -423,7 +405,7 @@ const jtiRefresh = randomUUID();
         email: { $ne: adminEmail }, // EXCLURE UNIQUEMENT EMAIL_USER
         isActive: true,
       })
-      .select('_id email firstName lastName role')
+      .select('id email firstName lastName role')
       .lean()
       .exec();
 
@@ -436,7 +418,7 @@ const jtiRefresh = randomUUID();
         stats: {
           usersLoggedOut: 0,
           adminPreserved: true,
-          adminEmail: this.maskEmail(adminEmail), // ✅ MASQUÉ
+          adminEmail: this.maskEmail(adminEmail),
           duration: "24h",
           timestamp: new Date().toISOString(),
           userEmails: []
@@ -444,15 +426,14 @@ const jtiRefresh = randomUUID();
       };
     }
 
-    const userIds = activeNonAdminUsers.map(user => user._id.toString());
-    const userObjectIds = activeNonAdminUsers.map(user => user._id);
+    const userIds = activeNonAdminUsers.map(user => user.id);
     const userEmails = activeNonAdminUsers.map(user => this.maskEmail(user.email));
 
     const logoutUntilDate = new Date(Date.now() + 24 * 60 * 60 * 1000);
 
     await Promise.all([
       this.userModel.updateMany(
-        { _id: { $in: userObjectIds } },
+        { id: { $in: userIds } },
         {
           $set: {
             logoutUntil: logoutUntilDate,
@@ -472,7 +453,7 @@ const jtiRefresh = randomUUID();
 
       this.refreshTokenService.deactivateByUserIds(userIds),
 
-      this.resetTokenModel.deleteMany({ user: { $in: userObjectIds } }).exec(),
+      this.resetTokenModel.deleteMany({ user: { $in: userIds } }).exec(),
     ]);
 
     await this.usersService.clearAllCache();
@@ -488,7 +469,7 @@ const jtiRefresh = randomUUID();
       stats: {
         usersLoggedOut: activeNonAdminUsers.length,
         adminPreserved: true,
-        adminEmail: this.maskEmail(adminEmail), // ✅ MASQUÉ
+        adminEmail: this.maskEmail(adminEmail),
         duration: "24 heures",
         timestamp: new Date().toISOString(),
         userEmails,
@@ -500,7 +481,6 @@ const jtiRefresh = randomUUID();
     throw new BadRequestException(`Échec de la déconnexion globale: ${error.message}`);
   }
 }
-
 
   async revokeToken(token: string, expiresAt: Date): Promise<void> {
     try {
@@ -677,7 +657,8 @@ const jtiRefresh = randomUUID();
       return null;
     }
 
-    const userId = this.convertObjectIdToString(user._id);
+    // ✅ UTILISATION DE id AU LIEU DE _id
+    const userId = user.id;
     const accessCheck = await this.usersService.checkUserAccess(userId);
     
     if (!accessCheck.canAccess) {
@@ -751,10 +732,11 @@ const jtiRefresh = randomUUID();
         throw new NotFoundException("Utilisateur non trouvé");
       }
 
-      const userId = this.convertObjectIdToString(user._id);
+      // ✅ UTILISATION DE id AU LIEU DE convertObjectIdToString
+      const userId = user.id;
       await this.usersService.resetPassword(userId, newPassword);
 
-      await this.resetTokenModel.deleteOne({ _id: resetToken._id });
+      await this.resetTokenModel.deleteOne({ id: resetToken.id });
       this.logger.log(`Mot de passe réinitialisé pour ${this.maskEmail(user.email)}`);
     } catch (error) {
       this.logger.error(`Erreur de réinitialisation: ${error.message}`);
@@ -811,12 +793,12 @@ const jtiRefresh = randomUUID();
       );
 
       await this.resetTokenModel.deleteMany({
-        user: user._id,
+        user: user.id,
       });
 
       await this.resetTokenModel.create({
         token: resetToken,
-        user: user._id,
+        user: user.id,
         expiresAt,
       });
 

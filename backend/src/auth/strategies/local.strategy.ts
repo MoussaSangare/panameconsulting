@@ -1,4 +1,3 @@
-// local.strategy.ts - CORRIGÉ
 import { Strategy } from "passport-local";
 import { PassportStrategy } from "@nestjs/passport";
 import { Injectable, UnauthorizedException, Logger } from "@nestjs/common";
@@ -18,47 +17,50 @@ export class LocalStrategy extends PassportStrategy(Strategy) {
 
   async validate(email: string, password: string): Promise<any> {
     try {
-      this.logger.log(`Attempting local authentication for email: ${this.maskEmail(email)}`);
+      this.logger.log(`Tentative d'authentification locale pour l'email: ${this.maskEmail(email)}`);
 
-      // ✅ Normaliser l'email
       const normalizedEmail = email.toLowerCase().trim();
       
-      // ✅ Appeler validateUser qui peut lancer des exceptions spécifiques
       const user = await this.authService.validateUser(normalizedEmail, password);
 
       if (!user) {
-        // ✅ C'est le cas où validateUser retourne null (credentials invalides)
-        this.logger.warn(`Invalid credentials for: ${this.maskEmail(email)}`);
+        this.logger.warn(`Identifiants invalides pour: ${this.maskEmail(email)}`);
         throw new UnauthorizedException({
           message: "Email ou mot de passe incorrect",
           code: "INVALID_CREDENTIALS"
         });
       }
 
-      this.logger.log(`Local authentication successful for user: ${this.maskEmail(email)}`);
-      return user;
+      // 🔍 Extraction de l'ID utilisateur (doit être présent dans l'objet user)
+      const userId = this.extractUserId(user);
+      
+      if (!userId) {
+        this.logger.error(`❌ Objet utilisateur sans ID pour l'email: ${this.maskEmail(email)}`, user);
+        throw new UnauthorizedException("Erreur interne: impossible d'extraire l'ID utilisateur");
+      }
+
+      // ✅ Retourner l'utilisateur avec l'ID correct
+      return {
+        ...user,
+        id: userId // 🔥 Seulement 'id', pas de '_id'
+      };
 
     } catch (error) {
-      // ✅ PROPAGER DIRECTEMENT si c'est déjà une UnauthorizedException
       if (error instanceof UnauthorizedException) {
-        // ✅ Distinguer les différents types d'erreurs
         const errorMessage = error.message;
         
-        // ✅ PASSWORD_RESET_REQUIRED est un cas spécial, pas une erreur d'authentification
         if (errorMessage === AuthConstants.ERROR_MESSAGES.PASSWORD_RESET_REQUIRED) {
-          this.logger.log(`Password reset required for user: ${this.maskEmail(email)}`);
-          // ⚠️ IMPORTANT : Lancer une nouvelle exception avec plus de contexte
+          this.logger.log(`Réinitialisation du mot de passe requise pour l'utilisateur: ${this.maskEmail(email)}`);
           throw new UnauthorizedException({
             message: "Un mot de passe doit être défini pour ce compte",
             code: AuthConstants.ERROR_MESSAGES.PASSWORD_RESET_REQUIRED,
             requiresPasswordReset: true,
-            email: email // On peut envoyer l'email pour faciliter la récupération
+            email: email
           });
         }
         
-        // ✅ Les autres erreurs spécifiques
         if (errorMessage === AuthConstants.ERROR_MESSAGES.COMPTE_DESACTIVE) {
-          this.logger.warn(`Account disabled for: ${this.maskEmail(email)}`);
+          this.logger.warn(`Compte désactivé pour: ${this.maskEmail(email)}`);
           throw new UnauthorizedException({
             message: "Votre compte a été désactivé",
             code: AuthConstants.ERROR_MESSAGES.COMPTE_DESACTIVE,
@@ -67,7 +69,7 @@ export class LocalStrategy extends PassportStrategy(Strategy) {
         }
         
         if (errorMessage === AuthConstants.ERROR_MESSAGES.COMPTE_TEMPORAIREMENT_DECONNECTE) {
-          this.logger.warn(`Account temporarily disconnected for: ${this.maskEmail(email)}`);
+          this.logger.warn(`Compte temporairement déconnecté pour: ${this.maskEmail(email)}`);
           throw new UnauthorizedException({
             message: "Votre compte est temporairement déconnecté",
             code: AuthConstants.ERROR_MESSAGES.COMPTE_TEMPORAIREMENT_DECONNECTE,
@@ -76,20 +78,18 @@ export class LocalStrategy extends PassportStrategy(Strategy) {
         }
         
         if (errorMessage === AuthConstants.ERROR_MESSAGES.MAINTENANCE_MODE) {
-          this.logger.warn(`Maintenance mode for: ${this.maskEmail(email)}`);
+          this.logger.warn(`Mode maintenance pour: ${this.maskEmail(email)}`);
           throw new UnauthorizedException({
             message: "Système en maintenance",
             code: AuthConstants.ERROR_MESSAGES.MAINTENANCE_MODE
           });
         }
         
-        // ✅ Pour les autres UnauthorizedException, propager telles quelles
-        this.logger.warn(`Authentication error for ${this.maskEmail(email)}: ${errorMessage}`);
+        this.logger.warn(`Erreur d'authentification pour ${this.maskEmail(email)}: ${errorMessage}`);
         throw error;
       }
 
-      // ✅ Pour les autres erreurs, logger et retourner une erreur générique
-      this.logger.error(`LocalStrategy unexpected error for ${this.maskEmail(email)}: ${error.message}`, error.stack);
+      this.logger.error(`Erreur inattendue LocalStrategy pour ${this.maskEmail(email)}: ${(error as Error).message}`, (error as Error).stack);
       throw new UnauthorizedException({
         message: "Email ou mot de passe incorrect",
         code: "AUTH_ERROR"
@@ -97,8 +97,37 @@ export class LocalStrategy extends PassportStrategy(Strategy) {
     }
   }
 
+  // 🔧 Méthode pour extraire l'ID utilisateur - utilise uniquement 'id'
+  private extractUserId(user: any): string | null {
+    if (!user) {
+      this.logger.warn("Objet utilisateur null ou undefined");
+      return null;
+    }
+    
+    // 1. Vérifier si 'id' existe et est une string
+    if (user.id && typeof user.id === 'string') {
+      return user.id;
+    }
+    
+    // 2. Vérifier si 'id' existe mais n'est pas une string (le convertir)
+    if (user.id && user.id.toString && typeof user.id.toString === 'function') {
+      return user.id.toString();
+    }
+    
+    // 3. Vérifier si 'userId' existe (comme alternative)
+    if (user.userId && typeof user.userId === 'string') {
+      return user.userId;
+    }
+    
+    // 4. Si aucun ID n'est trouvé, c'est une erreur de structure
+    this.logger.error(`Structure d'utilisateur invalide - champs disponibles: ${Object.keys(user).join(', ')}`);
+    return null;
+  }
+
+  //  Méthode pour masquer l'email dans les logs
   private maskEmail(email: string): string {
     if (!email) return '***@***';
+    
     const [name, domain] = email.split('@');
     if (!name || !domain) return '***@***';
     

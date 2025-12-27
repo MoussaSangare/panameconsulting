@@ -24,6 +24,25 @@ const EDUCATION_LEVELS = [
   'Doctorat'
 ] as const;
 
+const DESTINATIONS = [
+  'France',
+  'Canada',
+  'Belgique',
+  'Suisse',
+  'États-Unis',
+  'Autre'
+] as const;
+
+const FILIERES = [
+  'Informatique',
+  'Médecine',
+  'Droit',
+  'Commerce',
+  'Ingénierie',
+  'Architecture',
+  'Autre'
+] as const;
+
 export class CreateRendezvousDto {
   @ApiProperty({ example: 'Jean', description: 'Prénom du client' })
   @IsNotEmpty({ message: 'Le prénom est obligatoire' })
@@ -55,12 +74,11 @@ export class CreateRendezvousDto {
   @ApiProperty({
     example: 'France',
     description: 'Destination souhaitée',
+    enum: DESTINATIONS,
   })
   @IsNotEmpty({ message: 'La destination est obligatoire' })
   @IsString({ message: 'La destination doit être une chaîne de caractères' })
-  @MaxLength(100, {
-    message: 'La destination ne peut pas dépasser 100 caractères',
-  })
+  @IsEnum(DESTINATIONS, { message: 'Destination invalide' })
   destination: string;
 
   @ApiProperty({
@@ -92,10 +110,11 @@ export class CreateRendezvousDto {
   @ApiProperty({
     example: 'Informatique',
     description: 'Filière souhaitée',
+    enum: FILIERES,
   })
   @IsNotEmpty({ message: 'La filière est obligatoire' })
   @IsString({ message: 'La filière doit être une chaîne de caractères' })
-  @MaxLength(100, { message: 'La filière ne peut pas dépasser 100 caractères' })
+  @IsEnum(FILIERES, { message: 'Filière invalide' })
   filiere: string;
 
   @ApiProperty({
