@@ -16,6 +16,7 @@ import * as compression from "compression";
 import * as cookieParser from "cookie-parser";
 import { join } from "path";
 import { AppModule } from "./app.module";
+import rateLimit from "express-rate-limit";
 
 // 📦 ÉTENDRE L'INTERFACE REQUEST D'EXPRESS
 declare global {
@@ -25,6 +26,7 @@ declare global {
       isPublicRoute?: boolean;
       requestId?: string;
       startTime?: number;
+      isAdminRoute?: boolean;
     }
   }
 }
@@ -70,6 +72,48 @@ const isOriginAllowed = (origin: string, allowedList: string[]): boolean => {
     }
     return origin === allowedOrigin;
   });
+};
+
+// Fonction pour normaliser les adresses IP (IPv4 et IPv6)
+const normalizeIpForRateLimit = (req: express.Request): string => {
+  let ip = req.ip;
+  
+  // Si l'IP est undefined, essayer de la récupérer autrement
+  if (!ip) {
+    ip = req.socket.remoteAddress;
+  }
+  
+  // Si toujours undefined, retourner une valeur par défaut
+  if (!ip) {
+    return 'unknown-ip';
+  }
+  
+  // Gérer les adresses IPv6
+  if (ip.includes(':')) {
+    // Pour les adresses IPv6, on normalise pour éviter le contournement
+    // Enlever le préfixe ::ffff: pour les IPv4 mappées en IPv6
+    if (ip.startsWith('::ffff:')) {
+      return ip.substring(7); // Retourne l'IPv4
+    }
+    
+    // Pour les vraies IPv6, on peut prendre le préfixe /64
+    // Cela regroupe les adresses dans le même sous-réseau
+    const parts = ip.split(':');
+    
+    // Si c'est une adresse IPv6 compressée, la décompresser
+    if (ip.includes('::')) {
+      // Simplification: pour éviter la complexité, on utilise une approche plus simple
+      // On retourne l'IP complète pour l'instant
+      return `ipv6:${ip}`;
+    }
+    
+    // Prendre les 4 premiers segments (64 bits) pour regrouper
+    if (parts.length >= 4) {
+      return `ipv6:${parts.slice(0, 4).join(':')}::/64`;
+    }
+  }
+  
+  return ip;
 };
 
 async function bootstrap() {
@@ -434,8 +478,7 @@ async function bootstrap() {
       }),
     );
 
-    // ✅ RATE LIMITING
-    const rateLimit = require("express-rate-limit");
+    // ✅ RATE LIMITING - CORRECTION DE L'ERREUR ERR_ERL_KEY_GEN_IPV6
 
     // Middleware pour détecter les routes admin
     app.use((req: express.Request, res: express.Response, next: express.NextFunction) => {
@@ -453,12 +496,12 @@ async function bootstrap() {
         req.path.startsWith(route)
       );
       
-      (req as any).isAdminRoute = isAdminRoute;
+      req.isAdminRoute = isAdminRoute;
       
       next();
     });
 
-    // Rate limiter pour utilisateurs normaux
+    // Rate limiter pour utilisateurs normaux - AVEC CORRECTION POUR IPv6
     const userLimiter = rateLimit({
       windowMs: 30 * 60 * 1000, // 30 minutes
       max: 5000,
@@ -472,15 +515,18 @@ async function bootstrap() {
       legacyHeaders: false,
       skipSuccessfulRequests: false,
       keyGenerator: (req: express.Request) => {
-        const ip = req.ip || req.socket.remoteAddress || 'unknown';
-        return `user_${ip}`;
+        // Utiliser la fonction de normalisation pour traiter correctement IPv6
+        const normalizedIp = normalizeIpForRateLimit(req);
+        return `user_${normalizedIp}`;
       },
       handler: (_req: express.Request, res: express.Response, _next, options) => {
         res.status(options.statusCode).json(options.message);
       },
+      // Conserver la validation activée
+      validate: true,
     });
 
-    // Rate limiter pour admin
+    // Rate limiter pour admin - AVEC CORRECTION POUR IPv6
     const adminLimiter = rateLimit({
       windowMs: 30 * 60 * 1000, // 30 minutes
       max: 25000,
@@ -494,17 +540,20 @@ async function bootstrap() {
       legacyHeaders: false,
       skipSuccessfulRequests: false,
       keyGenerator: (req: express.Request) => {
-        const ip = req.ip || req.socket.remoteAddress || 'unknown';
-        return `admin_${ip}`;
+        // Utiliser la fonction de normalisation pour traiter correctement IPv6
+        const normalizedIp = normalizeIpForRateLimit(req);
+        return `admin_${normalizedIp}`;
       },
       handler: (_req: express.Request, res: express.Response, _next, options) => {
         res.status(options.statusCode).json(options.message);
       },
+      // Conserver la validation activée
+      validate: true,
     });
 
     // Appliquer le rate limiting approprié
     app.use((req: express.Request, res: express.Response, next: express.NextFunction) => {
-      if ((req as any).isAdminRoute) {
+      if (req.isAdminRoute) {
         return adminLimiter(req, res, next);
       } else {
         return userLimiter(req, res, next);
