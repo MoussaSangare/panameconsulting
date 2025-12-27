@@ -44,9 +44,11 @@ export class SmtpService implements OnModuleDestroy {
   private cleanupTimer?: NodeJS.Timeout;
 
   constructor(private readonly configService: ConfigService) {
-    this.initialize().catch(error => {
-      this.logger.error(`Erreur d'initialisation SMTP: ${error.message}`);
-    });
+    setTimeout(() => {
+      this.initialize().catch(error => {
+        this.logger.error(`Erreur d'initialisation SMTP: ${error.message}`);
+      });
+    }, 5000);
     
     this.cleanupTimer = setInterval(() => this.cleanupOldTimestamps(), this.cleanupInterval);
   }
