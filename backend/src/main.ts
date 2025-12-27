@@ -16,7 +16,7 @@ import * as compression from "compression";
 import * as cookieParser from "cookie-parser";
 import { join } from "path";
 import { AppModule } from "./app.module";
-import rateLimit from "express-rate-limit";
+import {rateLimit }from "express-rate-limit";
 
 // 📦 ÉTENDRE L'INTERFACE REQUEST D'EXPRESS
 declare global {
@@ -249,7 +249,7 @@ async function bootstrap() {
         // Autoriser les requêtes sans origine pour les webhooks et certaines API
         if (!origin) {
           // Vérifier si c'est une route publique
-          const publicRoutes = ['/health', '/api', '/webhooks'];
+          const publicRoutes = ['/', '/api', '/webhooks'];
           const currentReq = (app as any).httpAdapter?.getInstance()?.request;
           const requestPath = currentReq?.originalUrl || '';
           
