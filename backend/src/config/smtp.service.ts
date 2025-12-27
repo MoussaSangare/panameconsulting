@@ -1,7 +1,7 @@
-import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import nodemailer = require('nodemailer');
-import SMTPTransport =require( "nodemailer/lib/smtp-transport");
+import * as nodemailer from 'nodemailer';
+import * as SMTPTransport from 'nodemailer/lib/smtp-transport';
 
 export interface EmailOptions {
   to: string | string[];
@@ -30,7 +30,7 @@ export interface SmtpStatus {
 }
 
 @Injectable()
-export class SmtpService implements OnModuleDestroy {
+export class SmtpService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(SmtpService.name);
   private transporter!: nodemailer.Transporter<SMTPTransport.SentMessageInfo>;
   private isAvailable: boolean = false;
@@ -42,14 +42,12 @@ export class SmtpService implements OnModuleDestroy {
   private emailSentTimestamps: Date[] = [];
   private readonly cleanupInterval: number = 24 * 60 * 60 * 1000;
   private cleanupTimer?: NodeJS.Timeout;
+  private isInitializing: boolean = false;
 
-  constructor(private readonly configService: ConfigService) {
-    setTimeout(() => {
-      this.initialize().catch(error => {
-        this.logger.error(`Erreur d'initialisation SMTP: ${error.message}`);
-      });
-    }, 5000);
-    
+  constructor(private readonly configService: ConfigService) {}
+
+  async onModuleInit(): Promise<void> {
+    await this.initialize();
     this.cleanupTimer = setInterval(() => this.cleanupOldTimestamps(), this.cleanupInterval);
   }
 
@@ -61,13 +59,23 @@ export class SmtpService implements OnModuleDestroy {
   }
 
   private async initialize(): Promise<void> {
+    if (this.isInitializing) {
+      return;
+    }
+
+    this.isInitializing = true;
+    
     const emailUser = this.configService.get<string>('EMAIL_USER') || process.env.EMAIL_USER;
     const emailPass = this.configService.get<string>('EMAIL_PASS') || process.env.EMAIL_PASS;
     const nodeEnv = (this.configService.get<string>('NODE_ENV') || process.env.NODE_ENV || 'production').toLowerCase();
 
     if (!emailUser || !emailPass) {
       this.logger.error('EMAIL_USER ou EMAIL_PASS manquant pour SMTP');
+      this.logger.error('Vérifiez vos variables d\'environnement :');
+      this.logger.error('EMAIL_USER=' + emailUser);
+      this.logger.error('EMAIL_PASS=' + (emailPass ? '***' : 'undefined'));
       this.isAvailable = false;
+      this.isInitializing = false;
       return;
     }
 
@@ -76,15 +84,18 @@ export class SmtpService implements OnModuleDestroy {
     try {
       this.logger.log(`Configuration SMTP Gmail pour ${nodeEnv.toUpperCase()}...`);
       
+      // Configuration principale avec connexion plus rapide
       const transporterConfig: SMTPTransport.Options = {
-        service: 'gmail',
+        host: 'smtp.gmail.com',
+        port: 465,
+        secure: true,
         auth: {
           user: emailUser,
           pass: emailPass,
         },
-        connectionTimeout: 15000,
-        greetingTimeout: 10000,
-        socketTimeout: 30000,
+        connectionTimeout: 10000,
+        greetingTimeout: 5000,
+        socketTimeout: 15000,
         requireTLS: true,
         tls: {
           rejectUnauthorized: false,
@@ -94,58 +105,122 @@ export class SmtpService implements OnModuleDestroy {
 
       this.transporter = nodemailer.createTransport(transporterConfig);
 
+      // Vérification de la connexion
       await this.transporter.verify();
       this.isAvailable = true;
       
-      this.logger.log('Service SMTP Gmail opérationnel (Production)');
-      this.logger.log(`Expéditeur: ${this.maskEmail(emailUser)}`);
+      this.logger.log('✅ Service SMTP Gmail opérationnel (Production)');
+      this.logger.log(`📧 Expéditeur: ${this.maskEmail(emailUser)}`);
       
     } catch (error: any) {
-      this.logger.error(`Erreur initialisation SMTP: ${error.message}`);
+      this.logger.error(`❌ Erreur initialisation SMTP: ${error.message}`);
       
-      if (error.code === 'ECONNREFUSED') {
-        this.logger.warn('Tentative avec port alternatif (587)...');
-        await this.initializeWithFallback(emailUser, emailPass);
-      } else {
-        this.isAvailable = false;
-      }
+      // Tentative avec port alternatif
+      await this.initializeWithFallback(emailUser, emailPass);
+    } finally {
+      this.isInitializing = false;
     }
   }
 
   private async initializeWithFallback(emailUser: string, emailPass: string): Promise<void> {
     try {
+      this.logger.warn('🔄 Tentative avec port alternatif 587 (STARTTLS)...');
+      
       const transporterConfig: SMTPTransport.Options = {
-        service: 'gmail',
+        host: 'smtp.gmail.com',
+        port: 587,
+        secure: false, // STARTTLS
         requireTLS: true,
         auth: {
           user: emailUser,
           pass: emailPass,
         },
-        connectionTimeout: 10000,
-        socketTimeout: 20000,
+        connectionTimeout: 8000,
+        greetingTimeout: 5000,
+        socketTimeout: 15000,
+        tls: {
+          rejectUnauthorized: false,
+          ciphers: 'SSLv3'
+        }
       };
 
       this.transporter = nodemailer.createTransport(transporterConfig);
 
       await this.transporter.verify();
       this.isAvailable = true;
-      this.logger.log('Service SMTP Gmail opérationnel via port 587 (STARTTLS)');
+      this.logger.log('✅ Service SMTP Gmail opérationnel via port 587 (STARTTLS)');
       
     } catch (fallbackError: any) {
-      this.logger.error(`Echec configuration alternative: ${fallbackError.message}`);
-      this.isAvailable = false;
+      this.logger.error(`❌ Échec configuration alternative: ${fallbackError.message}`);
+      
+      // Dernière tentative avec des paramètres très simples
+      await this.initializeSimplified(emailUser, emailPass);
     }
   }
 
+  private async initializeSimplified(emailUser: string, emailPass: string): Promise<void> {
+    try {
+      this.logger.warn('🔄 Tentative avec configuration simplifiée...');
+      
+      this.transporter = nodemailer.createTransport({
+        service: 'gmail',
+        auth: {
+          user: emailUser,
+          pass: emailPass
+        }
+      });
+
+      await this.transporter.verify();
+      this.isAvailable = true;
+      this.logger.log('✅ Service SMTP Gmail opérationnel (configuration simplifiée)');
+      
+    } catch (simpleError: any) {
+      this.logger.error(`❌ Échec configuration simplifiée: ${simpleError.message}`);
+      this.isAvailable = false;
+      
+      // Afficher les conseils de dépannage
+      this.displayTroubleshootingTips(emailUser);
+    }
+  }
+
+  private displayTroubleshootingTips(emailUser: string): void {
+    this.logger.error('🔧 CONSEILS DE DÉPANNAGEMENT SMTP GMAIL:');
+    this.logger.error('1. Vérifiez votre mot de passe d\'application Google:');
+    this.logger.error('   - Allez sur https://myaccount.google.com/security');
+    this.logger.error('   - Activez la "Validation en 2 étapes" si ce n\'est pas fait');
+    this.logger.error('   - Générez un "Mot de passe d\'application"');
+    this.logger.error('   - Utilisez ce mot de passe comme EMAIL_PASS');
+    this.logger.error('');
+    this.logger.error('2. Vérifiez les accès SMTP dans votre compte Google:');
+    this.logger.error('   - https://myaccount.google.com/lesssecureapps (obsolète)');
+    this.logger.error('   - Utilisez plutôt les mots de passe d\'application');
+    this.logger.error('');
+    this.logger.error('3. Vérifiez votre connexion réseau:');
+    this.logger.error('   - Testez la connexion: telnet smtp.gmail.com 465');
+    this.logger.error('   - Désactivez temporairement le pare-feu/antivirus');
+    this.logger.error('');
+    this.logger.error(`4. Email utilisé: ${this.maskEmail(emailUser)}`);
+  }
+
   async initManually(): Promise<void> {
-    this.logger.log('Initialisation manuelle du service SMTP...');
+    this.logger.log('🔄 Initialisation manuelle du service SMTP...');
     await this.initialize();
   }
 
   async sendEmail(options: EmailOptions): Promise<{ success: boolean; messageId?: string; error?: string }> {
-    if (!this.isAvailable || !this.transporter) {
-      const message = 'Email ignoré - service SMTP indisponible';
-      this.logger.warn(message);
+    if (!this.isAvailable) {
+      await this.initialize();
+      
+      if (!this.isAvailable) {
+        const message = 'Email ignoré - service SMTP indisponible';
+        this.logger.warn(message);
+        return { success: false, error: message };
+      }
+    }
+
+    if (!this.transporter) {
+      const message = 'Transporter SMTP non initialisé';
+      this.logger.error(message);
       return { success: false, error: message };
     }
 
@@ -154,8 +229,6 @@ export class SmtpService implements OnModuleDestroy {
       this.logger.warn(message);
       return { success: false, error: message };
     }
-
-    await this.rateLimit();
 
     let lastError: any;
     
@@ -187,7 +260,7 @@ export class SmtpService implements OnModuleDestroy {
         
         this.emailSentTimestamps.push(new Date());
         
-        this.logger.log(`Email envoyé (tentative ${attempt}/${this.retryAttempts}) à: ${this.maskRecipient(options.to)}`);
+        this.logger.log(`✅ Email envoyé (tentative ${attempt}/${this.retryAttempts}) à: ${this.maskRecipient(options.to)}`);
         this.logger.debug(`Message ID: ${info.messageId}`);
         
         return { 
@@ -202,13 +275,13 @@ export class SmtpService implements OnModuleDestroy {
         
         if (attempt < this.retryAttempts) {
           const delay = this.retryDelay * Math.pow(2, attempt - 1);
-          this.logger.warn(`Nouvelle tentative dans ${delay}ms...`);
+          this.logger.warn(`⏱️ Nouvelle tentative dans ${delay}ms...`);
           await new Promise(resolve => setTimeout(resolve, delay));
         }
       }
     }
 
-    this.logger.error(`Echec après ${this.retryAttempts} tentatives pour: ${options.subject}`);
+    this.logger.error(`❌ Échec après ${this.retryAttempts} tentatives pour: ${options.subject}`);
     
     return {
       success: false,
@@ -220,38 +293,15 @@ export class SmtpService implements OnModuleDestroy {
     const errorCode = error.code || 'UNKNOWN';
     const errorMessage = error.message || 'Erreur inconnue';
     
-    switch (errorCode) {
-      case 'EAUTH':
-        this.logger.error(`Erreur auth (tentative ${attempt}): Vérifiez EMAIL_USER/EMAIL_PASS`);
-        break;
-      case 'EENVELOPE':
-        this.logger.error(`Erreur enveloppe (tentative ${attempt}): ${errorMessage}`);
-        break;
-      case 'EMESSAGE':
-        this.logger.error(`Erreur message (tentative ${attempt}): ${errorMessage}`);
-        break;
-      case 'ECONNECTION':
-        this.logger.error(`Erreur connexion (tentative ${attempt}): ${errorMessage}`);
-        break;
-      case 'ETIMEDOUT':
-        this.logger.error(`Timeout (tentative ${attempt}): ${errorMessage}`);
-        break;
-      case 'ESOCKET':
-        this.logger.error(`Erreur socket (tentative ${attempt}): ${errorMessage}`);
-        break;
-      default:
-        this.logger.error(`Erreur SMTP ${errorCode} (tentative ${attempt}): ${errorMessage}`);
+    this.logger.error(`❌ Erreur SMTP ${errorCode} (tentative ${attempt}): ${errorMessage}`);
+    
+    if (error.responseCode) {
+      this.logger.error(`Code réponse SMTP: ${error.responseCode} - ${error.response}`);
     }
     
-    if (error.responseCode && error.responseCode >= 400) {
-      this.logger.error(`Code réponse SMTP: ${error.responseCode}`);
+    if (errorCode === 'EAUTH') {
+      this.logger.error('Conseil: Générez un nouveau mot de passe d\'application Google');
     }
-  }
-
-  private async rateLimit(): Promise<void> {
-    const emailsPerSecond = 0.1;
-    const delay = Math.floor(1000 / emailsPerSecond);
-    await new Promise(resolve => setTimeout(resolve, delay));
   }
 
   private canSendEmail(): boolean {
@@ -263,7 +313,7 @@ export class SmtpService implements OnModuleDestroy {
     );
     
     if (this.emailSentTimestamps.length >= this.maxEmailsPerDay) {
-      this.logger.warn(`Limite quotidienne atteinte: ${this.emailSentTimestamps.length}/${this.maxEmailsPerDay} emails`);
+      this.logger.warn(`⚠️ Limite quotidienne atteinte: ${this.emailSentTimestamps.length}/${this.maxEmailsPerDay} emails`);
       return false;
     }
     
@@ -281,7 +331,7 @@ export class SmtpService implements OnModuleDestroy {
     const after = this.emailSentTimestamps.length;
     
     if (before !== after) {
-      this.logger.debug(`Nettoyage timestamps: ${before - after} anciennes entrées supprimées`);
+      this.logger.debug(`🧹 Nettoyage timestamps: ${before - after} anciennes entrées supprimées`);
     }
   }
 
@@ -324,7 +374,7 @@ export class SmtpService implements OnModuleDestroy {
     return {
       available: this.isAvailable,
       message: this.isAvailable 
-        ? 'SMTP Gmail operationnel'
+        ? 'SMTP Gmail opérationnel'
         : 'Service SMTP indisponible',
       host: options?.host || 'N/A',
       port: options?.port || 0,
@@ -335,7 +385,7 @@ export class SmtpService implements OnModuleDestroy {
 
   async testConnection(): Promise<{ success: boolean; message: string }> {
     try {
-      if (!this.transporter) {
+      if (!this.isAvailable) {
         await this.initialize();
       }
       
@@ -345,40 +395,46 @@ export class SmtpService implements OnModuleDestroy {
         
         return {
           success: true,
-          message: `SMTP Gmail operationnel\n` +
-                  `Expéditeur: ${this.maskEmail(this.fromEmail)}\n` +
-                  `Hôte: ${options.host}:${options.port}\n` +
-                  `Securite: ${options.secure ? 'SSL/TLS' : 'STARTTLS'}\n` +
-                  `Emails aujourd'hui: ${this.emailSentTimestamps.length}/${this.maxEmailsPerDay}`
+          message: `✅ SMTP Gmail opérationnel\n` +
+                  `📧 Expéditeur: ${this.maskEmail(this.fromEmail)}\n` +
+                  `🌐 Hôte: ${options.host || 'smtp.gmail.com'}:${options.port || 465}\n` +
+                  `🔒 Sécurité: ${options.secure ? 'SSL/TLS' : 'STARTTLS'}\n` +
+                  `📊 Emails aujourd'hui: ${this.emailSentTimestamps.length}/${this.maxEmailsPerDay}`
         };
       }
       
       return {
         success: false,
-        message: 'Service SMTP indisponible. Vérifiez:\n' +
-                '1. EMAIL_USER et EMAIL_PASS sont définis\n' +
-                '2. Le mot de passe d\'application Google est valide\n' +
-                '3. L\'accès SMTP est autorisé dans votre compte Google'
+        message: '❌ Service SMTP indisponible. Vérifiez:\n' +
+                '1. ✅ EMAIL_USER et EMAIL_PASS sont définis\n' +
+                '2. 🔑 Le mot de passe d\'application Google est valide\n' +
+                '3. 🔓 L\'accès SMTP est autorisé dans votre compte Google\n' +
+                '4. 🌐 Votre connexion internet fonctionne'
       };
     } catch (error: any) {
       return {
         success: false,
-        message: `Erreur de test SMTP: ${error.message}\n` +
-                `Code: ${error.code || 'N/A'}\n` +
-                `Conseil: ${this.getErrorAdvice(error)}`
+        message: `❌ Erreur de test SMTP: ${error.message}\n` +
+                `📝 Code: ${error.code || 'N/A'}\n` +
+                `💡 Conseil: ${this.getErrorAdvice(error)}`
       };
     }
   }
 
   private getErrorAdvice(error: any): string {
-    if (error.code === 'EAUTH') {
+    const code = error.code;
+    
+    if (code === 'EAUTH') {
       return 'Générez un nouveau mot de passe d\'application sur https://myaccount.google.com/apppasswords';
     }
-    if (error.code === 'ECONNECTION') {
-      return 'Vérifiez votre connexion internet et les pare-feux';
+    if (code === 'ECONNECTION' || code === 'ECONNREFUSED') {
+      return 'Vérifiez votre connexion internet et les pare-feux. Testez: telnet smtp.gmail.com 465';
     }
-    if (error.code === 'ETIMEDOUT') {
-      return 'Le serveur SMTP ne répond pas. Essayez le port 587 comme alternative';
+    if (code === 'ETIMEDOUT') {
+      return 'Timeout de connexion. Vérifiez votre réseau ou utilisez le port 587';
+    }
+    if (code === 'ESOCKET') {
+      return 'Erreur socket. Vérifiez les paramètres réseau et antivirus';
     }
     return 'Consultez les logs pour plus de détails';
   }
@@ -408,10 +464,10 @@ export class SmtpService implements OnModuleDestroy {
   async close(): Promise<void> {
     if (this.transporter) {
       try {
-        await this.transporter.close();
-        this.logger.log('Connexions SMTP fermées proprement');
+        this.transporter.close();
+        this.logger.log('🔌 Connexions SMTP fermées');
       } catch (error: any) {
-        this.logger.warn(`Erreur lors de la fermeture SMTP: ${error.message}`);
+        this.logger.warn(`⚠️ Erreur lors de la fermeture SMTP: ${error.message}`);
       }
     }
   }
