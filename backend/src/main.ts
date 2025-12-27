@@ -21,6 +21,11 @@ import * as cookieParser from "cookie-parser";
 import { join } from "path";
 import { AppModule } from "./app.module";
 import { rateLimit } from "express-rate-limit";
+import * as crypto from 'crypto';
+
+if (!global.crypto) {
+  global.crypto = crypto as any;
+}
 
 declare global {
   namespace Express {
@@ -87,6 +92,7 @@ async function bootstrap() {
     AppModule,
     new ExpressAdapter(server),
   );
+
 
   const logger = new Logger('Bootstrap');
 
