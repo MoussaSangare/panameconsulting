@@ -15,10 +15,6 @@ export class MailService {
     this.frontendUrl = this.configService.get<string>('FRONTEND_URL') || 'https://panameconsulting.vercel.app';
   }
 
-  async initManually(): Promise<void> {
-    await this.smtpService.initManually();
-  }
-
   /**
    * Envoi d'email générique
    */
@@ -37,7 +33,7 @@ export class MailService {
     }>;
   }): Promise<boolean> {
     if (!this.smtpService.isServiceAvailable()) {
-      this.logger.warn('📧 Envoi ignoré - service indisponible');
+      this.logger.warn('   Envoi ignoré - service indisponible');
       return false;
     }
 
@@ -46,8 +42,6 @@ export class MailService {
       subject: options.subject,
       html: options.html,
       replyTo: options.replyTo,
-      cc: options.cc,
-      bcc: options.bcc,
       attachments: options.attachments
     });
 
@@ -292,7 +286,7 @@ export class MailService {
             
             <div class="welcome-box">
               <p style="margin: 0 0 15px 0; font-size: 18px; font-weight: 600; color: #0369a1;">
-                🎉 Votre compte a été créé avec succès
+                 Votre compte a été créé avec succès
               </p>
               <p style="margin: 0; font-size: 15px;">
                 Vous pouvez maintenant accéder à toutes les fonctionnalités de votre espace personnel.
@@ -301,27 +295,18 @@ export class MailService {
 
             <div class="features">
               <div class="feature">
-                <div class="feature-icon">✓</div>
                 <div>
                   <strong>Prendre rendez-vous</strong> avec nos conseillers experts
                 </div>
               </div>
               <div class="feature">
-                <div class="feature-icon">✓</div>
                 <div>
                   <strong>Suivre votre procédure</strong> étape par étape
                 </div>
               </div>
               <div class="feature">
-                <div class="feature-icon">✓</div>
                 <div>
                   <strong>Recevoir des notifications</strong> sur l'avancement de votre dossier
-                </div>
-              </div>
-              <div class="feature">
-                <div class="feature-icon">✓</div>
-                <div>
-                  <strong>Gérer vos documents</strong> en toute sécurité
                 </div>
               </div>
             </div>
@@ -337,7 +322,7 @@ export class MailService {
               <p style="margin-top: 15px;">
                 Pour toute question, n'hésitez pas à nous contacter à l'adresse :<br>
                 <a href="mailto:support@panameconsulting.com" style="color: #0ea5e9; text-decoration: none;">
-                  support@panameconsulting.com
+                 panameconsulting906@gmail.com
                 </a>
               </p>
             </div>
@@ -607,19 +592,5 @@ export class MailService {
       subject: `[ALERTE] ${subject}`,
       html,
     });
-  }
-
-  /**
-   * Vérifie si le service est disponible
-   */
-  getStatus(): { available: boolean; message: string } {
-    return this.smtpService.getStatus();
-  }
-
-  /**
-   * Teste la connexion
-   */
-  async testConnection(): Promise<{ success: boolean; message: string }> {
-    return await this.smtpService.testConnection();
   }
 }
