@@ -216,6 +216,76 @@ function Header(): React.JSX.Element {
     return user.email || '';
   };
 
+  // Menu admin simplifié - seulement Tableau de bord
+  const adminMenuItems = [
+    {
+      name: 'Tableau de bord',
+      path: '/gestionnaire/statistiques',
+      icon: <LayoutDashboard className='w-4 h-4' />,
+      visible: user?.role === 'admin' || user?.isAdmin === true,
+    },
+    {
+      name: 'Mon Profil',
+      path: '/gestionnaire/profil',
+      icon: <UserIcon className='w-4 h-4' />,
+      visible: true,
+    },
+    {
+      name: 'Déconnexion',
+      action: handleLogout,
+      icon: isLoggingOut ? (
+        <div className='w-4 h-4 border-2 border-gray-700 border-t-transparent rounded-full animate-spin'></div>
+      ) : (
+        <LogOut className='w-4 h-4' />
+      ),
+      visible: true,
+      disabled: isLoggingOut,
+    },
+  ];
+
+  // Menu utilisateur normal
+  const normalUserMenuItems = [
+    {
+      name: 'Ma Procédure',
+      path: '/ma-procedure',
+      icon: <FileText className='w-4 h-4' />,
+      visible: true,
+    },
+    {
+      name: 'Mes Rendez-Vous',
+      path: '/mes-rendez-vous',
+      icon: <Calendar className='w-4 h-4' />,
+      visible: true,
+    },
+    {
+      name: 'Mon Profil',
+      path: '/mon-profil',
+      icon: <UserIcon className='w-4 h-4' />,
+      visible: true,
+    },
+    {
+      name: 'Déconnexion',
+      action: handleLogout,
+      icon: isLoggingOut ? (
+        <div className='w-4 h-4 border-2 border-gray-700 border-t-transparent rounded-full animate-spin'></div>
+      ) : (
+        <LogOut className='w-4 h-4' />
+      ),
+      visible: true,
+      disabled: isLoggingOut,
+    },
+  ];
+
+  // Sélection du menu selon le rôle
+  const getMenuItems = () => {
+    if (user?.role === 'admin' || user?.isAdmin === true) {
+      return adminMenuItems;
+    }
+    return normalUserMenuItems;
+  };
+
+  const currentMenuItems = getMenuItems();
+
   return (
     <header role='banner' className='fixed top-0 z-50 w-full font-sans '>
       {/* Top Bar - Desktop seulement */}
@@ -315,7 +385,7 @@ function Header(): React.JSX.Element {
                 ))}
               </ul>
 
-              {/* DÉLÉGATION COMPLÈTE AU AUTHCONTEXT - Desktop */}
+              {/* Avatar seulement visible lorsque connecté */}
               {isAuthenticated && user ? (
                 <div className='relative ml-2 md:ml-4' ref={dropdownRef}>
                   <button
@@ -356,7 +426,7 @@ function Header(): React.JSX.Element {
 
                       {/* Liens utilisateur */}
                       <div className='py-2'>
-                        {userMenuItems
+                        {currentMenuItems
                           .filter(item => item.visible)
                           .map((item, index) =>
                             item.path ? (
@@ -368,11 +438,11 @@ function Header(): React.JSX.Element {
                                 disabled={item.disabled}
                                 aria-disabled={item.disabled}
                               >
-                                <span className='flex-shrink-0 text-gray-400'>
+                                <span className='shrink-0 text-gray-400'>
                                   {item.icon}
                                 </span>
                                 <span className='ml-3 truncate'>{item.name}</span>
-                                {item.section === 'admin' && (
+                                {user?.role === 'admin' && item.name === 'Tableau de bord' && (
                                   <span className='ml-auto text-xs text-sky-500 font-semibold'>
                                     ADMIN
                                   </span>
@@ -389,7 +459,7 @@ function Header(): React.JSX.Element {
                                 disabled={item.disabled}
                                 aria-disabled={item.disabled}
                               >
-                                <span className='flex-shrink-0'>
+                                <span className='shrink-0'>
                                   {item.icon}
                                 </span>
                                 <span className='ml-3 truncate'>{item.name}</span>
@@ -425,7 +495,7 @@ function Header(): React.JSX.Element {
               )}
             </div>
 
-            {/* Bouton hamburger mobile - SEUL BOUTON DE FERMETURE */}
+            {/* Bouton hamburger mobile */}
             <button
               ref={hamburgerRef}
               className='lg:hidden p-2 rounded-lg hover:bg-gray-100 transition-all duration-200'
@@ -443,7 +513,7 @@ function Header(): React.JSX.Element {
             </button>
           </div>
 
-          {/* MOBILE MENU - DESIGN MOBILE FIRST */}
+          {/* MOBILE MENU */}
           {nav && (
             <div
               id='mobile-menu'
@@ -457,13 +527,16 @@ function Header(): React.JSX.Element {
                 aria-label='Navigation mobile'
                 onClick={(e) => e.stopPropagation()}
               >
-                {/* En-tête mobile - SIMPLIFIÉ (sans double bouton) */}
+                {/* En-tête mobile */}
                 <div className='sticky top-0 bg-white border-b z-10'>
                   <div className='px-4 py-3 flex items-center justify-between bg-gray-50'>
                     <div className='flex items-center'>
-                      <div className='flex items-center justify-center w-10 h-10 rounded-full bg-sky-500 text-white font-bold mr-3'>
-                        {isAuthenticated ? getUserInitials() : <UserIcon className='w-5 h-5' />}
-                      </div>
+                      {/* Avatar mobile seulement si connecté */}
+                      {isAuthenticated && (
+                        <div className='flex items-center justify-center w-10 h-10 rounded-full bg-sky-500 text-white font-bold mr-3'>
+                          {getUserInitials()}
+                        </div>
+                      )}
                       <div>
                         {isAuthenticated ? (
                           <>
@@ -473,21 +546,25 @@ function Header(): React.JSX.Element {
                             <p className='text-xs text-gray-500 truncate'>
                               {user?.email}
                             </p>
+                            {user?.role === 'admin' && (
+                              <span className='inline-flex items-center px-2 py-0.5 mt-1 rounded text-xs font-medium bg-sky-100 text-sky-800'>
+                                Administrateur
+                              </span>
+                            )}
                           </>
                         ) : (
                           <p className='text-sm font-bold text-gray-800'>
-                            {/* TEXTE RETIRÉ - Plus de "Paname Consulting" */}
+                            Menu Paname Consulting
                           </p>
                         )}
                       </div>
                     </div>
-                    {/* SUPPRIMÉ: Le bouton de fermeture en double */}
                   </div>
                 </div>
 
-                {/* CONTENU DU MENU MOBILE - Mobile First */}
+                {/* CONTENU DU MENU MOBILE */}
                 <div className='p-4 space-y-6'>
-                  {/* SECTION 1: LIENS AUTHENTIFIÉS (si connecté) - PRIORITÉ HAUTE */}
+                  {/* SECTION 1: LIENS AUTHENTIFIÉS (si connecté) */}
                   {isAuthenticated && (
                     <div className='space-y-2'>
                       <div className='flex items-center justify-between px-2 mb-2'>
@@ -498,8 +575,8 @@ function Header(): React.JSX.Element {
                           Connecté
                         </span>
                       </div>
-                      {userMenuItems
-                        .filter(item => item.visible && item.section !== 'logout')
+                      {currentMenuItems
+                        .filter(item => item.name !== 'Déconnexion')
                         .map((item, index) => (
                           <div key={index}>
                             {item.path ? (
@@ -510,11 +587,11 @@ function Header(): React.JSX.Element {
                                 disabled={item.disabled}
                                 aria-disabled={item.disabled}
                               >
-                                <span className='flex-shrink-0 text-sky-500'>
+                                <span className='shrink-0 text-sky-500'>
                                   {item.icon}
                                 </span>
                                 <span className='ml-3 flex-1 text-left font-semibold'>{item.name}</span>
-                                {item.section === 'admin' && (
+                                {user?.role === 'admin' && item.name === 'Tableau de bord' && (
                                   <span className='ml-2 text-xs font-bold text-white bg-sky-500 px-2 py-0.5 rounded'>
                                     ADMIN
                                   </span>
@@ -550,7 +627,7 @@ function Header(): React.JSX.Element {
                                 : 'text-gray-600 hover:bg-gray-50 hover:text-sky-500'
                             }`}
                           >
-                            <span className={`flex-shrink-0 ${
+                            <span className={`shrink-0 ${
                               location.pathname === item.path ? 'text-sky-500' : 'text-gray-400'
                             }`}>
                               {item.icon}

@@ -4,6 +4,20 @@
 .env.*
 !.env.example
 
+
+*.tar
+*.tar.gz
+paname-project.tar
+
+# Docker volumes/data
+backend-uploads/
+backend-logs/
+mongo-data/
+node_modules/
+dist/
+build/
+
+
 # Backend
 backend/node_modules/
 backend/dist/
