@@ -37,10 +37,13 @@ services:
     
     # Serveurs DNS pour la résolution de noms
     dns:
-      - 1.1.1.1
       - 8.8.8.8
+      - 1.1.1.1
       - 8.8.4.4
-
+      - 9.9.9.9
+    # Ajoutez si vous êtes derrière un proxy
+    extra_hosts:
+      - "smtp.gmail.com:142.250.74.109" 
     
     # Réseau
     networks:
