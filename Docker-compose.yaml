@@ -28,7 +28,7 @@ services:
       - EMAIL_HOST=${EMAIL_HOST}
       - EMAIL_USER=${EMAIL_USER}
       - EMAIL_PASS=${EMAIL_PASS}
-      - MONGODB_URI=mongodb://mongodb:27017/panameconsulting
+      - MONGODB_URI=${MONGODB_URI}
       # Modifié: FRONTEND_URL pointe maintenant vers le frontend interne
       - FRONTEND_URL=http://frontend:80
     
