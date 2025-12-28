@@ -18,9 +18,6 @@ export class NotificationService {
     this.frontendUrl = this.configService.get<string>('FRONTEND_URL') || 'https://panameconsulting.vercel.app';
   }
 
-  async initManually(): Promise<void> {
-    await this.smtpService.initManually();
-  }
 
   private async sendEmail(
     to: string, 
@@ -29,7 +26,7 @@ export class NotificationService {
     context: string
   ): Promise<boolean> {
     if (!this.smtpService.isServiceAvailable()) {
-      this.logger.warn(`📧 "${context}" ignorée - service indisponible`);
+      this.logger.warn(`"${context}" ignorée - service indisponible`);
       return false;
     }
 
@@ -41,14 +38,14 @@ export class NotificationService {
       });
       
       if (result.success) {
-        this.logger.log(`📧 Notification envoyée (${context})`);
+        this.logger.log(`Notification envoyée (${context})`);
       } else {
-        this.logger.error(`❌ Échec envoi notification (${context}): ${result.error || 'Erreur inconnue'}`);
+        this.logger.error(`Échec envoi notification (${context}): ${result.error || 'Erreur inconnue'}`);
       }
       
       return result.success;
     } catch (error: any) {
-      this.logger.error(`❌ Erreur "${context}": ${error.message}`);
+      this.logger.error(`Erreur "${context}": ${error.message}`);
       return false;
     }
   }

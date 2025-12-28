@@ -1,7 +1,6 @@
-import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as nodemailer from 'nodemailer';
-import * as SMTPTransport from 'nodemailer/lib/smtp-transport';
 
 export interface EmailOptions {
   to: string | string[];
@@ -31,12 +30,6 @@ export interface SmtpStatus {
 
 @Injectable()
 export class SmtpService {
-  isServiceAvailable() {
-    if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
-      return false;
-    }
-    return true;
-  }
   private transporter: nodemailer.Transporter;
   private logger = new Logger('SMTP');
 
@@ -48,10 +41,9 @@ export class SmtpService {
       port: parseInt(process.env.EMAIL_PORT || '587'),
       secure: process.env.EMAIL_PORT === '465',
       auth: {
-        user: process.env.EMAIL_USER || 'panameconsulting906@gmail.com' || this.configService.get<string>('EMAIL_USER') || 'moussa.sangare.ma@gmail.com',
-        pass: process.env.EMAIL_PASS  || this.configService.get<string>('EMAIL_PASS'),
+        user: process.env.EMAIL_USER || this.configService.get<string>('EMAIL_USER') || 'panameconsulting906@gmail.com',
+        pass: process.env.EMAIL_PASS || this.configService.get<string>('EMAIL_PASS'),
       },
-      // Options critiques pour Docker
       tls: {
         rejectUnauthorized: false
       },
@@ -59,18 +51,73 @@ export class SmtpService {
     });
   }
 
-  async sendEmail(to: string, subject: string, html: string): Promise<boolean> {
+  isServiceAvailable(): boolean {
+    const emailUser = process.env.EMAIL_USER || this.configService.get<string>('EMAIL_USER');
+    const emailPass = process.env.EMAIL_PASS || this.configService.get<string>('EMAIL_PASS');
+    
+    if (!emailUser || !emailPass) {
+      return false;
+    }
+    return true;
+  }
+
+  // Fix: Accept EmailOptions object instead of separate parameters
+  async sendEmail(options: EmailOptions): Promise<{ success: boolean; error?: string }> {
     try {
       await this.transporter.sendMail({
-        from: `Paname Consulting <${process.env.EMAIL_USER}>`,
-        to,
-        subject,
-        html,
+        from: `Paname Consulting <${process.env.EMAIL_USER || this.configService.get<string>('EMAIL_USER')}>`,
+        to: options.to,
+        subject: options.subject,
+        html: options.html,
+        text: options.text,
+        replyTo: options.replyTo,
+        cc: options.cc,
+        bcc: options.bcc,
+        attachments: options.attachments,
+        priority: options.priority,
       });
-      return true;
-    } catch (error) {
+      return { success: true };
+    } catch (error: any) {
       this.logger.error(`Erreur email: ${error.message}`);
-      return false;
+      return { success: false, error: error.message };
+    }
+  }
+
+  // Add missing method
+  getStatus(): SmtpStatus {
+    const emailUser = process.env.EMAIL_USER || this.configService.get<string>('EMAIL_USER');
+    
+    return {
+      available: this.isServiceAvailable(),
+      message: this.isServiceAvailable() ? 'Service disponible' : 'Service non configuré',
+      host: process.env.EMAIL_HOST || 'smtp.gmail.com',
+      port: parseInt(process.env.EMAIL_PORT || '587'),
+      secure: process.env.EMAIL_PORT === '465',
+      fromEmail: emailUser || 'Non configuré'
+    };
+  }
+
+  // Add missing method
+  async testConnection(): Promise<{ success: boolean; message: string }> {
+    try {
+      const isAvailable = this.isServiceAvailable();
+      if (!isAvailable) {
+        return {
+          success: false,
+          message: 'Service non configuré (EMAIL_USER ou EMAIL_PASS manquant)'
+        };
+      }
+
+      await this.transporter.verify();
+      return {
+        success: true,
+        message: 'Connexion SMTP réussie'
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        message: `Erreur de connexion SMTP: ${error.message}`
+      };
     }
   }
 }

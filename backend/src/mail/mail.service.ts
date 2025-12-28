@@ -18,7 +18,7 @@ export class MailService {
   /**
    * Envoi d'email générique
    */
-  async sendEmail(options: {
+    async sendEmail(options: {
     to: string;
     subject: string;
     html: string;
@@ -33,7 +33,7 @@ export class MailService {
     }>;
   }): Promise<boolean> {
     if (!this.smtpService.isServiceAvailable()) {
-      this.logger.warn('   Envoi ignoré - service indisponible');
+      this.logger.warn('Envoi ignoré - service indisponible');
       return false;
     }
 
@@ -42,12 +42,13 @@ export class MailService {
       subject: options.subject,
       html: options.html,
       replyTo: options.replyTo,
-      attachments: options.attachments
+      attachments: options.attachments,
+      cc: options.cc,
+      bcc: options.bcc
     });
 
     return result.success;
   }
-
   /**
    * Email de réinitialisation de mot de passe
    */
