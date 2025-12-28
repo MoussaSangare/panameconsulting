@@ -90,8 +90,8 @@ export class SmtpService implements OnModuleInit, OnModuleDestroy {
         port: 465,
         secure: true,
         auth: {
-          user: emailUser,
-          pass: emailPass,
+          user: this.configService.get<string>('EMAIL_USER') || process.env.EMAIL_USER || emailUser,
+          pass: this.configService.get<string>('EMAIL_PASS') || process.env.EMAIL_PASS || emailPass,
         },
         connectionTimeout: 10000,
         greetingTimeout: 5000,
@@ -132,8 +132,8 @@ export class SmtpService implements OnModuleInit, OnModuleDestroy {
         secure: false, // STARTTLS
         requireTLS: true,
         auth: {
-          user: emailUser,
-          pass: emailPass,
+          user: this.configService.get<string>('EMAIL_USER') || process.env.EMAIL_USER || emailUser,
+          pass: this.configService.get<string>('EMAIL_PASS') || process.env.EMAIL_PASS || emailPass,
         },
         connectionTimeout: 8000,
         greetingTimeout: 5000,
