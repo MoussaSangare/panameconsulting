@@ -89,7 +89,7 @@ class ProcedureApiService {
   ): Promise<PaginatedUserProcedures> {
     try {
       const response = await fetchWithAuth(
-        `/api/procedures/user?page=${page}&limit=${limit}`
+        `/procedures/user?page=${page}&limit=${limit}`
       );
 
       if (!response.ok) {
@@ -137,7 +137,7 @@ class ProcedureApiService {
     }
 
     try {
-      const response = await fetchWithAuth(`/api/procedures/${procedureId}`);
+      const response = await fetchWithAuth(`/procedures/${procedureId}`);
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
@@ -178,7 +178,7 @@ class ProcedureApiService {
 
     try {
       const response = await fetchWithAuth(
-        `/api/procedures/${procedureId}/cancel`,
+        `/procedures/${procedureId}/cancel`,
         {
           method: 'PUT',
           body: JSON.stringify({ reason } as CancelProcedureDto),

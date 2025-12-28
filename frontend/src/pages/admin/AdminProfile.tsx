@@ -105,7 +105,7 @@ const AdminProfile: React.FC = () => {
 
       // Use a more robust fetch implementation
       const response = await globalThis.fetch(
-        `${VITE_API_URL}/api/auth/update-password`,
+        `${VITE_API_URL}/auth/update-password`,
         {
           method: 'POST',
           headers: {

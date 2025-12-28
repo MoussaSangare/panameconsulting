@@ -154,7 +154,7 @@ export const useContactService = () => {
         if (search) params.append('search', search.trim());
 
         return await secureFetch(
-          `/api/contact?${params}`,
+          `/contact?${params}`,
           {
             method: 'GET',
           },
@@ -180,7 +180,7 @@ export const useContactService = () => {
 
     try {
       return await secureFetch(
-        '/api/contact/stats',
+        '/contact/stats',
         {
           method: 'GET',
         },
@@ -205,7 +205,7 @@ export const useContactService = () => {
 
       try {
         return await secureFetch(
-          `/api/contact/${id}`,
+          `/contact/${id}`,
           {
             method: 'GET',
           },
@@ -232,7 +232,7 @@ export const useContactService = () => {
 
       try {
         const result = await secureFetch(
-          `/api/contact/${id}/read`,
+          `/contact/${id}/read`,
           {
             method: 'PATCH',
           },
@@ -266,7 +266,7 @@ export const useContactService = () => {
 
       try {
         const result = await secureFetch(
-          `/api/contact/${id}/reply`,
+          `/contact/${id}/reply`,
           {
             method: 'POST',
             body: JSON.stringify({ reply: reply.trim() }),
@@ -297,7 +297,7 @@ export const useContactService = () => {
 
       try {
         await secureFetch(
-          `/api/contact/${id}`,
+          `/contact/${id}`,
           {
             method: 'DELETE',
           },
@@ -326,7 +326,7 @@ export const useContactService = () => {
 
       try {
         const result = await secureFetch(
-          '/api/contact',
+          '/contact',
           {
             method: 'POST',
             body: JSON.stringify(contactData),

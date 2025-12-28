@@ -58,8 +58,6 @@ const navTabs = [
 export const UserHeader = ({ 
   title, 
   subtitle, 
-  pageTitle, 
-  description, 
   isLoading = false, 
   onRefresh,
   children 

@@ -43,7 +43,7 @@ class DestinationService {
   private baseUrl: string;
 
   constructor() {
-    this.baseUrl = `${API_URL}/api/destinations`;
+    this.baseUrl = `${API_URL}/destinations`;
   }
 
   /**
@@ -372,7 +372,7 @@ class DestinationService {
   async getStatistics(): Promise<Statistics> {
     try {
       // Pour l'instant, on utilise la liste complète pour calculer les stats
-      // Vous pourriez ajouter un endpoint spécifique /api/destinations/stats dans le backend
+      // Vous pourriez ajouter un endpoint spécifique /destinations/stats dans le backend
       const destinations = await this.getAllDestinationsWithoutPagination();
 
       const uniqueCountries = new Set(

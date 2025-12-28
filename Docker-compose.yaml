@@ -1,0 +1,137 @@
+services:
+  # ============ BACKEND NESTJS ============
+  backend:
+    container_name: panameconsulting-backend
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      args:
+        NODE_ENV: production
+    
+    image: panameconsulting-backend:latest
+    
+    # Ports exposés - IMPORTANT: On expose uniquement sur le réseau interne
+    # Plus d'exposition directe sur localhost:10000
+    ports:
+      - "10000"  # Exposé uniquement sur le réseau Docker, pas sur l'hôte
+    
+    env_file:
+      - ./backend/.env
+    
+    environment:
+      - NODE_ENV=production
+      - PORT=10000
+      - MONGODB_SERVER_SELECTION_TIMEOUT=30000
+      - MONGODB_SOCKET_TIMEOUT=45000
+      - TZ=Europe/Paris
+      - JWT_SECRET=${JWT_SECRET}
+      - EMAIL_HOST=${EMAIL_HOST}
+      - EMAIL_USER=${EMAIL_USER}
+      - EMAIL_PASS=${EMAIL_PASS}
+      - MONGODB_URI=mongodb://mongodb:27017/panameconsulting
+      # Modifié: FRONTEND_URL pointe maintenant vers le frontend interne
+      - FRONTEND_URL=http://frontend:80
+    
+    # Politique de redémarrage automatique
+    restart: unless-stopped
+    
+    # Serveurs DNS pour la résolution de noms
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
+      - 8.8.4.4
+
+    
+    # Réseau
+    networks:
+      - paname-network
+    
+    # Volumes pour la persistance
+    volumes:
+      - backend-uploads:/app/uploads
+      - backend-logs:/app/logs
+      - backend-node_modules:/app/node_modules
+
+
+
+  # ============ MONGODB ============
+  mongodb:
+    container_name: panameconsulting-mongodb
+    image: mongo:latest
+    restart: unless-stopped
+    ports:
+      - "27017:27017"  # Exposé pour Compass
+    # ENLEVEZ les variables d'environnement d'authentification
+    # environment:
+    #   - MONGO_INITDB_ROOT_USERNAME=${MONGO_ROOT_USERNAME}
+    #   - MONGO_INITDB_ROOT_PASSWORD=${MONGO_ROOT_PASSWORD}
+    volumes:
+      - mongo-data:/data/db
+    networks:
+      - paname-network
+    # ENLEVEZ --auth de la commande
+    command: mongod --bind_ip_all
+    # OU simplement ne mettez pas de commande
+    
+    
+
+  # ============ FRONTEND REACT/VITE ============
+  frontend:
+    container_name: panameconsulting-frontend
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        # IMPORTANT: URL API relative pour same-site
+        VITE_API_URL: /api
+    
+    image: panameconsulting-frontend:latest
+    
+    # Ports exposés - Seul le frontend est exposé sur l'hôte
+    ports:
+      - "3000:80"  # Tout passe par localhost:3000
+    
+    # Réseau
+    networks:
+      - paname-network
+    
+    # Dépend du backend
+    depends_on:
+      - backend
+    
+    # Politique de redémarrage
+    restart: unless-stopped
+    
+    # Variables d'environnement pour le runtime
+    environment:
+      # Plus besoin de VITE_API_URL ici, déjà défini dans le build args
+      - NODE_ENV=production
+            
+    # Health check pour s'assurer que Nginx démarre correctement
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:80"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+# ============ VOLUMES ============
+volumes:
+  backend-uploads:
+    driver: local
+  backend-logs:
+    driver: local
+  backend-node_modules:
+    driver: local
+  frontend-build:
+    driver: local
+  mongo-data:
+    driver: local
+
+# ============ RÉSEAUX ============
+networks:
+  paname-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16

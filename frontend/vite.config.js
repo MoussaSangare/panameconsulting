@@ -13,7 +13,7 @@ export default defineConfig(({ mode }) => ({
         target: 'http://localhost:10000',
         changeOrigin: true,
         secure: false,
-        rewrite: (path) => path.replace(/^\/api/, ''),
+        rewrite: (path) => path 
       },
       '/auth': {
         target: 'http://localhost:10000',

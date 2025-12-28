@@ -134,7 +134,7 @@ const Form = () => {
       const controller = new AbortController();
       const timeoutId = globalThis.setTimeout(() => controller.abort(), 10000); // Timeout de 10s
 
-      const response = await globalThis.fetch(`${API_URL}/api/contact`, {
+      const response = await globalThis.fetch(`${API_URL}/contact`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

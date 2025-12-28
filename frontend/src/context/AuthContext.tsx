@@ -189,14 +189,14 @@ const TOAST_MESSAGES = {
 const API_CONFIG = {
   BASE_URL: import.meta.env.VITE_API_URL,
   ENDPOINTS: {
-    LOGIN: '/api/auth/login',
-    REGISTER: '/api/auth/register',
-    LOGOUT: '/api/auth/logout',
-    LOGOUT_ALL: '/api/auth/logout-all',
-    REFRESH: '/api/auth/refresh',
-    FORGOT_PASSWORD: '/api/auth/forgot-password',
-    RESET_PASSWORD: '/api/auth/reset-password',
-    ME: '/api/auth/me',
+    LOGIN: '/auth/login',
+    REGISTER: '/auth/register',
+    LOGOUT: '/auth/logout',
+    LOGOUT_ALL: '/auth/logout-all',
+    REFRESH: '/auth/refresh',
+    FORGOT_PASSWORD: '/auth/forgot-password',
+    RESET_PASSWORD: '/auth/reset-password',
+    ME: '/auth/me',
   } as const,
 } as const;
 

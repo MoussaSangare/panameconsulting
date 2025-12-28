@@ -80,7 +80,7 @@ class AdminDashboardService {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 10000);
 
-    const url = `${this.baseUrl}/api${endpoint}`;
+    const url = `${this.baseUrl}/${endpoint}`;
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${accessToken}`,

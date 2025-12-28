@@ -137,7 +137,7 @@ export class UserRendezvousService {
           urlParams.append('status', params.status);
         }
 
-        const endpoint = `/api/rendezvous/user?${urlParams.toString()}`;
+        const endpoint = `/rendezvous/user?${urlParams.toString()}`;
         
         if (import.meta.env.DEV) {
           console.log('📤 Envoi requête rendez-vous...');
@@ -196,7 +196,7 @@ export class UserRendezvousService {
     return this.addToQueue(async () => {
       try {
         const response = await this.auth.fetchWithAuth(
-          `/api/rendezvous/${rdvId}`,
+          `/rendezvous/${rdvId}`,
           { method: 'DELETE' }
         );
 

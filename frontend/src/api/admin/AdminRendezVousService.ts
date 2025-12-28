@@ -406,7 +406,7 @@ export class AdminRendezVousService {
       try {
         const queryParams: FilterParams = { page, limit, ...filters };
         const queryString = this.buildQueryString(queryParams);
-        const response = await this.rateLimitedFetch(`/api/rendezvous${queryString}`);
+        const response = await this.rateLimitedFetch(`/rendezvous${queryString}`);
         
         const data = await this.handleResponse<RendezvousListResponse>(
           response,
@@ -476,7 +476,7 @@ export class AdminRendezVousService {
           }
         }
 
-        const response = await this.rateLimitedFetch('/api/rendezvous', {
+        const response = await this.rateLimitedFetch('/rendezvous', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -514,7 +514,7 @@ export class AdminRendezVousService {
         if (status) queryParams.status = status;
         
         const queryString = this.buildQueryString(queryParams);
-        const response = await this.rateLimitedFetch(`/api/rendezvous/user${queryString}`);
+        const response = await this.rateLimitedFetch(`/rendezvous/user${queryString}`);
         
         const data = await this.handleResponse<RendezvousListResponse>(
           response,
@@ -539,7 +539,7 @@ export class AdminRendezVousService {
       }
 
       try {
-        const response = await this.rateLimitedFetch(`/api/rendezvous/${id}`);
+        const response = await this.rateLimitedFetch(`/rendezvous/${id}`);
         
         const data = await this.handleResponse<Rendezvous>(
           response,
@@ -636,7 +636,7 @@ export class AdminRendezVousService {
           }
         }
 
-        const response = await this.rateLimitedFetch(`/api/rendezvous/${id}`, {
+        const response = await this.rateLimitedFetch(`/rendezvous/${id}`, {
           method: 'PUT',
           headers: {
             'Content-Type': 'application/json',
@@ -689,7 +689,7 @@ export class AdminRendezVousService {
           body.avisAdmin = avisAdmin;
         }
 
-        const response = await this.rateLimitedFetch(`/api/rendezvous/${id}/status`, {
+        const response = await this.rateLimitedFetch(`/rendezvous/${id}/status`, {
           method: 'PUT',
           headers: {
             'Content-Type': 'application/json',
@@ -730,7 +730,7 @@ export class AdminRendezVousService {
       }
 
       try {
-        const response = await this.rateLimitedFetch(`/api/rendezvous/${id}`, {
+        const response = await this.rateLimitedFetch(`/rendezvous/${id}`, {
           method: 'DELETE',
           headers: {
             'Content-Type': 'application/json',
@@ -766,7 +766,7 @@ export class AdminRendezVousService {
       }
 
       try {
-        const response = await this.rateLimitedFetch(`/api/rendezvous/${id}/confirm`, {
+        const response = await this.rateLimitedFetch(`/rendezvous/${id}/confirm`, {
           method: 'PUT',
           headers: {
             'Content-Type': 'application/json',
@@ -811,7 +811,7 @@ export class AdminRendezVousService {
 
       try {
         const response = await this.rateLimitedFetch(
-          `/api/rendezvous/available-slots?date=${encodeURIComponent(date)}`
+          `/rendezvous/available-slots?date=${encodeURIComponent(date)}`
         );
 
         const data = await this.handleResponse<string[]>(
@@ -833,7 +833,7 @@ export class AdminRendezVousService {
   async fetchAvailableDates(): Promise<string[]> {
     return this.queueRequest(async () => {
       try {
-        const response = await this.rateLimitedFetch('/api/rendezvous/available-dates');
+        const response = await this.rateLimitedFetch('/rendezvous/available-dates');
         
         const data = await this.handleResponse<string[]>(
           response,

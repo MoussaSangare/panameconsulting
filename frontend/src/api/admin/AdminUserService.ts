@@ -120,7 +120,7 @@ class AdminUserService {
     if (!isBrowser) return false;
 
     // Utiliser l'endpoint de refresh comme dans AuthContext
-    const response = await fetch(`${this.baseURL}/api/auth/refresh`, {
+    const response = await fetch(`${this.baseURL}/auth/refresh`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -152,7 +152,7 @@ class AdminUserService {
   // === MÉTHODES ADMIN UNIQUEMENT ===
 
   async getAllUsers(): Promise<User[]> {
-    const response = await this.makeAuthenticatedRequest('/api/users');
+    const response = await this.makeAuthenticatedRequest('/users');
 
     if (!response.ok) {
       if (response.status === 403) {
@@ -171,7 +171,7 @@ class AdminUserService {
   }
 
   async getUserStats(): Promise<UserStats> {
-    const response = await this.makeAuthenticatedRequest('/api/users/stats');
+    const response = await this.makeAuthenticatedRequest('/users/stats');
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
@@ -184,7 +184,7 @@ class AdminUserService {
   }
 
   async createUser(userData: CreateUserDto): Promise<User> {
-    const response = await this.makeAuthenticatedRequest('/api/users', {
+    const response = await this.makeAuthenticatedRequest('/users', {
       method: 'POST',
       body: JSON.stringify(userData),
     });
@@ -202,7 +202,7 @@ class AdminUserService {
 
   async updateUser(userId: string, userData: UpdateUserDto): Promise<User> {
     const response = await this.makeAuthenticatedRequest(
-      `/api/users/${userId}`,
+      `/users/${userId}`,
       {
         method: 'PATCH',
         body: JSON.stringify(userData),
@@ -223,7 +223,7 @@ class AdminUserService {
   ): Promise<void> {
     // ✅ Changement de POST à PATCH
     const response = await this.makeAuthenticatedRequest(
-      `/api/users/${userId}/admin-reset-password`,
+      `/users/${userId}/admin-reset-password`,
       {
         method: 'PATCH',
         body: JSON.stringify(passwordData),
@@ -241,7 +241,7 @@ class AdminUserService {
 
   async deleteUser(userId: string): Promise<void> {
     const response = await this.makeAuthenticatedRequest(
-      `/api/users/${userId}`,
+      `/users/${userId}`,
       {
         method: 'DELETE',
       }
@@ -259,7 +259,7 @@ class AdminUserService {
 
   async toggleUserStatus(userId: string): Promise<User> {
     const response = await this.makeAuthenticatedRequest(
-      `/api/users/${userId}/toggle-status`,
+      `/users/${userId}/toggle-status`,
       {
         method: 'PATCH',
       }

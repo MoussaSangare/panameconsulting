@@ -3,8 +3,8 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { toast } from 'react-toastify';
 import { UserHeader, usePageConfig } from '../../components/user/UserHeader';
 import { useAuth } from '../../context/AuthContext';
-import { userProfileService, UserUpdateData, PasswordUpdateData } from '../../api/user/Profile/userProfileApi';
-import { Loader2, Mail, Phone, Calendar, Shield, User, UserCheck, Lock, Eye, EyeOff, CheckCircle, XCircle } from 'lucide-react';
+import { userProfileService, UserUpdateData} from '../../api/user/Profile/userProfileApi';
+import { Loader2, Mail, Phone, Shield, User, UserCheck, Lock, Eye, EyeOff, CheckCircle, XCircle } from 'lucide-react';
 
 const UserProfile = () => {
   const { user, updateProfile, fetchWithAuth, refreshToken, access_token } = useAuth();

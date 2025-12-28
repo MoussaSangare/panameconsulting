@@ -380,12 +380,12 @@ export class ProcedureService {
     if (filters.search) params.append('search', filters.search);
 
     return this.makeRequest<PaginatedResponse>(
-      `/api/procedures/admin/all?${params.toString()}`
+      `/procedures/admin/all?${params.toString()}`
     );
   }
 
   async getAdminProcedureDetails(id: string): Promise<Procedure> {
-    return this.makeRequest<Procedure>(`/api/procedures/admin/${id}`);
+    return this.makeRequest<Procedure>(`/procedures/admin/${id}`);
   }
 
   async updateAdminStep(
@@ -395,7 +395,7 @@ export class ProcedureService {
   ): Promise<Procedure> {
     const encodedStepName = encodeURIComponent(stepName);
     const result = await this.makeRequest<Procedure>(
-      `/api/procedures/admin/${procedureId}/steps/${encodedStepName}`,
+      `/procedures/admin/${procedureId}/steps/${encodedStepName}`,
       {
         method: 'PUT',
         body: JSON.stringify(updates),
@@ -413,7 +413,7 @@ export class ProcedureService {
     const result = await this.makeRequest<{
       success: boolean;
       message: string;
-    }>(`/api/procedures/admin/${id}`, {
+    }>(`/procedures/admin/${id}`, {
       method: 'DELETE',
       body: reason ? JSON.stringify({ reason }) : undefined,
     });
@@ -424,7 +424,7 @@ export class ProcedureService {
 
   async rejectAdminProcedure(id: string, reason: string): Promise<Procedure> {
     const result = await this.makeRequest<Procedure>(
-      `/api/procedures/admin/${id}/reject`,
+      `/procedures/admin/${id}/reject`,
       {
         method: 'PUT',
         body: JSON.stringify({ reason }),
@@ -440,7 +440,7 @@ export class ProcedureService {
     updates: UpdateProcedureDto
   ): Promise<Procedure> {
     const result = await this.makeRequest<Procedure>(
-      `/api/procedures/admin/${id}`,
+      `/procedures/admin/${id}`,
       {
         method: 'PUT',
         body: JSON.stringify(updates),
@@ -455,7 +455,7 @@ export class ProcedureService {
     rendezVousId: string
   ): Promise<Procedure> {
     const result = await this.makeRequest<Procedure>(
-      '/api/procedures/admin/create',
+      '/procedures/admin/create',
       {
         method: 'POST',
         body: JSON.stringify({ rendezVousId }),
@@ -467,7 +467,7 @@ export class ProcedureService {
   }
 
   async getAdminProceduresOverview(): Promise<StatsResponse> {
-    return this.makeRequest<StatsResponse>('/api/procedures/admin/stats');
+    return this.makeRequest<StatsResponse>('/procedures/admin/stats');
   }
 
   // === USER METHODS ===
@@ -478,12 +478,12 @@ export class ProcedureService {
     limit: number = 10
   ): Promise<PaginatedResponse> {
     return this.makeRequest<PaginatedResponse>(
-      `/api/procedures/user?email=${encodeURIComponent(email)}&page=${page}&limit=${limit}`
+      `/procedures/user?email=${encodeURIComponent(email)}&page=${page}&limit=${limit}`
     );
   }
 
   async getUserProcedureDetails(id: string): Promise<Procedure> {
-    return this.makeRequest<Procedure>(`/api/procedures/${id}`);
+    return this.makeRequest<Procedure>(`/procedures/${id}`);
   }
 
   async cancelUserProcedure(
@@ -492,7 +492,7 @@ export class ProcedureService {
     reason?: string
   ): Promise<Procedure> {
     const result = await this.makeRequest<Procedure>(
-      `/api/procedures/${id}/cancel`,
+      `/procedures/${id}/cancel`,
       {
         method: 'PUT',
         body: JSON.stringify({ reason, email }),
@@ -505,7 +505,7 @@ export class ProcedureService {
 
   async getUserProceduresByEmail(email: string): Promise<Procedure[]> {
     return this.makeRequest<Procedure[]>(
-      `/api/procedures/email/${encodeURIComponent(email)}`
+      `/procedures/email/${encodeURIComponent(email)}`
     );
   }
 
@@ -513,7 +513,7 @@ export class ProcedureService {
 
   async findProceduresByEmail(email: string): Promise<Procedure[]> {
     return this.makeRequest<Procedure[]>(
-      `/api/procedures/find?email=${encodeURIComponent(email)}`
+      `/procedures/find?email=${encodeURIComponent(email)}`
     );
   }
 
@@ -528,13 +528,13 @@ export class ProcedureService {
     if (email) params.append('email', email);
 
     return this.makeRequest<PaginatedResponse>(
-      `/api/procedures/active?${params.toString()}`
+      `/procedures/active?${params.toString()}`
     );
   }
 
   async softDeleteProcedure(id: string, reason?: string): Promise<Procedure> {
     const result = await this.makeRequest<Procedure>(
-      `/api/procedures/${id}/soft-delete`,
+      `/procedures/${id}/soft-delete`,
       {
         method: 'DELETE',
         body: reason ? JSON.stringify({ reason }) : undefined,
