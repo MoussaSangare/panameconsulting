@@ -40,6 +40,14 @@ services:
     dns:
       - 1.1.1.1
       - 8.8.8.8
+      - 8.8.4.4
+    # DNS Cloudflare
+    dns_search: .
+    
+    # Configuration des hôtes supplémentaires pour contourner les problèmes de DNS
+    extra_hosts:
+      - "smtp.gmail.com:142.250.74.109"  # IP SMTP connue
+      - "smtp.gmail.com:64.233.184.108"  # Alternative
     
     # Health check pour surveiller l'état de l'application
     healthcheck:
