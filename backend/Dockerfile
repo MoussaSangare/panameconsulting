@@ -1,23 +1,24 @@
 # ============ ÉTAPE DE BUILD ============
 FROM node:18-alpine AS builder
 
-RUN corepack enable && corepack prepare pnpm@10.26.2 --activate
-
-RUN pnpm install nodemailer@latest @types/nodemailer@latest --save
-
-
 WORKDIR /app
 
-# Copie de tout le backend
-COPY backend/ ./
+# Copie des fichiers de dépendances d'abord (meilleur cache)
+COPY backend/package.json backend/pnpm-lock.yaml* ./
 
+# Installez nodemailer DANS la phase de build seulement
+RUN corepack enable && corepack prepare pnpm@10.26.2 --activate
+RUN pnpm install nodemailer@latest @types/nodemailer@latest --save-dev
 
-# Installation
+# Installation complète pour le build
 RUN pnpm install --frozen-lockfile --prefer-offline
 
-# Construction forcée avec configuration modifiée
+# Copie du reste du code
+COPY backend/ ./
+
+# Construction
 RUN sed -i 's/"skipLibCheck": false/"skipLibCheck": true/g' tsconfig.json || true
-RUN pnpm build 
+RUN pnpm build
 
 # ============ ÉTAPE DE PRODUCTION ============
 FROM node:18-alpine AS production
@@ -26,18 +27,19 @@ ARG NODE_ENV=production
 ENV NODE_ENV=${NODE_ENV}
 ENV PORT=10000
 
-RUN corepack enable && corepack prepare pnpm@10.26.2 --activate
-
 WORKDIR /app
 
-COPY backend/package.json backend/pnpm-lock.yaml* ./
+# Copie des fichiers de dépendances
+COPY --from=builder /app/package.json /app/pnpm-lock.yaml* ./
 
+# Installation de production UNIQUEMENT
+RUN corepack enable && corepack prepare pnpm@10.26.2 --activate
 RUN pnpm install --prod --frozen-lockfile --prefer-offline
 
-RUN pnpm install nodemailer@latest @types/nodemailer@latest --save
-
+# Copie des fichiers construits
 COPY --from=builder /app/dist ./dist
 
+# Création des répertoires avec les bonnes permissions
 RUN mkdir -p /app/uploads /app/logs && \
     chown -R node:node /app
 
