@@ -3,9 +3,8 @@ FROM node:18-alpine AS builder
 
 WORKDIR /app
 
-# PNPM configuration
-ENV PNPM_HOME="/pnpm"
-ENV PATH="$PNPM_HOME:$PATH"
+# Configuration optimisée pour Docker
+
 # Copie des fichiers de dépendances d'abord (meilleur cache)
 COPY backend/package.json backend/pnpm-lock.yaml* ./
 

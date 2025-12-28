@@ -11,8 +11,7 @@ services:
     
     # Ports exposés (host:container)
     ports:
-      - "10000:10000"
-      - "587:587"  # Pour SMTP si nécessaire
+      - "0000:10000"
 
     env_file:
       - .env  # Charger TOUTES les variables depuis .env
@@ -32,10 +31,7 @@ services:
       - RAILWAY_STATIC_URL=https://panameconsulting.up.railway.app
       - FRONTEND_URL=http://panameconsulting.vercerl.app
       
-    sysctls:
-      - net.ipv4.tcp_keepalive_time=600
-      - net.ipv4.tcp_keepalive_intvl=60
-      - net.ipv4.tcp_keepalive_probes=10
+      
     
     # Politique de redémarrage automatique
     restart: unless-stopped
@@ -45,13 +41,8 @@ services:
       - 1.1.1.1
       - 8.8.8.8
       - 8.8.4.4
-    # DNS Cloudflare
-    dns_search: .
-    
-    # Configuration des hôtes supplémentaires pour contourner les problèmes de DNS
-    extra_hosts:
-      - "smtp.gmail.com:142.250.74.109"  # IP SMTP connue
-      - "smtp.gmail.com:64.233.184.108"  # Alternative
+
+    network_mode: host
     
     # Health check pour surveiller l'état de l'application
     healthcheck:
@@ -78,6 +69,14 @@ services:
       - ./uploads:/app/uploads
       - ./logs:/app/logs
       
+      # Volume pour les node_modules (évite les conflits avec l'hôte)
+      - node_modules:/app/node_modules
+
+# Déclaration des ressources partagées
+volumes:
+  node_modules:
+    driver: local
+
 networks:
   backend-network:
     driver: bridge
