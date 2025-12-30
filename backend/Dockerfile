@@ -6,7 +6,7 @@ WORKDIR /app
 # Configuration optimisée pour Docker
 
 # Copie des fichiers de dépendances d'abord (meilleur cache)
-COPY . ./
+COPY backend/package.json backend/pnpm-lock.yaml* ./
 
 # Installez nodemailer DANS la phase de build seulement
 RUN corepack enable && corepack prepare pnpm@10.26.2 --activate
@@ -16,7 +16,7 @@ RUN pnpm install nodemailer@latest @types/nodemailer@latest --save-dev
 RUN pnpm install --frozen-lockfile --prefer-offline
 
 # Copie du reste du code
-COPY . ./
+COPY backend/ ./
 
 # Construction
 RUN sed -i 's/"skipLibCheck": false/"skipLibCheck": true/g' tsconfig.json || true
