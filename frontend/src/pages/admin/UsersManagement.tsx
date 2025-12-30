@@ -23,21 +23,44 @@ import {
   Users,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
-import AdminUserService, {
+import useAdminUserService, {
   User as UserType,
   UserStats,
   CreateUserDto,
   UpdateUserDto,
-} from '../../api/admin/AdminUserService';
+  AdminResetPasswordDto,
+} from '../../api/admin/AdminUserService'; // Chemin corrigé
 import { toast } from 'react-toastify';
 import { Helmet } from 'react-helmet-async';
 
 // Créer un alias pour éviter le conflit
 interface AppUser extends UserType {}
 
+// Interface locale pour création d'utilisateur
+interface LocalCreateUserDto {
+  firstName: string;
+  lastName: string;
+  email: string;
+  telephone: string;
+  password: string;
+  role: 'admin' | 'user';
+}
+
 const UsersManagement: React.FC = () => {
   const { user: currentUser } = useAuth();
-  const userService = new AdminUserService();
+  
+  // Utiliser le hook de service - CORRECTION
+  const {
+    getAllUsers,
+    getUserStats,
+    createUser: createUserService,
+    updateUser: updateUserService,
+    adminResetPassword: adminResetPasswordService,
+    deleteUser: deleteUserService,
+    toggleUserStatus: toggleUserStatusService,
+    canAccessAdmin,
+    isUserAdmin
+  } = useAdminUserService();
 
   const [users, setUsers] = useState<AppUser[]>([]);
   const [stats, setStats] = useState<UserStats | null>(null);
@@ -50,7 +73,7 @@ const UsersManagement: React.FC = () => {
   const [selectedUser, setSelectedUser] = useState<AppUser | null>(null);
   const [showMobileMenu, setShowMobileMenu] = useState<string | null>(null);
 
-  const [newUser, setNewUser] = useState<CreateUserDto>({
+  const [newUser, setNewUser] = useState<LocalCreateUserDto>({
     firstName: '',
     lastName: '',
     email: '',
@@ -60,7 +83,7 @@ const UsersManagement: React.FC = () => {
   });
 
   const [editUser, setEditUser] = useState<UpdateUserDto>({});
-  const [passwordData, setPasswordData] = useState({
+  const [passwordData, setPasswordData] = useState<AdminResetPasswordDto>({
     newPassword: '',
     confirmNewPassword: '',
   });
@@ -68,22 +91,24 @@ const UsersManagement: React.FC = () => {
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
-  // États pour la validation
-  const [profileErrors, setProfileErrors] = useState<Record<string, string>>(
-    {}
-  );
-  const [profileTouched, setProfileTouched] = useState<Record<string, boolean>>(
-    {}
-  );
+  const [profileErrors, setProfileErrors] = useState<Record<string, string>>({});
+  const [profileTouched, setProfileTouched] = useState<Record<string, boolean>>({});
+
+  // Vérifier l'accès admin
+  useEffect(() => {
+    if (!canAccessAdmin) {
+      toast.error('Accès refusé : droits administrateur requis');
+    }
+  }, [canAccessAdmin]);
 
   // Charger les utilisateurs
   const loadUsers = async () => {
     try {
       setIsLoading(true);
-      const usersData = await userService.getAllUsers();
+      const usersData = await getAllUsers();
       setUsers(usersData);
     } catch (error: any) {
-      toast.error(`❌ ${error.message || 'Erreur lors du chargement'}`);
+      toast.error(`${error.message || 'Erreur lors du chargement'}`);
     } finally {
       setIsLoading(false);
     }
@@ -92,19 +117,19 @@ const UsersManagement: React.FC = () => {
   // Charger les statistiques
   const loadStats = async () => {
     try {
-      const statsData = await userService.getUserStats();
+      const statsData = await getUserStats();
       setStats(statsData);
     } catch (error: any) {
-      toast.error(
-        `❌ ${error.message || 'Erreur lors du chargement des statistiques'}`
-      );
+      toast.error(`${error.message || 'Erreur lors du chargement des statistiques'}`);
     }
   };
 
   useEffect(() => {
-    loadUsers();
-    loadStats();
-  }, []);
+    if (canAccessAdmin) {
+      loadUsers();
+      loadStats();
+    }
+  }, [canAccessAdmin]);
 
   // Validation email
   const validateEmail = (email: string): boolean => {
@@ -114,11 +139,10 @@ const UsersManagement: React.FC = () => {
 
   // Validation téléphone
   const validatePhone = (phone: string): boolean => {
-    const phoneRegex = /^[+]?[0-9\s\-()]{10,}$/;
+    const phoneRegex = /^\+?[1-9]\d{1,14}$/;
     return phoneRegex.test(phone.replace(/\s/g, ''));
   };
 
-  // Validation en temps réel
   const validateProfileField = (name: string, value: string) => {
     let error = '';
 
@@ -138,7 +162,6 @@ const UsersManagement: React.FC = () => {
     return !error;
   };
 
-  // Gestion des changements de profil
   const handleProfileChange = (field: keyof UpdateUserDto, value: string) => {
     const newData = {
       ...editUser,
@@ -150,7 +173,6 @@ const UsersManagement: React.FC = () => {
     validateProfileField(field, value);
   };
 
-  // Validation finale
   const validateProfileBeforeSubmit = (): boolean => {
     const errors: Record<string, string> = {};
 
@@ -166,31 +188,38 @@ const UsersManagement: React.FC = () => {
     return Object.keys(errors).length === 0;
   };
 
-  // Création d'un utilisateur
   const handleAddUser = async () => {
     try {
-      // Validation côté client
       if (!newUser.firstName?.trim() || !newUser.lastName?.trim()) {
-        toast.error('❌ Le prénom et le nom sont obligatoires');
+        toast.error('Le prénom et le nom sont obligatoires');
         return;
       }
 
       if (!newUser.email || !validateEmail(newUser.email)) {
-        toast.error("❌ Format d'email invalide");
+        toast.error("Format d'email invalide");
         return;
       }
 
       if (!newUser.telephone || !validatePhone(newUser.telephone)) {
-        toast.error('❌ Format de téléphone invalide');
+        toast.error('Format de téléphone invalide');
         return;
       }
 
       if (!newUser.password || newUser.password.length < 8) {
-        toast.error('❌ Le mot de passe doit contenir au moins 8 caractères');
+        toast.error('Le mot de passe doit contenir au moins 8 caractères');
         return;
       }
 
-      const createdUser = await userService.createUser(newUser);
+      const createUserDto: CreateUserDto = {
+        firstName: newUser.firstName.trim(),
+        lastName: newUser.lastName.trim(),
+        email: newUser.email.toLowerCase().trim(),
+        telephone: newUser.telephone.trim(),
+        password: newUser.password,
+        role: newUser.role
+      };
+
+      const createdUser = await createUserService(createUserDto);
 
       setUsers(prev => [...prev, createdUser]);
       await loadStats();
@@ -205,22 +234,21 @@ const UsersManagement: React.FC = () => {
       });
 
       setIsAddModalOpen(false);
-      toast.success('✅ Utilisateur créé avec succès');
+      toast.success('Utilisateur créé avec succès');
     } catch (error: any) {
-      toast.error(`❌ ${error.message || 'Erreur lors de la création'}`);
+      toast.error(`${error.message}`);
     }
   };
 
-  // Modification d'un utilisateur
   const handleEditUser = async () => {
     try {
       if (!selectedUser) {
-        toast.error('❌ Données manquantes');
+        toast.error('Données manquantes');
         return;
       }
 
       if (!validateProfileBeforeSubmit()) {
-        toast.error('❌ Veuillez corriger les erreurs dans le formulaire');
+        toast.error('Veuillez corriger les erreurs dans le formulaire');
         return;
       }
 
@@ -229,28 +257,25 @@ const UsersManagement: React.FC = () => {
         (editUser.telephone && editUser.telephone !== selectedUser.telephone);
 
       if (!hasChanges) {
-        toast.error('❌ Aucune modification détectée');
+        toast.error('Aucune modification détectée');
         return;
       }
 
       const updateData: UpdateUserDto = {};
-
+      
       if (editUser.email && editUser.email !== selectedUser.email) {
-        updateData.email = editUser.email;
+        updateData.email = editUser.email.toLowerCase().trim();
       }
-
+      
       if (editUser.telephone && editUser.telephone !== selectedUser.telephone) {
-        updateData.telephone = editUser.telephone;
+        updateData.telephone = editUser.telephone.trim();
       }
 
-      const updatedUser = await userService.updateUser(
-        selectedUser._id,
-        updateData
-      );
+      const updatedUser = await updateUserService(selectedUser.id, updateData);
 
       setUsers(prev =>
         prev.map(user =>
-          user._id === selectedUser._id ? { ...user, ...updatedUser } : user
+          user.id === selectedUser.id ? { ...user, ...updatedUser } : user
         )
       );
 
@@ -261,31 +286,30 @@ const UsersManagement: React.FC = () => {
       setIsEditModalOpen(false);
       setSelectedUser(null);
 
-      toast.success('✅ Utilisateur modifié avec succès');
+      toast.success('Utilisateur modifié avec succès');
     } catch (error: any) {
-      toast.error(`❌ ${error.message || 'Erreur lors de la modification'}`);
+      toast.error(`${error.message}`);
     }
   };
 
-  // Réinitialisation du mot de passe
   const handleAdminResetPassword = async () => {
     try {
       if (!selectedUser) {
-        toast.error('❌ Données manquantes');
+        toast.error('Données manquantes');
         return;
       }
 
       if (!passwordData.newPassword || passwordData.newPassword.length < 8) {
-        toast.error('❌ Le mot de passe doit contenir au moins 8 caractères');
+        toast.error('Le mot de passe doit contenir au moins 8 caractères');
         return;
       }
 
       if (passwordData.newPassword !== passwordData.confirmNewPassword) {
-        toast.error('❌ Les mots de passe ne correspondent pas');
+        toast.error('Les mots de passe ne correspondent pas');
         return;
       }
 
-      await userService.adminResetPassword(selectedUser._id, passwordData);
+      await adminResetPasswordService(selectedUser.id, passwordData);
 
       setPasswordData({
         newPassword: '',
@@ -294,64 +318,58 @@ const UsersManagement: React.FC = () => {
       setIsPasswordModalOpen(false);
       setSelectedUser(null);
 
-      toast.success('✅ Mot de passe réinitialisé avec succès');
+      toast.success('Mot de passe réinitialisé avec succès');
     } catch (error: any) {
-      toast.error(
-        `❌ ${error.message || 'Erreur lors de la réinitialisation'}`
-      );
+      toast.error(`${error.message}`);
     }
   };
 
-  // Suppression d'un utilisateur
   const handleDeleteUser = async () => {
     try {
       if (!selectedUser) {
-        toast.error('❌ Données manquantes');
+        toast.error('Données manquantes');
         return;
       }
 
-      if (selectedUser._id === currentUser?.id) {
-        toast.error('🚫 Vous ne pouvez pas supprimer votre propre compte');
+      if (selectedUser.id === currentUser?.id) {
+        toast.error('Vous ne pouvez pas supprimer votre propre compte');
         setIsDeleteModalOpen(false);
         setSelectedUser(null);
         return;
       }
 
-      await userService.deleteUser(selectedUser._id);
+      await deleteUserService(selectedUser.id);
 
-      setUsers(prev => prev.filter(user => user._id !== selectedUser._id));
+      setUsers(prev => prev.filter(user => user.id !== selectedUser.id));
       await loadStats();
 
       setIsDeleteModalOpen(false);
       setSelectedUser(null);
-      toast.success('✅ Utilisateur supprimé avec succès');
+      toast.success('Utilisateur supprimé avec succès');
     } catch (error: any) {
-      toast.error(`❌ ${error.message || 'Erreur lors de la suppression'}`);
+      toast.error(`${error.message}`);
     }
   };
 
-  // Basculer le statut actif/inactif
   const handleToggleStatus = async (user: AppUser) => {
     try {
-      if (user._id === currentUser?.id) {
-        toast.error('🚫 Vous ne pouvez pas désactiver votre propre compte');
+      if (user.id === currentUser?.id) {
+        toast.error('Vous ne pouvez pas désactiver votre propre compte');
         return;
       }
 
-      const updatedUser = await userService.toggleUserStatus(user._id);
+      const updatedUser = await toggleUserStatusService(user.id);
 
       setUsers(prev =>
-        prev.map(u => (u._id === user._id ? { ...u, ...updatedUser } : u))
+        prev.map(u => (u.id === user.id ? { ...u, ...updatedUser } : u))
       );
 
       await loadStats();
       toast.success(
-        `✅ Utilisateur ${!user.isActive ? 'activé' : 'désactivé'} avec succès`
+        `Utilisateur ${!user.isActive ? 'activé' : 'désactivé'} avec succès`
       );
     } catch (error: any) {
-      toast.error(
-        `❌ ${error.message || 'Erreur lors du changement de statut'}`
-      );
+      toast.error(`${error.message}`);
     }
   };
 
@@ -383,7 +401,6 @@ const UsersManagement: React.FC = () => {
     setShowMobileMenu(null);
   };
 
-  // Réinitialiser le formulaire d'édition
   const resetEditForm = () => {
     if (selectedUser) {
       setEditUser({
@@ -395,7 +412,6 @@ const UsersManagement: React.FC = () => {
     setProfileTouched({});
   };
 
-  // Vérifier les modifications
   const hasEditChanges = () => {
     if (!selectedUser) return false;
     return (
@@ -404,7 +420,6 @@ const UsersManagement: React.FC = () => {
     );
   };
 
-  // Filtrage des utilisateurs
   const filteredUsers = users.filter(user => {
     const searchLower = searchTerm.toLowerCase();
     return (
@@ -415,7 +430,6 @@ const UsersManagement: React.FC = () => {
     );
   });
 
-  // Icônes et couleurs pour les statuts
   const getStatusIcon = (isActive: boolean) => {
     return isActive ? (
       <UserCheck className='w-3 h-3 text-emerald-500' />
@@ -452,6 +466,22 @@ const UsersManagement: React.FC = () => {
       : 'bg-gray-50 text-gray-700 border-gray-200';
   };
 
+  if (!canAccessAdmin) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-center">
+          <Shield className="w-16 h-16 text-red-500 mx-auto mb-4" />
+          <h2 className="text-xl font-bold text-gray-800 mb-2">
+            Accès refusé
+          </h2>
+          <p className="text-gray-600">
+            Vous n'avez pas les droits administrateur requis pour accéder à cette page.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <>
       <Helmet>
@@ -469,8 +499,7 @@ const UsersManagement: React.FC = () => {
         <meta name='naver' content='noindex, nofollow' />
         <meta name='seznam' content='noindex, nofollow' />
       </Helmet>
-      <div className='min-h-screen bg-gradient-to-br from-slate-50 to-blue-50/30 max-w-[1024px] mx-auto overflow-x-hidden'>
-        {/* Header */}
+      <div className='min-h-screen bg-linear-to-br from-slate-50 to-blue-50/30 max-w-5xl mx-auto overflow-x-hidden'>
         <div className='mb-4 px-4'>
           <div className='flex items-center gap-2 mb-1'>
             <div className='p-2 bg-blue-500 rounded-lg'>
@@ -487,7 +516,6 @@ const UsersManagement: React.FC = () => {
           </div>
         </div>
 
-        {/* Cartes de statistiques */}
         {stats && (
           <div className='grid grid-cols-2 lg:grid-cols-5 gap-2 mb-4 px-4'>
             <div className='bg-white rounded-xl border border-slate-200/60 p-3 shadow-sm'>
@@ -562,10 +590,8 @@ const UsersManagement: React.FC = () => {
           </div>
         )}
 
-        {/* Barre de recherche et actions */}
         <div className='bg-white rounded-xl border border-slate-200/60 p-3 mb-4 shadow-sm mx-4'>
           <div className='flex flex-col space-y-3'>
-            {/* Recherche */}
             <div className='relative'>
               <div className='absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none'>
                 <Search className='w-4 h-4 text-slate-400' />
@@ -575,19 +601,18 @@ const UsersManagement: React.FC = () => {
                 placeholder='Rechercher un utilisateur...'
                 value={searchTerm}
                 onChange={e => setSearchTerm(e.target.value)}
-                className='w-full pl-10 pr-4 py-2.5 bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-none focus:border-blue-500 hover:border-blue-400 transition-all duration-200'
+                className='w-full pl-10 pr-4 py-2.5 bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent hover:border-blue-400 transition-all duration-200'
               />
             </div>
 
-            {/* Actions */}
             <div className='flex gap-2'>
               <button
                 onClick={() => {
                   loadUsers();
                   loadStats();
-                  toast.info('🔄 Actualisation...');
+                  toast.info('Actualisation...');
                 }}
-                className='flex-1 px-3 py-2.5 bg-slate-500 text-white rounded-lg hover:bg-slate-600 focus:outline-none focus:ring-none focus:border-blue-500 transition-all duration-200 flex items-center justify-center gap-2'
+                className='flex-1 px-3 py-2.5 bg-slate-500 text-white rounded-lg hover:bg-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-200 flex items-center justify-center gap-2'
               >
                 <RefreshCw className='w-4 h-4' />
                 <span className='text-sm'>Actualiser</span>
@@ -595,7 +620,7 @@ const UsersManagement: React.FC = () => {
 
               <button
                 onClick={() => setIsAddModalOpen(true)}
-                className='flex-1 px-3 py-2.5 bg-blue-500 text-white rounded-lg hover:bg-blue-600 focus:outline-none focus:ring-none focus:border-blue-500 transition-all duration-200 flex items-center justify-center gap-2'
+                className='flex-1 px-3 py-2.5 bg-blue-500 text-white rounded-lg hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-200 flex items-center justify-center gap-2'
               >
                 <Plus className='w-4 h-4' />
                 <span className='text-sm'>Nouveau</span>
@@ -604,10 +629,8 @@ const UsersManagement: React.FC = () => {
           </div>
         </div>
 
-        {/* Liste des utilisateurs */}
         <div className='bg-white rounded-xl border border-slate-200/60 overflow-hidden shadow-sm mx-4'>
-          {/* En-tête */}
-          <div className='px-4 py-3 bg-gradient-to-r from-blue-500 to-blue-600 text-white'>
+          <div className='px-4 py-3 bg-linear-to-r from-blue-500 to-blue-600 text-white'>
             <div className='flex items-center justify-between'>
               <div className='flex items-center gap-2'>
                 <User className='w-4 h-4' />
@@ -621,13 +644,12 @@ const UsersManagement: React.FC = () => {
             </div>
           </div>
 
-          {/* Version mobile - Cartes */}
           <div className='lg:hidden'>
             {isLoading ? (
               <div className='p-4 text-center'>
                 <div className='animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-blue-500 mx-auto'></div>
                 <p className='text-slate-600 mt-2 text-sm'>
-                  Chargement sécurisé...
+                  Chargement...
                 </p>
               </div>
             ) : filteredUsers.length === 0 ? (
@@ -636,7 +658,7 @@ const UsersManagement: React.FC = () => {
                 <p className='text-slate-500'>Aucun utilisateur trouvé</p>
                 {searchTerm && (
                   <p className='text-slate-400 text-sm mt-1'>
-                    Aucun résultat pour &quot;{searchTerm}&quot;
+                    Aucun résultat pour "{searchTerm}"
                   </p>
                 )}
               </div>
@@ -644,12 +666,12 @@ const UsersManagement: React.FC = () => {
               <div className='divide-y divide-slate-200'>
                 {filteredUsers.map(user => (
                   <div
-                    key={user._id}
+                    key={user.id}
                     className='p-4 hover:bg-slate-50 transition-colors'
                   >
                     <div className='flex justify-between items-start mb-3'>
                       <div className='flex items-center flex-1 min-w-0'>
-                        <div className='w-12 h-12 bg-gradient-to-br from-blue-500 to-blue-600 rounded-full flex items-center justify-center flex-shrink-0'>
+                        <div className='w-12 h-12 bg-linear-to-br from-blue-500 to-blue-600 rounded-full flex items-center justify-center shrink-0'>
                           <User className='w-6 h-6 text-white' />
                         </div>
                         <div className='ml-3 flex-1 min-w-0'>
@@ -657,7 +679,7 @@ const UsersManagement: React.FC = () => {
                             {user.firstName} {user.lastName}
                           </h3>
                           <div className='flex items-center gap-1 mt-1'>
-                            <Mail className='w-3 h-3 text-slate-400 flex-shrink-0' />
+                            <Mail className='w-3 h-3 text-slate-400 shrink-0' />
                             <p className='text-xs text-slate-600 truncate'>
                               {user.email}
                             </p>
@@ -665,38 +687,38 @@ const UsersManagement: React.FC = () => {
                         </div>
                       </div>
 
-                      <div className='relative flex-shrink-0'>
+                      <div className='relative shrink-0'>
                         <button
                           onClick={() =>
                             setShowMobileMenu(
-                              showMobileMenu === user._id ? null : user._id
+                              showMobileMenu === user.id ? null : user.id
                             )
                           }
-                          className='p-2 hover:bg-slate-100 rounded-lg focus:outline-none focus:ring-none focus:border-blue-500 transition-all duration-200'
+                          className='p-2 hover:bg-slate-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-200'
                         >
                           <MoreVertical className='w-4 h-4 text-slate-500' />
                         </button>
 
-                        {showMobileMenu === user._id && (
-                          <div className='absolute right-0 top-10 bg-white border border-slate-200 rounded-lg shadow-lg z-10 min-w-[180px]'>
+                        {showMobileMenu === user.id && (
+                          <div className='absolute right-0 top-10 bg-white border border-slate-200 rounded-lg shadow-lg z-10 min-w-45'>
                             <button
                               onClick={() => openEditModal(user)}
-                              className='w-full px-4 py-2.5 text-sm text-blue-600 hover:bg-blue-50 flex items-center gap-2 border-b border-slate-200 focus:outline-none focus:ring-none'
+                              className='w-full px-4 py-2.5 text-sm text-blue-600 hover:bg-blue-50 flex items-center gap-2 border-b border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500'
                             >
                               <Edit className='w-4 h-4' />
                               Modifier
                             </button>
                             <button
                               onClick={() => openPasswordModal(user)}
-                              className='w-full px-4 py-2.5 text-sm text-green-600 hover:bg-green-50 flex items-center gap-2 border-b border-slate-200 focus:outline-none focus:ring-none'
+                              className='w-full px-4 py-2.5 text-sm text-green-600 hover:bg-green-50 flex items-center gap-2 border-b border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500'
                             >
                               <Key className='w-4 h-4' />
-                              Réinit. MDP
+                              Réinitialiser MDP
                             </button>
                             <button
                               onClick={() => handleToggleStatus(user)}
-                              disabled={user._id === currentUser?.id}
-                              className='w-full px-4 py-2.5 text-sm text-amber-600 hover:bg-amber-50 flex items-center gap-2 border-b border-slate-200 disabled:opacity-50 focus:outline-none focus:ring-none'
+                              disabled={user.id === currentUser?.id}
+                              className='w-full px-4 py-2.5 text-sm text-amber-600 hover:bg-amber-50 flex items-center gap-2 border-b border-slate-200 disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-blue-500'
                             >
                               {user.isActive ? (
                                 <EyeOff className='w-4 h-4' />
@@ -707,8 +729,8 @@ const UsersManagement: React.FC = () => {
                             </button>
                             <button
                               onClick={() => openDeleteModal(user)}
-                              disabled={user._id === currentUser?.id}
-                              className='w-full px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 flex items-center gap-2 disabled:opacity-50 focus:outline-none focus:ring-none'
+                              disabled={user.id === currentUser?.id}
+                              className='w-full px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 flex items-center gap-2 disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-blue-500'
                             >
                               <Trash2 className='w-4 h-4' />
                               Supprimer
@@ -736,12 +758,12 @@ const UsersManagement: React.FC = () => {
                     </div>
 
                     <div className='flex items-center gap-2 text-sm text-slate-600 mb-2'>
-                      <Phone className='w-4 h-4 text-slate-400 flex-shrink-0' />
+                      <Phone className='w-4 h-4 text-slate-400 shrink-0' />
                       <span className='truncate'>{user.telephone}</span>
                     </div>
 
                     <div className='text-xs text-slate-500 truncate'>
-                      ID: {user._id}
+                      ID: {user.id}
                     </div>
                   </div>
                 ))}
@@ -749,9 +771,8 @@ const UsersManagement: React.FC = () => {
             )}
           </div>
 
-          {/* Version desktop - Tableau */}
           <div className='hidden lg:block overflow-x-auto'>
-            <table className='w-full min-w-[800px]'>
+            <table className='w-full min-w-45'>
               <thead className='bg-slate-50'>
                 <tr>
                   <th className='px-4 py-3 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider'>
@@ -788,7 +809,7 @@ const UsersManagement: React.FC = () => {
                         <div className='animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-blue-500'></div>
                       </div>
                       <p className='text-slate-600 mt-2 text-sm'>
-                        Chargement sécurisé...
+                        Chargement...
                       </p>
                     </td>
                   </tr>
@@ -802,12 +823,12 @@ const UsersManagement: React.FC = () => {
                 ) : (
                   filteredUsers.map(user => (
                     <tr
-                      key={user._id}
+                      key={user.id}
                       className='hover:bg-slate-50 transition-colors'
                     >
                       <td className='px-4 py-4'>
                         <div className='flex items-center'>
-                          <div className='w-10 h-10 bg-gradient-to-br from-blue-500 to-blue-600 rounded-full flex items-center justify-center'>
+                          <div className='w-10 h-10 bg-linear-to-br from-blue-500 to-blue-600 rounded-full flex items-center justify-center'>
                             <User className='w-5 h-5 text-white' />
                           </div>
                           <div className='ml-3'>
@@ -815,7 +836,7 @@ const UsersManagement: React.FC = () => {
                               {user.firstName} {user.lastName}
                             </p>
                             <p className='text-xs text-slate-500'>
-                              ID: {user._id.substring(0, 8)}...
+                              ID: {user.id.substring(0, 8)}...
                             </p>
                           </div>
                         </div>
@@ -860,7 +881,7 @@ const UsersManagement: React.FC = () => {
                         <div className='flex items-center gap-1'>
                           <button
                             onClick={() => openEditModal(user)}
-                            className='p-2 text-blue-600 hover:text-blue-700 hover:bg-blue-50 rounded-lg focus:outline-none focus:ring-none focus:border-blue-500 transition-all duration-200'
+                            className='p-2 text-blue-600 hover:text-blue-700 hover:bg-blue-50 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-200'
                             title="Modifier l'utilisateur"
                           >
                             <Edit className='w-4 h-4' />
@@ -868,7 +889,7 @@ const UsersManagement: React.FC = () => {
 
                           <button
                             onClick={() => openPasswordModal(user)}
-                            className='p-2 text-green-600 hover:text-green-700 hover:bg-green-50 rounded-lg focus:outline-none focus:ring-none focus:border-blue-500 transition-all duration-200'
+                            className='p-2 text-green-600 hover:text-green-700 hover:bg-green-50 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-200'
                             title='Réinitialiser le mot de passe'
                           >
                             <Key className='w-4 h-4' />
@@ -876,16 +897,16 @@ const UsersManagement: React.FC = () => {
 
                           <button
                             onClick={() => handleToggleStatus(user)}
-                            disabled={user._id === currentUser?.id}
-                            className={`p-2 rounded-lg focus:outline-none focus:ring-none focus:border-blue-500 transition-all duration-200 ${
-                              user._id === currentUser?.id
+                            disabled={user.id === currentUser?.id}
+                            className={`p-2 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-200 ${
+                              user.id === currentUser?.id
                                 ? 'text-slate-400 cursor-not-allowed'
                                 : user.isActive
                                   ? 'text-amber-600 hover:text-amber-700 hover:bg-amber-50'
                                   : 'text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50'
                             }`}
                             title={
-                              user._id === currentUser?.id
+                              user.id === currentUser?.id
                                 ? 'Impossible de modifier votre statut'
                                 : user.isActive
                                   ? 'Désactiver'
@@ -901,14 +922,14 @@ const UsersManagement: React.FC = () => {
 
                           <button
                             onClick={() => openDeleteModal(user)}
-                            disabled={user._id === currentUser?.id}
-                            className={`p-2 rounded-lg focus:outline-none focus:ring-none focus:border-blue-500 transition-all duration-200 ${
-                              user._id === currentUser?.id
+                            disabled={user.id === currentUser?.id}
+                            className={`p-2 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-200 ${
+                              user.id === currentUser?.id
                                 ? 'text-slate-400 cursor-not-allowed'
                                 : 'text-red-600 hover:text-red-700 hover:bg-red-50'
                             }`}
                             title={
-                              user._id === currentUser?.id
+                              user.id === currentUser?.id
                                 ? 'Impossible de supprimer votre compte'
                                 : 'Supprimer'
                             }
@@ -925,7 +946,6 @@ const UsersManagement: React.FC = () => {
           </div>
         </div>
 
-        {/* Modal d'ajout d'utilisateur */}
         {isAddModalOpen && (
           <div className='fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4'>
             <div className='bg-white rounded-xl border border-slate-200/60 max-w-md w-full max-h-[85vh] overflow-y-auto'>
@@ -936,7 +956,7 @@ const UsersManagement: React.FC = () => {
                 </h2>
                 <button
                   onClick={() => setIsAddModalOpen(false)}
-                  className='p-1.5 hover:bg-slate-100 rounded-lg focus:outline-none focus:ring-none focus:border-blue-500 transition-all duration-200'
+                  className='p-1.5 hover:bg-slate-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-200'
                 >
                   <X className='w-5 h-5 text-slate-500' />
                 </button>
@@ -956,7 +976,7 @@ const UsersManagement: React.FC = () => {
                         setNewUser({ ...newUser, firstName: e.target.value })
                       }
                       placeholder='Jean'
-                      className='w-full px-3 py-2.5 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-none focus:border-blue-500 hover:border-blue-400 transition-all duration-200'
+                      className='w-full px-3 py-2.5 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent hover:border-blue-400 transition-all duration-200'
                     />
                   </div>
 
@@ -972,7 +992,7 @@ const UsersManagement: React.FC = () => {
                         setNewUser({ ...newUser, lastName: e.target.value })
                       }
                       placeholder='Dupont'
-                      className='w-full px-3 py-2.5 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-none focus:border-blue-500 hover:border-blue-400 transition-all duration-200'
+                      className='w-full px-3 py-2.5 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent hover:border-blue-400 transition-all duration-200'
                     />
                   </div>
                 </div>
@@ -989,7 +1009,7 @@ const UsersManagement: React.FC = () => {
                       setNewUser({ ...newUser, email: e.target.value })
                     }
                     placeholder='jean.dupont@example.com'
-                    className='w-full px-3 py-2.5 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-none focus:border-blue-500 hover:border-blue-400 transition-all duration-200'
+                    className='w-full px-3 py-2.5 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent hover:border-blue-400 transition-all duration-200'
                   />
                 </div>
 
@@ -1005,7 +1025,7 @@ const UsersManagement: React.FC = () => {
                       setNewUser({ ...newUser, telephone: e.target.value })
                     }
                     placeholder='+33 1 23 45 67 89'
-                    className='w-full px-3 py-2.5 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-none focus:border-blue-500 hover:border-blue-400 transition-all duration-200'
+                    className='w-full px-3 py-2.5 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent hover:border-blue-400 transition-all duration-200'
                   />
                 </div>
 
@@ -1022,12 +1042,12 @@ const UsersManagement: React.FC = () => {
                         setNewUser({ ...newUser, password: e.target.value })
                       }
                       placeholder='Minimum 8 caractères'
-                      className='w-full px-3 py-2.5 pr-10 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-none focus:border-blue-500 hover:border-blue-400 transition-all duration-200'
+                      className='w-full px-3 py-2.5 pr-10 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent hover:border-blue-400 transition-all duration-200'
                     />
                     <button
                       type='button'
                       onClick={() => setShowPassword(!showPassword)}
-                      className='absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 focus:outline-none focus:ring-none'
+                      className='absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-500'
                     >
                       {showPassword ? (
                         <EyeOff className='w-4 h-4' />
@@ -1054,7 +1074,7 @@ const UsersManagement: React.FC = () => {
                         role: e.target.value as 'admin' | 'user',
                       })
                     }
-                    className='w-full px-3 py-2.5 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-none focus:border-blue-500 hover:border-blue-400 transition-all duration-200'
+                    className='w-full px-3 py-2.5 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent hover:border-blue-400 transition-all duration-200'
                   >
                     <option value='user'>Utilisateur</option>
                     <option value='admin'>Administrateur</option>
@@ -1065,13 +1085,13 @@ const UsersManagement: React.FC = () => {
               <div className='flex gap-3 p-4 border-t border-slate-200 sticky bottom-0 bg-white'>
                 <button
                   onClick={() => setIsAddModalOpen(false)}
-                  className='flex-1 px-4 py-2.5 text-sm text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 focus:outline-none focus:ring-none focus:border-blue-500 hover:border-blue-400 transition-all duration-200'
+                  className='flex-1 px-4 py-2.5 text-sm text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500 hover:border-blue-400 transition-all duration-200'
                 >
                   Annuler
                 </button>
                 <button
                   onClick={handleAddUser}
-                  className='flex-1 px-4 py-2.5 text-sm bg-blue-500 text-white rounded-lg hover:bg-blue-600 focus:outline-none focus:ring-none focus:border-blue-500 transition-all duration-200 flex items-center justify-center gap-2'
+                  className='flex-1 px-4 py-2.5 text-sm bg-blue-500 text-white rounded-lg hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-200 flex items-center justify-center gap-2'
                 >
                   <User className='w-4 h-4' />
                   Créer
@@ -1081,7 +1101,6 @@ const UsersManagement: React.FC = () => {
           </div>
         )}
 
-        {/* Modal de modification d'utilisateur */}
         {isEditModalOpen && selectedUser && (
           <div className='fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4'>
             <div className='bg-white rounded-xl border border-slate-200/60 max-w-md w-full max-h-[85vh] overflow-y-auto'>
@@ -1092,14 +1111,13 @@ const UsersManagement: React.FC = () => {
                 </h2>
                 <button
                   onClick={() => setIsEditModalOpen(false)}
-                  className='p-1.5 hover:bg-slate-100 rounded-lg focus:outline-none focus:ring-none focus:border-blue-500 transition-all duration-200'
+                  className='p-1.5 hover:bg-slate-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-200'
                 >
                   <X className='w-5 h-5 text-slate-500' />
                 </button>
               </div>
 
               <div className='p-4 space-y-4'>
-                {/* Informations utilisateur */}
                 <div className='bg-slate-50 rounded-lg p-3'>
                   <p className='text-sm font-medium text-slate-700'>
                     Modification de:{' '}
@@ -1108,11 +1126,10 @@ const UsersManagement: React.FC = () => {
                     </span>
                   </p>
                   <p className='text-xs text-slate-500 mt-1'>
-                    ID: {selectedUser._id}
+                    ID: {selectedUser.id}
                   </p>
                 </div>
 
-                {/* Champs non modifiables */}
                 <div className='grid grid-cols-2 gap-4'>
                   <div className='space-y-2'>
                     <label className='text-sm font-medium text-slate-700 flex items-center gap-2'>
@@ -1143,7 +1160,6 @@ const UsersManagement: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Email modifiable */}
                 <div className='space-y-2'>
                   <label className='text-sm font-medium text-slate-700 flex items-center gap-2'>
                     <Mail className='w-4 h-4 text-slate-400' />
@@ -1153,9 +1169,9 @@ const UsersManagement: React.FC = () => {
                     type='email'
                     value={editUser.email || ''}
                     onChange={e => handleProfileChange('email', e.target.value)}
-                    className={`w-full px-3 py-2.5 text-sm border rounded-lg focus:outline-none focus:ring-none focus:border-blue-500 hover:border-blue-400 transition-all duration-200 ${
+                    className={`w-full px-3 py-2.5 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent hover:border-blue-400 transition-all duration-200 ${
                       profileErrors.email
-                        ? 'border-red-300'
+                        ? 'border-red-300 focus:ring-red-500'
                         : 'border-slate-300'
                     }`}
                     placeholder='nouvel@email.com'
@@ -1171,7 +1187,6 @@ const UsersManagement: React.FC = () => {
                   </p>
                 </div>
 
-                {/* Téléphone modifiable */}
                 <div className='space-y-2'>
                   <label className='text-sm font-medium text-slate-700 flex items-center gap-2'>
                     <Phone className='w-4 h-4 text-slate-400' />
@@ -1183,9 +1198,9 @@ const UsersManagement: React.FC = () => {
                     onChange={e =>
                       handleProfileChange('telephone', e.target.value)
                     }
-                    className={`w-full px-3 py-2.5 text-sm border rounded-lg focus:outline-none focus:ring-none focus:border-blue-500 hover:border-blue-400 transition-all duration-200 ${
+                    className={`w-full px-3 py-2.5 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent hover:border-blue-400 transition-all duration-200 ${
                       profileErrors.telephone
-                        ? 'border-red-300'
+                        ? 'border-red-300 focus:ring-red-500'
                         : 'border-slate-300'
                     }`}
                     placeholder='+33 1 23 45 67 89'
@@ -1201,10 +1216,9 @@ const UsersManagement: React.FC = () => {
                   </p>
                 </div>
 
-                {/* Information */}
                 <div className='bg-blue-50 border border-blue-200 rounded-lg p-3'>
                   <div className='flex items-start'>
-                    <Info className='w-4 h-4 text-blue-500 mt-0.5 mr-2 flex-shrink-0' />
+                    <Info className='w-4 h-4 text-blue-500 mt-0.5 mr-2 shrink-0' />
                     <div>
                       <p className='text-xs text-blue-800 font-medium'>
                         Informations
@@ -1222,7 +1236,7 @@ const UsersManagement: React.FC = () => {
                 <button
                   onClick={resetEditForm}
                   disabled={!hasEditChanges()}
-                  className='flex-1 px-4 py-2.5 text-sm border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 focus:outline-none focus:ring-none focus:border-blue-500 hover:border-blue-400 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed'
+                  className='flex-1 px-4 py-2.5 text-sm border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500 hover:border-blue-400 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed'
                 >
                   Annuler
                 </button>
@@ -1232,7 +1246,7 @@ const UsersManagement: React.FC = () => {
                     !hasEditChanges() ||
                     Object.keys(profileErrors).some(key => profileErrors[key])
                   }
-                  className={`flex-1 px-4 py-2.5 text-sm rounded-lg focus:outline-none focus:ring-none focus:border-blue-500 transition-all duration-200 flex items-center justify-center gap-2 ${
+                  className={`flex-1 px-4 py-2.5 text-sm rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-200 flex items-center justify-center gap-2 ${
                     !hasEditChanges() ||
                     Object.keys(profileErrors).some(key => profileErrors[key])
                       ? 'bg-slate-300 text-slate-500 cursor-not-allowed'
@@ -1247,7 +1261,6 @@ const UsersManagement: React.FC = () => {
           </div>
         )}
 
-        {/* Modal de réinitialisation du mot de passe */}
         {isPasswordModalOpen && selectedUser && (
           <div className='fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4'>
             <div className='bg-white rounded-xl border border-slate-200/60 max-w-md w-full'>
@@ -1258,7 +1271,7 @@ const UsersManagement: React.FC = () => {
                 </h2>
                 <button
                   onClick={() => setIsPasswordModalOpen(false)}
-                  className='p-1.5 hover:bg-slate-100 rounded-lg focus:outline-none focus:ring-none focus:border-blue-500 transition-all duration-200'
+                  className='p-1.5 hover:bg-slate-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-200'
                 >
                   <X className='w-5 h-5 text-slate-500' />
                 </button>
@@ -1267,7 +1280,7 @@ const UsersManagement: React.FC = () => {
               <div className='p-4 space-y-4'>
                 <div className='bg-amber-50 border border-amber-200 rounded-lg p-3'>
                   <div className='flex items-start'>
-                    <AlertTriangle className='w-4 h-4 text-amber-600 mt-0.5 mr-2 flex-shrink-0' />
+                    <AlertTriangle className='w-4 h-4 text-amber-600 mt-0.5 mr-2 shrink-0' />
                     <div>
                       <p className='text-sm font-medium text-amber-800'>
                         Réinitialisation
@@ -1299,12 +1312,12 @@ const UsersManagement: React.FC = () => {
                         })
                       }
                       placeholder='Minimum 8 caractères'
-                      className='w-full px-3 py-2.5 pr-10 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-none focus:border-blue-500 hover:border-blue-400 transition-all duration-200'
+                      className='w-full px-3 py-2.5 pr-10 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent hover:border-blue-400 transition-all duration-200'
                     />
                     <button
                       type='button'
                       onClick={() => setShowNewPassword(!showNewPassword)}
-                      className='absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 focus:outline-none focus:ring-none'
+                      className='absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-500'
                     >
                       {showNewPassword ? (
                         <EyeOff className='w-4 h-4' />
@@ -1334,14 +1347,14 @@ const UsersManagement: React.FC = () => {
                         })
                       }
                       placeholder='Confirmer le mot de passe'
-                      className='w-full px-3 py-2.5 pr-10 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-none focus:border-blue-500 hover:border-blue-400 transition-all duration-200'
+                      className='w-full px-3 py-2.5 pr-10 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent hover:border-blue-400 transition-all duration-200'
                     />
                     <button
                       type='button'
                       onClick={() =>
                         setShowConfirmPassword(!showConfirmPassword)
                       }
-                      className='absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 focus:outline-none focus:ring-none'
+                      className='absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-500'
                     >
                       {showConfirmPassword ? (
                         <EyeOff className='w-4 h-4' />
@@ -1356,7 +1369,7 @@ const UsersManagement: React.FC = () => {
               <div className='flex gap-3 p-4 border-t border-slate-200'>
                 <button
                   onClick={() => setIsPasswordModalOpen(false)}
-                  className='flex-1 px-4 py-2.5 text-sm border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 focus:outline-none focus:ring-none focus:border-blue-500 hover:border-blue-400 transition-all duration-200'
+                  className='flex-1 px-4 py-2.5 text-sm border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500 hover:border-blue-400 transition-all duration-200'
                 >
                   Annuler
                 </button>
@@ -1367,7 +1380,7 @@ const UsersManagement: React.FC = () => {
                     !passwordData.confirmNewPassword ||
                     passwordData.newPassword !== passwordData.confirmNewPassword
                   }
-                  className={`flex-1 px-4 py-2.5 text-sm rounded-lg focus:outline-none focus:ring-none focus:border-blue-500 transition-all duration-200 flex items-center justify-center gap-2 ${
+                  className={`flex-1 px-4 py-2.5 text-sm rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-200 flex items-center justify-center gap-2 ${
                     !passwordData.newPassword ||
                     !passwordData.confirmNewPassword ||
                     passwordData.newPassword !== passwordData.confirmNewPassword
@@ -1383,7 +1396,6 @@ const UsersManagement: React.FC = () => {
           </div>
         )}
 
-        {/* Modal de confirmation de suppression */}
         {isDeleteModalOpen && selectedUser && (
           <div className='fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4'>
             <div className='bg-white rounded-xl border border-slate-200/60 max-w-md w-full'>
@@ -1396,7 +1408,7 @@ const UsersManagement: React.FC = () => {
                 </div>
                 <button
                   onClick={() => setIsDeleteModalOpen(false)}
-                  className='p-1.5 hover:bg-slate-100 rounded-lg focus:outline-none focus:ring-none focus:border-blue-500 transition-all duration-200'
+                  className='p-1.5 hover:bg-slate-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-200'
                 >
                   <X className='w-5 h-5 text-slate-500' />
                 </button>
@@ -1413,9 +1425,9 @@ const UsersManagement: React.FC = () => {
                 <p className='text-xs text-slate-500 text-center mt-1'>
                   Cette action est irréversible.
                 </p>
-                {selectedUser._id === currentUser?.id && (
+                {selectedUser.id === currentUser?.id && (
                   <p className='text-rose-600 text-xs text-center mt-2 bg-rose-50 p-2 rounded border border-rose-200'>
-                    ⚠️ Vous ne pouvez pas supprimer votre compte
+                    Vous ne pouvez pas supprimer votre compte
                   </p>
                 )}
               </div>
@@ -1423,15 +1435,15 @@ const UsersManagement: React.FC = () => {
               <div className='flex gap-3 p-4 border-t border-slate-200'>
                 <button
                   onClick={() => setIsDeleteModalOpen(false)}
-                  className='flex-1 px-4 py-2.5 text-sm border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 focus:outline-none focus:ring-none focus:border-blue-500 hover:border-blue-400 transition-all duration-200'
+                  className='flex-1 px-4 py-2.5 text-sm border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500 hover:border-blue-400 transition-all duration-200'
                 >
                   Annuler
                 </button>
                 <button
                   onClick={handleDeleteUser}
-                  disabled={selectedUser._id === currentUser?.id}
-                  className={`flex-1 px-4 py-2.5 text-sm rounded-lg focus:outline-none focus:ring-none focus:border-blue-500 transition-all duration-200 flex items-center justify-center gap-2 ${
-                    selectedUser._id === currentUser?.id
+                  disabled={selectedUser.id === currentUser?.id}
+                  className={`flex-1 px-4 py-2.5 text-sm rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-200 flex items-center justify-center gap-2 ${
+                    selectedUser.id === currentUser?.id
                       ? 'bg-slate-300 text-slate-500 cursor-not-allowed'
                       : 'bg-rose-500 text-white hover:bg-rose-600'
                   }`}

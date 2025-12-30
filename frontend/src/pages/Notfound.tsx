@@ -71,21 +71,21 @@ const NotFound: React.FC = (): React.JSX.Element => {
         <meta name='robots' content='noindex, nofollow' />
       </Helmet>
 
-      <div className='min-h-screen bg-gradient-to-b from-gray-50 to-white flex items-center justify-center p-4 md:p-6'>
+      <div className='min-h-screen bg-linear-to-b from-gray-50 to-white flex items-center justify-center p-4 md:p-6'>
         <div className='max-w-2xl w-full text-center space-y-8'>
           {/* Decorative Header */}
           <div className='relative'>
-            <div className='absolute -inset-4 bg-gradient-to-r from-blue-500/10 to-cyan-500/10 blur-3xl rounded-full' />
+            <div className='absolute -inset-4 bg-linear-to-r from-blue-500/10 to-cyan-500/10 blur-3xl rounded-full' />
 
             <div className='relative'>
               {/* Animated 404 Number */}
               <div className='relative inline-block'>
-                <span className='text-9xl md:text-[10rem] font-black bg-gradient-to-r from-blue-600 to-cyan-500 bg-clip-text text-transparent'>
+                <span className='text-9xl md:text-[10rem] font-black bg-linear-to-r from-blue-600 to-cyan-500 bg-clip-text text-transparent'>
                   404
                 </span>
 
                 {/* Glow effect */}
-                <div className='absolute inset-0 bg-gradient-to-r from-blue-600/20 to-cyan-500/20 blur-2xl -z-10' />
+                <div className='absolute inset-0 bg-linear-to-r from-blue-600/20 to-cyan-500/20 blur-2xl -z-10' />
 
                 {/* Floating dots */}
                 <div className='absolute -top-4 -right-4 w-8 h-8 bg-blue-400 rounded-full animate-[float_3s_ease-in-out_infinite]' />
@@ -108,13 +108,13 @@ const NotFound: React.FC = (): React.JSX.Element => {
 
             {/* Countdown Timer */}
             <div className='max-w-sm mx-auto'>
-              <div className='bg-gradient-to-br from-white to-gray-50 rounded-2xl p-6 shadow-lg border border-gray-200'>
+              <div className='bg-linear-to-br from-white to-gray-50 rounded-2xl p-6 shadow-lg border border-gray-200'>
                 <div className='space-y-4'>
                   <div className='flex items-center justify-between'>
                     <span className='text-gray-700 font-medium'>
                       Redirection dans :
                     </span>
-                    <span className='text-3xl font-bold bg-gradient-to-r from-blue-600 to-cyan-500 bg-clip-text text-transparent'>
+                    <span className='text-3xl font-bold bg-linear-to-r from-blue-600 to-cyan-500 bg-clip-text text-transparent'>
                       {countdown}s
                     </span>
                   </div>
@@ -122,7 +122,7 @@ const NotFound: React.FC = (): React.JSX.Element => {
                   {/* Progress Bar */}
                   <div className='h-2 bg-gray-200 rounded-full overflow-hidden'>
                     <div
-                      className='h-full bg-gradient-to-r from-blue-500 to-cyan-400 rounded-full transition-all duration-1000 ease-linear'
+                      className='h-full bg-linear-to-r from-blue-500 to-cyan-400 rounded-full transition-all duration-1000 ease-linear'
                       style={{ width: `${(countdown / 5) * 100}%` }}
                     />
                   </div>
@@ -134,7 +134,7 @@ const NotFound: React.FC = (): React.JSX.Element => {
             <div className='flex flex-col sm:flex-row gap-4 justify-center pt-4'>
               <button
                 onClick={handleGoHome}
-                className='group relative px-8 py-4 bg-gradient-to-r from-blue-600 to-cyan-500 text-white font-semibold rounded-xl shadow-lg hover:shadow-xl transition-all duration-300 hover:-translate-y-1 active:translate-y-0'
+                className='group relative px-8 py-4 bg-linear-to-r from-blue-600 to-cyan-500 text-white font-semibold rounded-xl shadow-lg hover:shadow-xl transition-all duration-300 hover:-translate-y-1 active:translate-y-0'
               >
                 <div className='absolute inset-0 bg-white/10 rounded-xl opacity-0 group-hover:opacity-100 transition-opacity duration-300' />
                 <span className='relative flex items-center justify-center gap-2'>
@@ -191,13 +191,13 @@ const NotFound: React.FC = (): React.JSX.Element => {
           {/* Decorative Elements */}
           <div className='fixed inset-0 pointer-events-none -z-10 overflow-hidden'>
             {/* Background Grid */}
-            <div className='absolute inset-0 bg-[linear-gradient(to_right,#f0f0f0_1px,transparent_1px),linear-gradient(to_bottom,#f0f0f0_1px,transparent_1px)] bg-[size:50px_50px] opacity-20' />
+            <div className='absolute inset-0 bg-[linear-gradient(to_right,#f0f0f0_1px,transparent_1px),linear-gradient(to_bottom,#f0f0f0_1px,transparent_1px)] bg-size-[50px_50px] opacity-20' />
 
             {/* Animated Particles */}
             {particles.map(particle => (
               <div
                 key={particle.id}
-                className='absolute w-1 h-1 bg-gradient-to-r from-blue-400 to-cyan-400 rounded-full animate-pulse'
+                className='absolute w-1 h-1 bg-linear-to-r from-blue-400 to-cyan-400 rounded-full animate-pulse'
                 style={particle.style}
               />
             ))}

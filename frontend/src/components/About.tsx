@@ -2,13 +2,13 @@ import AOS from 'aos';
 import 'aos/dist/aos.css';
 import React, { useEffect } from 'react';
 import {
-  FiArrowRight,
-  FiAward,
-  FiBook,
-  FiTarget,
-  FiUser,
-  FiUsers,
-} from 'react-icons/fi';
+  ArrowRight as FiArrowRight,
+  Award as FiAward,
+  Book as FiBook,
+  Target as FiTarget,
+  User as FiUser,
+  Users as FiUsers,
+} from 'lucide-react';
 import { Link, useLocation } from 'react-router-dom';
 
 const About = () => {
@@ -47,7 +47,7 @@ const About = () => {
   ];
 
   return (
-    <div className='bg-gradient-to-b from-white via-sky-50 to-white mt-5'>
+    <div className='bg-linear-to-b from-white via-sky-50 to-white mt-5'>
       <section
         id='a-propos'
         className='py-12 px-4 sm:px-6 lg:px-8 w-full max-w-7xl mx-auto'
@@ -71,7 +71,7 @@ const About = () => {
           data-aos-delay='200'
         >
           <div className='flex flex-col lg:flex-row'>
-            <div className='lg:w-2/5 bg-gradient-to-br from-sky-500 to-sky-700 p-6 md:p-8 flex flex-col justify-center relative overflow-hidden'>
+            <div className='lg:w-2/5 bg-linear-to-br from-sky-500 to-sky-700 p-6 md:p-8 flex flex-col justify-center relative overflow-hidden'>
               {/* Texture déco */}
               <div className='absolute inset-0 pointer-events-none'>
                 <div

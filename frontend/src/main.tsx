@@ -1,11 +1,10 @@
 import React from 'react';
-import ReactDOM from 'react-dom/client';
+import { createRoot } from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
 import { HelmetProvider } from 'react-helmet-async';
-import { ToastContainer } from 'react-toastify';
 import App from './App';
 import { AuthProvider } from './context/AuthContext';
-import 'react-toastify/dist/ReactToastify.css';
+import { ToastContainer } from 'react-toastify';
 import './index.css';
 
 const GlobalToastContainer = () => (
@@ -20,10 +19,6 @@ const GlobalToastContainer = () => (
     draggable={true}
     pauseOnHover={true}
     theme='light'
-    limit={1}
-    toastClassName='toast-custom'
-    bodyClassName='toast-body'
-    progressClassName='toast-progress'
   />
 );
 
@@ -34,15 +29,13 @@ if (!rootElement) {
   throw new Error("Élément 'root' non trouvé dans le DOM");
 }
 
-ReactDOM.createRoot(rootElement).render(
+// React 19 : createRoot est toujours la méthode recommandée
+const root = createRoot(rootElement);
+
+root.render(
   <React.StrictMode>
     <HelmetProvider>
-      <BrowserRouter
-        future={{
-          v7_startTransition: true,
-          v7_relativeSplatPath: true,
-        }}
-      >
+      <BrowserRouter>
         <AuthProvider>
           <App />
           <GlobalToastContainer />

@@ -105,7 +105,7 @@ const AdminProfile: React.FC = () => {
 
       // Use a more robust fetch implementation
       const response = await globalThis.fetch(
-        `${VITE_API_URL}/auth/update-password`,
+        `${VITE_API_URL}/api/auth/update-password`,
         {
           method: 'POST',
           headers: {
@@ -277,7 +277,7 @@ const AdminProfile: React.FC = () => {
                     {user?.role === 'admin' ? 'Administrateur' : 'Utilisateur'}
                   </p>
                 </div>
-                <div className='bg-blue-500 text-white px-3 py-1 rounded-full text-xs font-medium flex-shrink-0 ml-3'>
+                <div className='bg-blue-500 text-white px-3 py-1 rounded-full text-xs font-medium shrink-0 ml-3'>
                   {user?.role === 'admin' ? 'Admin' : 'Utilisateur'}
                 </div>
               </div>
@@ -439,9 +439,9 @@ const AdminProfile: React.FC = () => {
                   {passwordRules.map(rule => (
                     <div key={rule.id} className='flex items-center gap-3'>
                       {rule.met ? (
-                        <CheckCircle className='w-4 h-4 text-green-500 flex-shrink-0' />
+                        <CheckCircle className='w-4 h-4 text-green-500 shrink-0' />
                       ) : (
-                        <XCircle className='w-4 h-4 text-gray-300 flex-shrink-0' />
+                        <XCircle className='w-4 h-4 text-gray-300 shrink-0' />
                       )}
                       <span
                         className={`text-sm ${rule.met ? 'text-green-600' : 'text-gray-500'}`}
@@ -495,7 +495,7 @@ const AdminProfile: React.FC = () => {
             {/* Note de sécurité */}
             <div className='mt-6 p-4 bg-amber-50 border border-amber-200 rounded-lg'>
               <div className='flex items-start gap-3'>
-                <Shield className='w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5' />
+                <Shield className='w-5 h-5 text-amber-600 shrink-0 mt-0.5' />
                 <div>
                   <p className='text-amber-800 text-sm font-medium'>
                     Sécurité renforcée

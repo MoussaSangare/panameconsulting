@@ -1,14 +1,8 @@
 /* eslint-disable no-undef */
 
 import React, { useState, useEffect } from 'react';
-import {
-  FiAlertCircle,
-  FiEye,
-  FiEyeOff,
-  FiLock,
-  FiMail,
-  FiUserX,
-} from 'react-icons/fi';
+import { FiAlertCircle, FiMail } from 'react-icons/fi';
+import { Eye as FiEye, EyeOff as FiEyeOff, Lock as FiLock, UserX as FiUserX } from 'lucide-react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { toast } from 'react-toastify';
 import { useAuth } from '../../context/AuthContext';
@@ -54,16 +48,9 @@ const Login: React.FC = (): React.JSX.Element => {
         message.includes('MAINTENANCE MODE')
       ) {
         toast.error(
-          <div>
-            <div className='font-semibold'>Mode maintenance activé</div>
-            <div className='text-sm mt-1'>
-              L'application est en cours de maintenance. Réessayez plus tard ou
-              contactez l'administrateur.
-            </div>
-          </div>,
+          'Mode maintenance activé. L\'application est en cours de maintenance. Réessayez plus tard ou contactez l\'administrateur.',
           {
             autoClose: 10000,
-            icon: <FiAlertCircle className='text-orange-500 text-xl' />,
           }
         );
       } else if (
@@ -73,15 +60,9 @@ const Login: React.FC = (): React.JSX.Element => {
         message.includes('Compte désactivé')
       ) {
         toast.error(
-          <div>
-            <div className='font-semibold'>Compte désactivé</div>
-            <div className='text-sm mt-1'>
-              Contactez l'administrateur pour réactiver votre compte
-            </div>
-          </div>,
+          'Compte désactivé. Contactez l\'administrateur pour réactiver votre compte',
           {
             autoClose: 8000,
-            icon: <FiUserX className='text-red-500 text-xl' />,
           }
         );
       } else if (
@@ -92,26 +73,14 @@ const Login: React.FC = (): React.JSX.Element => {
         const match = message.match(/:(\d+)/) || message.match(/\(reste (\d+)h\)/);
         const hours = match ? match[1] : '24';
         toast.warning(
-          <div>
-            <div className='font-semibold'>Déconnexion administrative</div>
-            <div className='text-sm mt-1'>
-              Votre compte est temporairement déconnecté. Réessayez dans {hours}{' '}
-              heures.
-            </div>
-          </div>,
+          `Déconnexion administrative. Votre compte est temporairement déconnecté. Réessayez dans ${hours} heures.`,
           {
             autoClose: 10000,
-            icon: <FiAlertCircle className='text-amber-500 text-xl' />,
           }
         );
       } else if (message.includes('Trop de tentatives')) {
         toast.error(
-          <div>
-            <div className='font-semibold'>Trop de tentatives</div>
-            <div className='text-sm mt-1'>
-              Veuillez réessayer dans quelques minutes
-            </div>
-          </div>,
+          'Trop de tentatives. Veuillez réessayer dans quelques minutes',
           { autoClose: 6000 }
         );
       } else if (
@@ -119,15 +88,9 @@ const Login: React.FC = (): React.JSX.Element => {
         message.includes('NO_PASSWORD_IN_DB')
       ) {
         toast.info(
-          <div>
-            <div className='font-semibold'>Configuration du compte requise</div>
-            <div className='text-sm mt-1'>
-              Veuillez définir votre mot de passe pour la première connexion
-            </div>
-          </div>,
+          'Configuration du compte requise. Veuillez définir votre mot de passe pour la première connexion',
           {
             autoClose: 8000,
-            icon: <FiAlertCircle className='text-blue-500 text-xl' />,
           }
         );
         navigate('/reset-password-required', { 
@@ -163,7 +126,7 @@ const Login: React.FC = (): React.JSX.Element => {
     >
       <div className='w-full max-w-sm'>
         <div className='bg-white rounded-lg shadow-md overflow-hidden mt-8'>
-          <div className='bg-gradient-to-r from-sky-500 to-sky-600 p-4 text-center'>
+          <div className='bg-linear-to-r from-sky-500 to-sky-600 p-4 text-center'>
             <div className='flex items-center justify-center space-x-2'>
               <div className='bg-white p-1 rounded-full'>
                 <div className='w-8 h-8 rounded-full bg-sky-500 flex items-center justify-center'>
@@ -307,7 +270,7 @@ const Login: React.FC = (): React.JSX.Element => {
                 <button
                   type='submit'
                   disabled={isLoading}
-                  className={`w-full py-2 px-4 rounded-md text-white bg-gradient-to-r from-sky-500 to-sky-600 hover:from-sky-600 hover:to-sky-700 font-medium transition-all duration-200 ${
+                  className={`w-full py-2 px-4 rounded-md text-white bg-linear-to-r from-sky-500 to-sky-600 hover:from-sky-600 hover:to-sky-700 font-medium transition-all duration-200 ${
                     isLoading
                       ? 'opacity-60 cursor-not-allowed'
                       : 'hover:shadow-md'

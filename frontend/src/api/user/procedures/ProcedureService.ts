@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../../../context/AuthContext';
 import { toast } from 'react-toastify';
 
-// ==================== TYPES SÉCURISÉS ====================
+// ==================== TYPES CONFORMES AU BACKEND ====================
 export enum ProcedureStatus {
   IN_PROGRESS = 'En cours',
   COMPLETED = 'Terminée',
@@ -24,12 +24,12 @@ export enum StepName {
   PREPARATIF_VOYAGE = 'PREPARATIF VOYAGE',
 }
 
-export interface UserProcedureStep {
+export interface Step {
   nom: StepName;
   statut: StepStatus;
+  raisonRefus?: string;
   dateCreation: Date;
   dateMaj: Date;
-  raisonRefus?: string;
   dateCompletion?: Date;
 }
 
@@ -45,23 +45,24 @@ export interface RendezvousInfo {
 
 export interface UserProcedure {
   _id: string;
-  rendezVousId: RendezvousInfo | string;
+  rendezVousId?: string | RendezvousInfo; // ✅ Conforme au backend (peuplé ou non)
   prenom: string;
   nom: string;
   email: string;
+  telephone?: string;
   destination: string;
   destinationAutre?: string;
   filiere: string;
   filiereAutre?: string;
   niveauEtude: string;
-  telephone?: string;
   statut: ProcedureStatus;
-  steps: UserProcedureStep[];
+  steps: Step[];
   raisonRejet?: string;
   dateCompletion?: Date;
   dateDerniereModification?: Date;
   createdAt: Date;
   updatedAt: Date;
+  // ✅ PAS de isDeleted - Géré par statut dans le backend
 }
 
 export interface PaginatedUserProcedures {
@@ -72,93 +73,80 @@ export interface PaginatedUserProcedures {
   totalPages: number;
 }
 
-export interface CancelProcedureDto {
-  reason?: string;
-}
-
-// ==================== SERVICE API UTILISANT LE CONTEXTE ====================
+// ==================== SERVICE API SIMPLIFIÉ ====================
 class ProcedureApiService {
+  private fetchWithAuth: (endpoint: string, options?: RequestInit) => Promise<Response>;
+
+  constructor(fetchWithAuth: (endpoint: string, options?: RequestInit) => Promise<Response>) {
+    this.fetchWithAuth = fetchWithAuth;
+  }
+
   /**
    * Récupérer les procédures de l'utilisateur connecté
-   * Utilise fetchWithAuth du contexte pour gérer automatiquement les tokens
    */
   async fetchUserProcedures(
-    fetchWithAuth: (endpoint: string, options?: RequestInit) => Promise<Response>,
     page: number = 1,
     limit: number = 10
   ): Promise<PaginatedUserProcedures> {
     try {
-      const response = await fetchWithAuth(
-        `/procedures/user?page=${page}&limit=${limit}`
+      const response = await this.fetchWithAuth(
+        `/api/procedures/user?page=${page}&limit=${limit}`
       );
 
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        const errorMessage = errorData.message || `Erreur ${response.status}`;
-        throw new Error(errorMessage);
+        if (response.status === 401) {
+          throw new Error('SESSION_EXPIRED');
+        }
+        
+        const errorText = await response.text();
+        throw new Error(`Erreur ${response.status}: ${errorText || 'Erreur serveur'}`);
       }
 
       const data = await response.json();
-
-      // Transforme les données pour correspondre à l'interface frontend
-      const transformedData: PaginatedUserProcedures = {
-        data: data.data.map(this.transformProcedureData.bind(this)),
-        total: data.total,
-        page: data.page,
-        limit: data.limit,
-        totalPages: data.totalPages,
-      };
-
-      return transformedData;
+      return data; // ✅ Le backend formate déjà correctement
     } catch (error: any) {
-      if (import.meta.env.DEV) {
-        globalThis.console.error('Erreur fetchUserProcedures:', error.message);
+      console.error('Erreur fetchUserProcedures:', error.message);
+      
+      // Messages utilisateur-friendly
+      if (error.message === 'SESSION_EXPIRED') {
+        throw error;
+      } else if (error.message.includes('404')) {
+        throw new Error('Endpoint non trouvé');
+      } else if (error.message.includes('500')) {
+        throw new Error('Erreur serveur interne');
       }
-
-      // Afficher un toast uniquement pour les erreurs non liées à la session
-      if (error.message !== 'SESSION_EXPIRED') {
-        toast.error(this.getUserFriendlyMessage(error.message));
-      }
-
-      throw error;
+      
+      throw new Error('Impossible de charger vos procédures');
     }
   }
 
   /**
-   * Récupérer les détails d'une procédure spécifique
+   * Récupérer les détails d'une procédure
    */
-  async fetchProcedureDetails(
-    fetchWithAuth: (endpoint: string, options?: RequestInit) => Promise<Response>,
-    procedureId: string
-  ): Promise<UserProcedure> {
+  async fetchProcedureDetails(procedureId: string): Promise<UserProcedure> {
     if (!procedureId) {
-      toast.error('ID de procédure manquant');
       throw new Error('ID de procédure manquant');
     }
 
     try {
-      const response = await fetchWithAuth(`/procedures/${procedureId}`);
+      const response = await this.fetchWithAuth(`/api/procedures/${procedureId}`);
 
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        const errorMessage = errorData.message || `Erreur ${response.status}`;
-        throw new Error(errorMessage);
+        if (response.status === 404) {
+          throw new Error('Procédure non trouvée');
+        }
+        throw new Error(`Erreur ${response.status}`);
       }
 
-      const data = await response.json();
-      return this.transformProcedureData(data);
+      return response.json();
     } catch (error: any) {
-      if (import.meta.env.DEV) {
-        globalThis.console.error(
-          'Erreur fetchProcedureDetails:',
-          error.message
-        );
+      console.error('Erreur fetchProcedureDetails:', error.message);
+      
+      if (error.message === 'SESSION_EXPIRED') {
+        throw error;
       }
-
-      if (error.message !== 'SESSION_EXPIRED') {
-        toast.error(this.getUserFriendlyMessage(error.message));
-      }
-
+      
+      toast.error(this.getUserFriendlyMessage(error.message));
       throw error;
     }
   }
@@ -166,92 +154,47 @@ class ProcedureApiService {
   /**
    * Annuler une procédure
    */
-  async cancelProcedure(
-    fetchWithAuth: (endpoint: string, options?: RequestInit) => Promise<Response>,
-    procedureId: string,
-    reason?: string
-  ): Promise<UserProcedure> {
+  async cancelProcedure(procedureId: string, reason?: string): Promise<UserProcedure> {
     if (!procedureId) {
-      toast.error('ID de procédure manquant');
       throw new Error('ID de procédure manquant');
     }
 
     try {
-      const response = await fetchWithAuth(
-        `/procedures/${procedureId}/cancel`,
+      const response = await this.fetchWithAuth(
+        `/api/procedures/${procedureId}/cancel`,
         {
           method: 'PUT',
-          body: JSON.stringify({ reason } as CancelProcedureDto),
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ reason }),
         }
       );
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
         const errorMessage = errorData.message || `Erreur ${response.status}`;
+        
+        if (response.status === 403) {
+          throw new Error('Action non autorisée');
+        } else if (response.status === 400) {
+          throw new Error('Procédure déjà finalisée');
+        }
+        
         throw new Error(errorMessage);
       }
 
-      const data = await response.json();
-
-      toast.success('Procédure annulée avec succès');
-      return this.transformProcedureData(data);
+      return response.json();
     } catch (error: any) {
-      if (import.meta.env.DEV) {
-        globalThis.console.error('Erreur cancelProcedure:', error.message);
+      console.error('Erreur cancelProcedure:', error.message);
+      
+      if (error.message === 'SESSION_EXPIRED') {
+        throw error;
       }
-
-      if (error.message !== 'SESSION_EXPIRED') {
-        toast.error(this.getUserFriendlyMessage(error.message));
-      }
-
+      
+      toast.error(this.getUserFriendlyMessage(error.message));
       throw error;
     }
-  }
-
-  /**
-   * Transformer les données du backend pour correspondre au frontend
-   */
-  private transformProcedureData(data: any): UserProcedure {
-    return {
-      _id: data._id || data.id,
-      rendezVousId: data.rendezVousId || '',
-      prenom: data.prenom || '',
-      nom: data.nom || '',
-      email: data.email || '',
-      destination: data.destination || '',
-      destinationAutre: data.destinationAutre,
-      filiere: data.filiere || '',
-      filiereAutre: data.filiereAutre,
-      niveauEtude: data.niveauEtude || '',
-      telephone: data.telephone,
-      statut: (data.statut as ProcedureStatus) || ProcedureStatus.IN_PROGRESS,
-      steps: this.transformSteps(data.steps || []),
-      raisonRejet: data.raisonRejet,
-      dateCompletion: data.dateCompletion
-        ? new Date(data.dateCompletion)
-        : undefined,
-      dateDerniereModification: data.dateDerniereModification
-        ? new Date(data.dateDerniereModification)
-        : undefined,
-      createdAt: new Date(data.createdAt),
-      updatedAt: new Date(data.updatedAt),
-    };
-  }
-
-  /**
-   * Transformer les étapes du backend pour correspondre au frontend
-   */
-  private transformSteps(steps: any[]): UserProcedureStep[] {
-    return steps.map(step => ({
-      nom: step.nom as StepName,
-      statut: step.statut as StepStatus,
-      dateCreation: new Date(step.dateCreation),
-      dateMaj: new Date(step.dateMaj),
-      raisonRefus: step.raisonRefus,
-      dateCompletion: step.dateCompletion
-        ? new Date(step.dateCompletion)
-        : undefined,
-    }));
   }
 
   /**
@@ -259,60 +202,49 @@ class ProcedureApiService {
    */
   private getUserFriendlyMessage(errorCode: string): string {
     const messages: Record<string, string> = {
-      SESSION_EXPIRED: 'Session expirée - Veuillez vous reconnecter',
-      'ID de procédure manquant': 'Identifiant de procédure manquant',
-      'Délai de connexion dépassé': 'Délai de connexion dépassé',
-      'Erreur 400': 'Requête incorrecte',
-      'Erreur 403': 'Accès refusé',
+      'SESSION_EXPIRED': 'Session expirée - Veuillez vous reconnecter',
+      'Action non autorisée': 'Vous ne pouvez annuler que vos propres procédures',
+      'Procédure déjà finalisée': 'Cette procédure est déjà finalisée',
+      'Procédure non trouvée': 'Cette procédure n\'existe plus',
       'Erreur 404': 'Procédure non trouvée',
+      'Erreur 403': 'Accès refusé',
       'Erreur 500': 'Erreur serveur',
     };
 
-    return messages[errorCode] || 'Une erreur est survenue';
+    return messages[errorCode] || errorCode || 'Une erreur est survenue';
   }
 }
 
-// ==================== HOOKS PERSONNALISÉS UTILISANT LE CONTEXTE ====================
+// ==================== HOOKS SIMPLIFIÉS ====================
 
 /**
  * Hook pour récupérer les procédures de l'utilisateur
  */
 export const useUserProcedures = (page: number = 1, limit: number = 10) => {
-  const { fetchWithAuth, access_token } = useAuth();
-  const [procedures, setProcedures] = useState<PaginatedUserProcedures | null>(
-    null
-  );
+  const { fetchWithAuth } = useAuth();
+  const [procedures, setProcedures] = useState<PaginatedUserProcedures | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
   const fetchProcedures = useCallback(async () => {
-    // Vérifier que nous avons un token
-    if (!access_token) {
-      setLoading(false);
-      setError('Non authentifié');
-      return;
-    }
-
     setLoading(true);
     setError(null);
 
     try {
-      const apiService = new ProcedureApiService();
-      const data = await apiService.fetchUserProcedures(
-        fetchWithAuth,
-        page,
-        limit
-      );
+      const apiService = new ProcedureApiService(fetchWithAuth);
+      const data = await apiService.fetchUserProcedures(page, limit);
       setProcedures(data);
     } catch (err: any) {
-      const errorMessage = err.message || 'ERREUR_INCONNUE';
-      setError(errorMessage);
-
-      // Le contexte gère déjà la déconnexion pour SESSION_EXPIRED
+      setError(err.message);
+      
+      // Ne pas afficher toast pour SESSION_EXPIRED (géré par le contexte)
+      if (err.message !== 'SESSION_EXPIRED') {
+        toast.error(err.message || 'Erreur lors du chargement des procédures');
+      }
     } finally {
       setLoading(false);
     }
-  }, [fetchWithAuth, access_token, page, limit]);
+  }, [fetchWithAuth, page, limit]);
 
   useEffect(() => {
     fetchProcedures();
@@ -330,7 +262,7 @@ export const useUserProcedures = (page: number = 1, limit: number = 10) => {
  * Hook pour récupérer les détails d'une procédure
  */
 export const useProcedureDetails = (procedureId: string | null) => {
-  const { fetchWithAuth, access_token } = useAuth();
+  const { fetchWithAuth } = useAuth();
   const [procedure, setProcedure] = useState<UserProcedure | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
@@ -342,29 +274,23 @@ export const useProcedureDetails = (procedureId: string | null) => {
       return;
     }
 
-    if (!access_token) {
-      setLoading(false);
-      setError('Non authentifié');
-      return;
-    }
-
     setLoading(true);
     setError(null);
 
     try {
-      const apiService = new ProcedureApiService();
-      const data = await apiService.fetchProcedureDetails(
-        fetchWithAuth,
-        procedureId
-      );
+      const apiService = new ProcedureApiService(fetchWithAuth);
+      const data = await apiService.fetchProcedureDetails(procedureId);
       setProcedure(data);
     } catch (err: any) {
-      const errorMessage = err.message || 'ERREUR_INCONNUE';
-      setError(errorMessage);
+      setError(err.message);
+      
+      if (err.message !== 'SESSION_EXPIRED') {
+        toast.error(err.message || 'Erreur lors du chargement des détails');
+      }
     } finally {
       setLoading(false);
     }
-  }, [procedureId, fetchWithAuth, access_token]);
+  }, [procedureId, fetchWithAuth]);
 
   useEffect(() => {
     fetchDetails();
@@ -382,18 +308,11 @@ export const useProcedureDetails = (procedureId: string | null) => {
  * Hook pour annuler une procédure
  */
 export const useCancelProcedure = () => {
-  const { fetchWithAuth, access_token } = useAuth();
+  const { fetchWithAuth } = useAuth();
   const [loading, setLoading] = useState<boolean>(false);
 
   const cancelProcedure = useCallback(
-    async (
-      procedureId: string,
-      reason?: string
-    ): Promise<UserProcedure | null> => {
-      if (!access_token) {
-        throw new Error('Non authentifié');
-      }
-
+    async (procedureId: string, reason?: string): Promise<UserProcedure | null> => {
       if (!procedureId) {
         throw new Error('ID de procédure manquant');
       }
@@ -401,21 +320,18 @@ export const useCancelProcedure = () => {
       setLoading(true);
 
       try {
-        const apiService = new ProcedureApiService();
-        const data = await apiService.cancelProcedure(
-          fetchWithAuth,
-          procedureId,
-          reason
-        );
+        const apiService = new ProcedureApiService(fetchWithAuth);
+        const data = await apiService.cancelProcedure(procedureId, reason);
+        toast.success('Procédure annulée avec succès');
         return data;
       } catch (err: any) {
-        const errorMessage = err.message || 'ERREUR_INCONNUE';
+        // Le toast est déjà géré par le service
         throw err;
       } finally {
         setLoading(false);
       }
     },
-    [fetchWithAuth, access_token]
+    [fetchWithAuth]
   );
 
   return {
@@ -436,15 +352,17 @@ export const canCancelProcedure = (procedure: UserProcedure): boolean => {
     ProcedureStatus.REJECTED,
   ];
 
+  // Impossible d'annuler une procédure déjà finalisée
   if (finalStatuses.includes(procedure.statut)) {
     return false;
   }
 
   // Vérifier si des étapes sont déjà terminées
   const hasCompletedSteps = procedure.steps.some(
-    (step: UserProcedureStep) => step.statut === StepStatus.COMPLETED
+    (step) => step.statut === StepStatus.COMPLETED
   );
 
+  // Peut annuler si aucune étape n'est terminée
   return !hasCompletedSteps;
 };
 
@@ -459,13 +377,14 @@ export const getProgressStatus = (
   total: number;
 } => {
   const totalSteps = procedure.steps.length;
+  
+  // Compter les étapes terminées
   const completedSteps = procedure.steps.filter(
-    (step: UserProcedureStep) => step.statut === StepStatus.COMPLETED
+    (step) => step.statut === StepStatus.COMPLETED
   ).length;
 
   return {
-    percentage:
-      totalSteps > 0 ? Math.round((completedSteps / totalSteps) * 100) : 0,
+    percentage: totalSteps > 0 ? Math.round((completedSteps / totalSteps) * 100) : 0,
     completed: completedSteps,
     total: totalSteps,
   };
@@ -476,8 +395,28 @@ export const getProgressStatus = (
  */
 export const formatProcedureDate = (dateString: string | Date): string => {
   try {
-    const date =
-      typeof dateString === 'string' ? new Date(dateString) : dateString;
+    const date = typeof dateString === 'string' ? new Date(dateString) : dateString;
+
+    if (isNaN(date.getTime())) {
+      return 'Date invalide';
+    }
+
+    return date.toLocaleDateString('fr-FR', {
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric',
+    });
+  } catch {
+    return 'Date invalide';
+  }
+};
+
+/**
+ * Formate une date avec heure pour l'affichage
+ */
+export const formatProcedureDateTime = (dateString: string | Date): string => {
+  try {
+    const date = typeof dateString === 'string' ? new Date(dateString) : dateString;
 
     if (isNaN(date.getTime())) {
       return 'Date invalide';
@@ -531,7 +470,7 @@ export const getProcedureStatusColor = (statut: ProcedureStatus): string => {
     case ProcedureStatus.COMPLETED:
       return 'bg-green-50 text-green-700 border-green-200';
     case ProcedureStatus.CANCELLED:
-      return 'bg-red-50 text-red-700 border-red-200';
+      return 'bg-gray-100 text-gray-700 border-gray-300';
     case ProcedureStatus.REJECTED:
       return 'bg-orange-50 text-orange-700 border-orange-200';
     default:
@@ -551,12 +490,24 @@ export const getStepStatusColor = (statut: StepStatus): string => {
     case StepStatus.COMPLETED:
       return 'bg-green-50 text-green-700 border-green-200';
     case StepStatus.CANCELLED:
-      return 'bg-red-50 text-red-700 border-red-200';
+      return 'bg-gray-100 text-gray-600 border-gray-300';
     case StepStatus.REJECTED:
       return 'bg-orange-50 text-orange-700 border-orange-200';
     default:
       return 'bg-gray-50 text-gray-700 border-gray-200';
   }
+};
+
+/**
+ * Vérifie si une procédure a un rendez-vous associé peuplé
+ */
+export const hasPopulatedRendezvous = (procedure: UserProcedure): boolean => {
+  return (
+    procedure.rendezVousId !== undefined &&
+    procedure.rendezVousId !== null &&
+    typeof procedure.rendezVousId === 'object' &&
+    'firstName' in procedure.rendezVousId
+  );
 };
 
 // Export pour utilisation externe

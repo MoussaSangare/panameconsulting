@@ -43,6 +43,7 @@ type AdminOpinion = typeof ADMIN_OPINION[keyof typeof ADMIN_OPINION];
 
 @Injectable()
 export class RendezvousService {
+  
   private readonly logger = new Logger(RendezvousService.name);
   private holidays: any;
   private cachedHolidays: Map<string, string[]> = new Map();
@@ -640,6 +641,239 @@ export class RendezvousService {
     return updated;
   }
 
+
+  // Dans rendez-vous.service.ts
+async getStats(): Promise<{
+  total: number;
+  byStatus: { _id: string; count: number }[];
+  upcoming: number;
+  today: number;
+  byDate: { _id: string; count: number }[];
+  stats: {
+    pending: number;
+    confirmed: number;
+    completed: number;
+    cancelled: number;
+    expired: number;
+  };
+  recentActivities: {
+    hour: string;
+    count: number;
+    appointments: Array<{
+      firstName: string;
+      lastName: string;
+      time: string;
+      status: string;
+    }>;
+  }[];
+  userStats: {
+    uniqueUsers: number;
+    mostActiveUsers: Array<{
+      email: string;
+      count: number;
+      lastAppointment: Date;
+    }>;
+  };
+  popularSlots: Array<{ time: string; count: number }>; // AJOUTER CETTE LIGNE
+}> {
+  this.logger.log('Calcul des statistiques des rendez-vous');
+
+  try {
+    const today = new Date();
+    const todayStr = today.toISOString().split('T')[0];
+    
+    // Calculer toutes les statistiques en parallèle
+    const [
+      total,
+      byStatus,
+      upcoming,
+      todayCount,
+      byDate,
+      recentActivities,
+      uniqueUsers,
+      mostActiveUsers,
+      popularSlots // AJOUTER CETTE VARIABLE
+    ] = await Promise.all([
+      // Total des rendez-vous
+      this.rendezvousModel.countDocuments(),
+
+      // Répartition par statut
+      this.rendezvousModel.aggregate([
+        {
+          $group: {
+            _id: '$status',
+            count: { $sum: 1 }
+          }
+        },
+        {
+          $sort: { count: -1 }
+        }
+      ]),
+
+      // Rendez-vous à venir (aujourd'hui ou après)
+      this.rendezvousModel.countDocuments({
+        date: { $gte: todayStr },
+        status: { $in: ['En attente', 'Confirmé'] }
+      }),
+
+      // Rendez-vous d'aujourd'hui
+      this.rendezvousModel.countDocuments({
+        date: todayStr,
+        status: { $in: ['En attente', 'Confirmé', 'Terminé'] }
+      }),
+
+      // Distribution par date (7 derniers jours)
+      this.rendezvousModel.aggregate([
+        {
+          $match: {
+            createdAt: {
+              $gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
+            }
+          }
+        },
+        {
+          $group: {
+            _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } },
+            count: { $sum: 1 }
+          }
+        },
+        {
+          $sort: { _id: -1 }
+        },
+        {
+          $limit: 7
+        }
+      ]),
+
+      // Activités récentes (aujourd'hui)
+      this.rendezvousModel.find({
+        date: todayStr,
+        status: { $in: ['Confirmé', 'Terminé'] }
+      })
+        .select('firstName lastName time status date')
+        .sort({ time: 1 })
+        .limit(10)
+        .lean(),
+
+      // Nombre d'utilisateurs uniques
+      this.rendezvousModel.distinct('email').then(emails => emails.length),
+
+      // Utilisateurs les plus actifs
+      this.rendezvousModel.aggregate([
+        {
+          $group: {
+            _id: '$email',
+            count: { $sum: 1 },
+            lastAppointment: { $max: '$createdAt' }
+          }
+        },
+        {
+          $sort: { count: -1 }
+        },
+        {
+          $limit: 5
+        },
+        {
+          $project: {
+            email: '$_id',
+            count: 1,
+            lastAppointment: 1,
+            _id: 0
+          }
+        }
+      ]),
+
+      // Créneaux horaires populaires (AJOUTER CET APPEL)
+      this.rendezvousModel.aggregate([
+        {
+          $group: {
+            _id: '$time',
+            count: { $sum: 1 }
+          }
+        },
+        {
+          $match: {
+            count: { $gt: 0 }
+          }
+        },
+        {
+          $sort: { count: -1 }
+        },
+        {
+          $limit: 5
+        },
+        {
+          $project: {
+            time: '$_id',
+            count: 1,
+            _id: 0
+          }
+        }
+      ])
+    ]);
+
+    // Convertir byStatus en objet pour un accès facile
+    const statusMap = {};
+    byStatus.forEach(item => {
+      statusMap[item._id] = item.count;
+    });
+
+    // Regrouper les activités récentes par heure
+    const groupedActivities = this.groupActivitiesByHour(recentActivities);
+
+    // Calculer les statistiques détaillées
+    const stats = {
+      pending: statusMap['En attente'] || 0,
+      confirmed: statusMap['Confirmé'] || 0,
+      completed: statusMap['Terminé'] || 0,
+      cancelled: statusMap['Annulé'] || 0,
+      expired: statusMap['Expiré'] || 0,
+    };
+
+    this.logger.log(`Statistiques calculées: ${total} rendez-vous au total`);
+
+    return {
+      total,
+      byStatus,
+      upcoming,
+      today: todayCount,
+      byDate,
+      stats,
+      recentActivities: groupedActivities,
+      userStats: {
+        uniqueUsers,
+        mostActiveUsers
+      },
+      popularSlots: popularSlots || [] // AJOUTER CETTE PROPRIÉTÉ
+    };
+
+  } catch (error) {
+    this.logger.error(`Erreur lors du calcul des statistiques: ${error.message}`, error.stack);
+    
+    // Retourner des statistiques par défaut en cas d'erreur
+    return {
+      total: 0,
+      byStatus: [],
+      upcoming: 0,
+      today: 0,
+      byDate: [],
+      stats: {
+        pending: 0,
+        confirmed: 0,
+        completed: 0,
+        cancelled: 0,
+        expired: 0,
+      },
+      recentActivities: [],
+      userStats: {
+        uniqueUsers: 0,
+        mostActiveUsers: []
+      },
+      popularSlots: [] // AJOUTER CETTE PROPRIÉTÉ DANS LE RETOUR D'ERREUR
+    };
+  }
+}
+
   async removeWithPolicy(id: string, userEmail: string, isAdmin: boolean = false): Promise<Rendezvous> {
     const rdv = await this.rendezvousModel.findById(id);
     if (!rdv) {
@@ -800,6 +1034,348 @@ export class RendezvousService {
 
   // ==================== PRIVATE METHODS ====================
 
+
+
+ private groupActivitiesByHour(activities: any[]): any[] {
+  const groups = {};
+  
+  activities.forEach(activity => {
+    const hour = activity.time?.split(':')[0] || 'unknown';
+    
+    if (!groups[hour]) {
+      groups[hour] = {
+        hour: `${hour}:00`,
+        count: 0,
+        appointments: []
+      };
+    }
+    
+    groups[hour].count++;
+    groups[hour].appointments.push({
+      firstName: activity.firstName,
+      lastName: activity.lastName,
+      time: activity.time,
+      status: activity.status
+    });
+  });
+  
+  return Object.values(groups).sort((a: any, b: any) => a.hour.localeCompare(b.hour));
+}
+
+
+  // ==================== MONTHLY STATS ====================
+
+  async getMonthlyStats(year?: number, month?: number): Promise<any> {
+    const targetYear = year || new Date().getFullYear();
+    const targetMonth = month !== undefined ? month : new Date().getMonth() + 1;
+    
+    const startDate = new Date(targetYear, targetMonth - 1, 1);
+    const endDate = new Date(targetYear, targetMonth, 0, 23, 59, 59);
+    
+    try {
+      const [
+        monthlyStats,
+        dailyStats,
+        comparisonStats
+      ] = await Promise.all([
+        // Statistiques du mois en cours
+        this.rendezvousModel.aggregate([
+          {
+            $match: {
+              createdAt: {
+                $gte: startDate,
+                $lte: endDate
+              }
+            }
+          },
+          {
+            $group: {
+              _id: '$status',
+              count: { $sum: 1 }
+            }
+          }
+        ]),
+        
+        // Statistiques quotidiennes
+        this.rendezvousModel.aggregate([
+          {
+            $match: {
+              createdAt: {
+                $gte: startDate,
+                $lte: endDate
+              }
+            }
+          },
+          {
+            $group: {
+              _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } },
+              count: { $sum: 1 }
+            }
+          },
+          {
+            $sort: { _id: 1 }
+          }
+        ]),
+        
+        // Comparaison avec le mois précédent
+        this.getPreviousMonthComparison(startDate)
+      ]);
+      
+      return {
+        period: `${targetMonth}/${targetYear}`,
+        total: monthlyStats.reduce((sum, item) => sum + item.count, 0),
+        byStatus: monthlyStats,
+        dailyStats,
+        comparison: comparisonStats,
+        averagePerDay: this.calculateAverage(dailyStats)
+      };
+      
+    } catch (error) {
+      this.logger.error(`Erreur stats mensuelles: ${error.message}`);
+      throw error;
+    }
+  }
+
+  private async getPreviousMonthComparison(currentMonthStart: Date): Promise<any> {
+    const prevMonthStart = new Date(currentMonthStart);
+    prevMonthStart.setMonth(prevMonthStart.getMonth() - 1);
+    
+    const prevMonthEnd = new Date(currentMonthStart);
+    prevMonthEnd.setDate(0); // Dernier jour du mois précédent
+    
+    try {
+      const [currentCount, previousCount] = await Promise.all([
+        this.rendezvousModel.countDocuments({
+          createdAt: {
+            $gte: currentMonthStart,
+            $lte: new Date(currentMonthStart.getFullYear(), currentMonthStart.getMonth() + 1, 0)
+          }
+        }),
+        this.rendezvousModel.countDocuments({
+          createdAt: {
+            $gte: prevMonthStart,
+            $lte: prevMonthEnd
+          }
+        })
+      ]);
+      
+      const difference = currentCount - previousCount;
+      const percentage = previousCount > 0 ? (difference / previousCount) * 100 : 0;
+      
+      return {
+        currentMonth: currentCount,
+        previousMonth: previousCount,
+        difference,
+        percentage: Math.round(percentage * 100) / 100,
+        trend: difference > 0 ? 'up' : difference < 0 ? 'down' : 'stable'
+      };
+      
+    } catch (error) {
+      this.logger.warn(`Erreur comparaison mensuelle: ${error.message}`);
+      return {
+        currentMonth: 0,
+        previousMonth: 0,
+        difference: 0,
+        percentage: 0,
+        trend: 'stable'
+      };
+    }
+  }
+
+  private calculateAverage(dailyStats: Array<{ _id: string; count: number }>): number {
+    if (dailyStats.length === 0) return 0;
+    
+    const total = dailyStats.reduce((sum, day) => sum + day.count, 0);
+    return Math.round((total / dailyStats.length) * 100) / 100;
+  }
+
+  // ==================== DESTINATION STATS ====================
+
+  async getDestinationStats(): Promise<any> {
+    try {
+      const destinationStats = await this.rendezvousModel.aggregate([
+        {
+          $group: {
+            _id: '$destination',
+            count: { $sum: 1 },
+            users: { $addToSet: '$email' }
+          }
+        },
+        {
+          $project: {
+            destination: '$_id',
+            count: 1,
+            uniqueUsers: { $size: '$users' },
+            _id: 0
+          }
+        },
+        {
+          $sort: { count: -1 }
+        }
+      ]);
+      
+      // Traiter les destinations "Autre"
+      const autres = await this.rendezvousModel.aggregate([
+        {
+          $match: {
+            destination: 'Autre',
+            destinationAutre: { $exists: true, $ne: '' }
+          }
+        },
+        {
+          $group: {
+            _id: '$destinationAutre',
+            count: { $sum: 1 }
+          }
+        },
+        {
+          $sort: { count: -1 }
+        },
+        {
+          $limit: 10
+        }
+      ]);
+      
+      return {
+        byDestination: destinationStats,
+        autresDestinations: autres,
+        totalDestinations: destinationStats.length + autres.length
+      };
+      
+    } catch (error) {
+      this.logger.error(`Erreur stats destinations: ${error.message}`);
+      return {
+        byDestination: [],
+        autresDestinations: [],
+        totalDestinations: 0
+      };
+    }
+  }
+
+  // ==================== REAL-TIME STATS ====================
+
+  async getRealTimeStats(): Promise<any> {
+    const now = new Date();
+    const today = now.toISOString().split('T')[0];
+    const currentHour = now.getHours();
+    
+    try {
+      const [
+        todayStats,
+        hourStats,
+        pendingConfirmations,
+        recentChanges
+      ] = await Promise.all([
+        // Stats d'aujourd'hui
+        this.rendezvousModel.aggregate([
+          {
+            $match: {
+              date: today
+            }
+          },
+          {
+            $group: {
+              _id: '$status',
+              count: { $sum: 1 }
+            }
+          }
+        ]),
+        
+        // Stats par heure
+        this.rendezvousModel.aggregate([
+          {
+            $match: {
+              date: today,
+              time: { 
+                $regex: `^${currentHour.toString().padStart(2, '0')}:` 
+              }
+            }
+          },
+          {
+            $group: {
+              _id: '$status',
+              count: { $sum: 1 }
+            }
+          }
+        ]),
+        
+        // Rendez-vous en attente de confirmation
+        this.rendezvousModel.countDocuments({
+          status: 'En attente',
+          createdAt: {
+            $gte: new Date(Date.now() - 24 * 60 * 60 * 1000) // 24 dernières heures
+          }
+        }),
+        
+        // Changements récents (dernière heure)
+        this.rendezvousModel.find({
+          updatedAt: {
+            $gte: new Date(Date.now() - 60 * 60 * 1000) // Dernière heure
+          },
+          status: { $in: ['Confirmé', 'Annulé', 'Terminé'] }
+        })
+        .select('firstName lastName status updatedAt time')
+        .sort({ updatedAt: -1 })
+        .limit(10)
+        .lean()
+      ]);
+      
+      return {
+        timestamp: now,
+        today: today,
+        currentHour: `${currentHour}:00-${currentHour + 1}:00`,
+        todayStats: todayStats,
+        hourStats: hourStats,
+        pendingConfirmations,
+        recentChanges,
+        nextHour: await this.getNextHourStats(currentHour + 1)
+      };
+      
+    } catch (error) {
+      this.logger.error(`Erreur stats temps réel: ${error.message}`);
+      return {
+        timestamp: now,
+        today: today,
+        currentHour: `${currentHour}:00-${currentHour + 1}:00`,
+        todayStats: [],
+        hourStats: [],
+        pendingConfirmations: 0,
+        recentChanges: [],
+        nextHour: { count: 0, appointments: [] }
+      };
+    }
+  }
+
+  private async getNextHourStats(nextHour: number): Promise<any> {
+    const today = new Date().toISOString().split('T')[0];
+    const hourStr = nextHour.toString().padStart(2, '0');
+    
+    try {
+      const appointments = await this.rendezvousModel.find({
+        date: today,
+        time: { $regex: `^${hourStr}:` },
+        status: { $in: ['En attente', 'Confirmé'] }
+      })
+      .select('firstName lastName time status')
+      .sort({ time: 1 })
+      .limit(5)
+      .lean();
+      
+      return {
+        hour: `${hourStr}:00-${hourStr}:59`,
+        count: appointments.length,
+        appointments
+      };
+      
+    } catch (error) {
+      return {
+        hour: `${hourStr}:00-${hourStr}:59`,
+        count: 0,
+        appointments: []
+      };
+    }
+  }
+
   private processAndValidateRendezvousData(
     createDto: CreateRendezvousDto | UpdateRendezvousDto,
   ): any {
@@ -911,9 +1487,9 @@ export class RendezvousService {
     newStatus: string,
     isAdmin: boolean
   ): Promise<void> {
-    const transitions: Record<string, string[]> = {
+      const transitions: Record<string, string[]> = {
       [RENDEZVOUS_STATUS.PENDING]: [RENDEZVOUS_STATUS.CONFIRMED, RENDEZVOUS_STATUS.CANCELLED, RENDEZVOUS_STATUS.EXPIRED],
-      [RENDEZVOUS_STATUS.CONFIRMED]: [RENDEZVOUS_STATUS.COMPLETED, RENDEZVOUS_STATUS.CANCELLED, RENDEZVOUS_STATUS.EXPIRED],
+      [RENDEZVOUS_STATUS.CONFIRMED]: [RENDEZVOUS_STATUS.PENDING, RENDEZVOUS_STATUS.COMPLETED, RENDEZVOUS_STATUS.CANCELLED, RENDEZVOUS_STATUS.EXPIRED], // ← Ajouter "En attente"
       [RENDEZVOUS_STATUS.COMPLETED]: [],
       [RENDEZVOUS_STATUS.CANCELLED]: [],
       [RENDEZVOUS_STATUS.EXPIRED]: [],

@@ -44,7 +44,7 @@ export default function Contact() {
                 `}</style>
         </Helmet>
 
-        <main className='flex-1 mt-[10px] sm:mt-[10px] bg-gradient-to-b from-white via-sky-50 to-white'>
+        <main className='flex-1 mt-2.5 sm:mt-2.5 bg-linear-to-b from-white via-sky-50 to-white'>
           <Form />
           <Faq />
           <CTASection />

@@ -1,6 +1,8 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import 'tailwindcss';
+
+@import 'react-toastify/dist/ReactToastify.css';
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
 
 /* Styles personnalisés pour les toasts */
 .toast-custom {
@@ -11,6 +13,19 @@
   margin-bottom: 8px !important;
   min-height: 48px !important;
   padding: 12px 16px !important;
+}
+
+.Toastify__toast {
+  border-radius: 8px;
+  font-family: 'Inter', sans-serif;
+}
+
+.Toastify__toast-body {
+  font-size: 14px;
+}
+
+.Toastify__progress-bar {
+  height: 3px;
 }
 
 .toast-body {

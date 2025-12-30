@@ -737,6 +737,15 @@ export class RendezvousController {
     return this.rendezvousService.confirmByUser(id, userEmail, true);
   }
 
+
+  @Get('stats/overview')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({ summary: 'Statistiques des rendez-vous (admin)' })
+  async getRendezvousStats() {
+    return this.rendezvousService.getStats();
+  }
+
   @Get(':id/check-availability')
   @UseGuards(JwtAuthGuard)
   @ApiOperation({ 

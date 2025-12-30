@@ -84,103 +84,135 @@ const Form = () => {
     [validateField]
   );
 
-  // Gestion de la soumission avec validation complète
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+const handleSubmit = async (e: React.FormEvent) => {
+  e.preventDefault();
 
-    if (!formRef.current) return;
+  if (!formRef.current) return;
 
-    setIsSubmitting(true);
+  setIsSubmitting(true);
 
-    const formData = new FormData(formRef.current);
-    const data: FormData = {
-      firstName: (formData.get('firstName') as string) || '',
-      lastName: (formData.get('lastName') as string) || '',
-      email: (formData.get('email') as string) || '',
-      message: (formData.get('message') as string) || '',
-    };
-
-    // Validation complète avant soumission
-    const newErrors: ValidationErrors = {
-      email: validateField('email', data.email),
-      message: validateField('message', data.message),
-      firstName: validateField('firstName', data.firstName),
-      lastName: validateField('lastName', data.lastName),
-    };
-
-    setErrors(newErrors);
-    setTouchedFields(new Set(['email', 'message', 'firstName', 'lastName']));
-
-    if (Object.values(newErrors).some(error => error)) {
-      setIsSubmitting(false);
-
-      // Focus sur le premier champ en erreur
-      const firstErrorField = Object.keys(newErrors).find(
-        key => newErrors[key as keyof ValidationErrors]
-      );
-      if (firstErrorField) {
-        const errorElement =
-          globalThis.document?.getElementById(firstErrorField);
-        errorElement?.focus();
-      }
-      return;
-    }
-
-    try {
-      if (!API_URL) {
-        throw new Error('URL API non configurée');
-      }
-
-      const controller = new AbortController();
-      const timeoutId = globalThis.setTimeout(() => controller.abort(), 10000); // Timeout de 10s
-
-      const response = await globalThis.fetch(`${API_URL}/contact`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Accept: 'application/json',
-        },
-        body: JSON.stringify(data),
-        signal: controller.signal,
-      });
-
-      globalThis.clearTimeout(timeoutId);
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.message || `Erreur HTTP: ${response.status}`);
-      }
-
-      setSubmitStatus({
-        success: true,
-        message: 'Message envoyé ! Vous recevrez une confirmation par email.',
-      });
-      formRef.current.reset();
-      setTouchedFields(new Set());
-    } catch (error) {
-      // Log only in development
-      if (import.meta.env.DEV) {
-        console.error('Erreur soumission formulaire:', error);
-      }
-
-      let errorMessage = "Erreur lors de l'envoi. Veuillez réessayer.";
-
-      if (error instanceof Error) {
-        if (error.name === 'AbortError') {
-          errorMessage = 'La requête a pris trop de temps. Veuillez réessayer.';
-        } else {
-          errorMessage = error.message || errorMessage;
-        }
-      }
-
-      setSubmitStatus({
-        success: false,
-        message: errorMessage,
-      });
-    } finally {
-      setIsSubmitting(false);
-    }
+  const formData = new FormData(formRef.current);
+  const data: FormData = {
+    firstName: (formData.get('firstName') as string) || '',
+    lastName: (formData.get('lastName') as string) || '',
+    email: (formData.get('email') as string) || '',
+    message: (formData.get('message') as string) || '',
   };
+
+  // Validation complète avant soumission
+  const newErrors: ValidationErrors = {
+    email: validateField('email', data.email),
+    message: validateField('message', data.message),
+    firstName: validateField('firstName', data.firstName),
+    lastName: validateField('lastName', data.lastName),
+  };
+
+  setErrors(newErrors);
+  setTouchedFields(new Set(['email', 'message', 'firstName', 'lastName']));
+
+  if (Object.values(newErrors).some(error => error)) {
+    setIsSubmitting(false);
+    
+    // Focus sur le premier champ en erreur
+    const firstErrorField = Object.keys(newErrors).find(
+      key => newErrors[key as keyof ValidationErrors]
+    );
+    if (firstErrorField) {
+      const errorElement = globalThis.document?.getElementById(firstErrorField);
+      if (errorElement && errorElement instanceof HTMLElement) {
+        errorElement.focus();
+      }
+    }
+    return;
+  }
+
+  try {
+    if (!API_URL) {
+      throw new Error('URL API non configurée');
+    }
+
+    const controller = new AbortController();
+    const timeoutId = globalThis.setTimeout(() => {
+      controller.abort();
+    }, 10000); // Timeout de 10s
+
+    const response = await globalThis.fetch(`${API_URL}/api/contact`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      },
+      body: JSON.stringify({
+        firstName: data.firstName.trim(),
+        lastName: data.lastName.trim(),
+        email: data.email.trim(),
+        message: data.message.trim(),
+      }),
+      signal: controller.signal,
+    });
+
+    globalThis.clearTimeout(timeoutId);
+
+    if (!response.ok) {
+      // Essayer de récupérer le message d'erreur du backend
+      let errorMessage = `Erreur HTTP: ${response.status}`;
+      try {
+        const errorData = await response.json();
+        errorMessage = errorData.message || errorMessage;
+        
+        // Si le backend retourne des erreurs de validation détaillées
+        if (errorData.errors) {
+          // Mettre à jour les erreurs du formulaire avec celles du backend
+          const backendErrors: ValidationErrors = {};
+          Object.keys(errorData.errors).forEach(key => {
+            if (key in backendErrors) {
+              backendErrors[key as keyof ValidationErrors] = errorData.errors[key];
+            }
+          });
+          if (Object.keys(backendErrors).length > 0) {
+            setErrors(backendErrors);
+            return;
+          }
+        }
+      } catch (parseError) {
+        // Si on ne peut pas parser la réponse JSON
+      }
+      throw new Error(errorMessage);
+    }
+
+    const result = await response.json();
+    
+    setSubmitStatus({
+      success: true,
+      message: 'Message envoyé ! Vous recevrez une confirmation par email.',
+    });
+    formRef.current.reset();
+    setTouchedFields(new Set());
+    
+  } catch (error) {
+    // Log only in development
+    if (import.meta.env.DEV) {
+      console.error('Erreur soumission formulaire:', error);
+    }
+
+    let errorMessage = "Erreur lors de l'envoi. Veuillez réessayer.";
+
+    if (error instanceof Error) {
+      if (error.name === 'AbortError') {
+        errorMessage = 'La requête a pris trop de temps. Veuillez réessayer.';
+      } else {
+        errorMessage = error.message || errorMessage;
+      }
+    }
+
+    setSubmitStatus({
+      success: false,
+      message: errorMessage,
+    });
+  } finally {
+    setIsSubmitting(false);
+  }
+};
 
   // Rendu conditionnel pour éviter les erreurs d'hydratation
   const [isClient, setIsClient] = useState(false);
@@ -225,7 +257,7 @@ const Form = () => {
             <section
               className='relative w-full md:w-1/3 text-white space-y-6 p-8 lg:p-12 
               overflow-hidden
-              bg-gradient-to-tr from-sky-600 via-sky-500 to-sky-400
+              bg-linear-to-tr from-sky-600 via-sky-500 to-sky-400
               before:absolute before:inset-0 before:bg-[radial-gradient(circle_at_30%_40%,rgba(255,255,255,0.2),transparent_50%)]
               before:animate-[pulse_6s_ease-in-out_infinite]
               after:absolute after:inset-0 after:bg-[url("https://www.transparenttextures.com/patterns/cubes.png")]

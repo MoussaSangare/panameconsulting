@@ -1,49 +1,50 @@
+import React from 'react';
 import {
-  FiKey,
-  FiEdit,
-  FiBookOpen,
-  FiFileText,
-  FiUsers,
-  FiBriefcase,
-} from 'react-icons/fi';
+  Key,
+  Edit3,
+  BookOpen,
+  FileText,
+  Users,
+  Briefcase,
+} from 'lucide-react';
 
 const services = [
   {
-    icon: <FiKey className='w-5 h-5' />,
+    icon: <Key className='w-5 h-5' />,
     title: "Création d'un Compte Pastel",
     description:
       'Nous créons votre compte Pastel rapidement et en toute sécurité.',
     keywords: 'compte pastel, création compte, sécurité',
   },
   {
-    icon: <FiEdit className='w-5 h-5' />,
+    icon: <Edit3 className='w-5 h-5' />,
     title: 'Saisie des Informations Personnelles',
     description:
       'Saisie précise et sécurisée de vos informations personnelles.',
     keywords: 'informations personnelles, saisie données',
   },
   {
-    icon: <FiBookOpen className='w-5 h-5' />,
+    icon: <BookOpen className='w-5 h-5' />,
     title: 'Choix des Universités et Formations',
     description:
       'Conseils personnalisés pour choisir les meilleures universités.',
     keywords: 'universités, formations, orientation',
   },
   {
-    icon: <FiFileText className='w-5 h-5' />,
+    icon: <FileText className='w-5 h-5' />,
     title: 'Lettre de Motivation',
     description:
       'Rédaction de lettres de motivation percutantes et personnalisées.',
     keywords: 'lettre motivation, rédaction',
   },
   {
-    icon: <FiUsers className='w-5 h-5' />,
+    icon: <Users className='w-5 h-5' />,
     title: 'Préparation aux Entretiens',
     description: 'Préparation efficace et personnalisée pour vos entretiens.',
     keywords: 'préparation entretiens, simulation',
   },
   {
-    icon: <FiBriefcase className='w-5 h-5' />,
+    icon: <Briefcase className='w-5 h-5' />,
     title: 'Assistance Demande de Visa',
     description: 'Accompagnement complet pour votre demande de visa.',
     keywords: 'visa, demande visa, assistance',

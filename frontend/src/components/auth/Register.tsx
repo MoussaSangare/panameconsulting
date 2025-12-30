@@ -1,13 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import {
-  FiEye,
-  FiEyeOff,
-  FiLock,
+ 
   FiMail,
   FiPhone,
   FiUser,
   FiAlertCircle,
 } from 'react-icons/fi';
+
+import { Lock as  FiLock
+  
+  , Eye as  FiEye 
+  , EyeOff as FiEyeOff } from 'lucide-react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 
@@ -154,7 +157,7 @@ const Register: React.FC = () => {
     <div className='flex items-center justify-center p-4 min-h-screen bg-sky-50'>
       <div className='w-full max-w-sm'>
         <div className='bg-white rounded-lg shadow-md overflow-hidden'>
-          <div className='bg-gradient-to-r from-sky-500 to-sky-600 p-4 text-center'>
+          <div className='bg-linear-to-r from-sky-500 to-sky-600 p-4 text-center'>
             <div className='flex items-center justify-center space-x-2'>
               <div className='bg-white p-1 rounded-full'>
                 <div className='w-8 h-8 rounded-full bg-sky-500 flex items-center justify-center'>
@@ -360,7 +363,7 @@ const Register: React.FC = () => {
                   role='alert'
                 >
                   <div className='flex items-center'>
-                    <FiAlertCircle className='mr-2 flex-shrink-0' />
+                    <FiAlertCircle className='mr-2 shrink-0' />
                     <span>{formError}</span>
                   </div>
                 </div>
@@ -370,7 +373,7 @@ const Register: React.FC = () => {
               <button
                 type='submit'
                 disabled={isLoading}
-                className={`w-full py-2 px-4 rounded-md text-white bg-gradient-to-r from-sky-500 to-sky-600 hover:from-sky-600 hover:to-sky-700 font-medium transition-all duration-200 ${
+                className={`w-full py-2 px-4 rounded-md text-white bg-linear-to-r from-sky-500 to-sky-600 hover:from-sky-600 hover:to-sky-700 font-medium transition-all duration-200 ${
                   isLoading
                     ? 'opacity-60 cursor-not-allowed'
                     : 'hover:shadow-md active:scale-[0.98]'

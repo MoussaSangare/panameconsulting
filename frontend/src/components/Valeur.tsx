@@ -29,7 +29,7 @@ const Valeur = () => {
   ];
 
   return (
-    <section className='py-16 sm:py-24 bg-gradient-to-b from-sky-50 to-white'>
+    <section className='py-16 sm:py-24 bg-linear-to-b from-sky-50 to-white'>
       <div className='mx-auto px-4 sm:px-6 lg:px-8'>
         <div className='text-center mb-14'>
           <h2 className='text-3xl sm:text-4xl font-bold text-sky-500 mb-4'>

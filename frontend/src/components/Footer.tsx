@@ -1,10 +1,17 @@
 import {
-  FaInstagram,
-  FaPhoneAlt,
-  FaTiktok,
-  FaEnvelope,
-  FaMapMarkerAlt,
-} from 'react-icons/fa';
+  Instagram as FaInstagram,
+  Phone as FaPhoneAlt,
+  Mail as FaEnvelope,
+  MapPin as FaMapMarkerAlt,
+} from 'lucide-react';
+
+
+const FaTiktok = () => (
+  <svg className='w-5 h-5' viewBox="0 0 24 24" fill="currentColor">
+    <path d="M19.59 6.69a4.83 4.83 0 0 1-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 0 1-5.2 1.74 2.89 2.89 0 0 1 2.31-4.64 2.93 2.93 0 0 1 .88.13V9.4a6.33 6.33 0 0 0-1-.08A6.34 6.34 0 0 0 5 20.1a6.33 6.33 0 0 0 10.86-4.43v-7a8.16 8.16 0 0 0 4.77 1.52v-3.4a4.85 4.85 0 0 1-1-.1z"/>
+  </svg>
+);
+
 import { SiWhatsapp } from 'react-icons/si';
 import { Link } from 'react-router-dom';
 // AOS is now initialized globally in App.tsx
@@ -13,7 +20,7 @@ export default function Footer() {
   return (
     <footer
       role='contentinfo'
-      className='px-4 py-12 bg-gradient-to-br from-sky-50 to-sky-100 sm:px-6 lg:px-8 border-t border-sky-200 w-full'
+      className='px-4 py-12 bg-linear-to-br from-sky-50 to-sky-100 sm:px-6 lg:px-8 border-t border-sky-200 w-full'
     >
       <div className='max-w-7xl mx-auto'>
         {/* Grille responsive */}
@@ -31,7 +38,7 @@ export default function Footer() {
                 className='w-16 h-auto mr-3'
                 loading='lazy'
               />
-              <h2 className='text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-sky-600 to-sky-400'>
+              <h2 className='text-2xl font-bold bg-clip-text text-transparent bg-linear-to-r from-sky-600 to-sky-400'>
                 PANAME CONSULTING
               </h2>
             </div>
@@ -41,7 +48,7 @@ export default function Footer() {
               académiques à travers le monde.
             </p>
             <div className='flex items-start space-x-2 text-sky-600'>
-              <FaMapMarkerAlt className='flex-shrink-0 mt-1' />
+              <FaMapMarkerAlt className='shrink-0 mt-1' />
               <span className='text-sm'>
                 Kalaban Coura, Imm.Bore <br />
                 en face de l'hôtel Wassulu
@@ -122,7 +129,7 @@ export default function Footer() {
                         ? 'noopener noreferrer'
                         : undefined
                     }
-                    className={`flex items-center gap-3 px-4 py-3 text-white bg-gradient-to-r ${item.bg} rounded shadow-md transition-all duration-300 group`}
+                    className={`flex items-center gap-3 px-4 py-3 text-white bg-linear-to-r ${item.bg} rounded shadow-md transition-all duration-300 group`}
                     aria-label={item.text}
                   >
                     {item.icon}
@@ -144,7 +151,7 @@ export default function Footer() {
                     bg: 'hover:bg-sky-500 hover:text-white',
                   },
                   {
-                    icon: <FaTiktok className='w-5 h-5' />,
+                    icon: <FaTiktok  />,
                     to: 'https://www.tiktok.com/@paname.consulting',
                     bg: 'hover:bg-sky-500 hover:text-white',
                   },

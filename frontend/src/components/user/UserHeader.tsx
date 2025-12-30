@@ -49,7 +49,7 @@ const navTabs = [
   },
   {
     id: 'procedures',
-    label: 'Dossier',
+    label: 'Procédure',
     to: '/ma-procedure',
     icon: FileText,
   },
@@ -58,6 +58,8 @@ const navTabs = [
 export const UserHeader = ({ 
   title, 
   subtitle, 
+  pageTitle, 
+  description, 
   isLoading = false, 
   onRefresh,
   children 
@@ -113,9 +115,9 @@ export const UserHeader = ({
                 <Link
                   key={tab.id}
                   to={tab.to}
-                  className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-all duration-200 flex-shrink-0 relative ${
+                  className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-all duration-200 shrink-0 relative ${
                     isActive
-                      ? 'bg-gradient-to-r from-sky-500 to-sky-600 text-white shadow-sm'
+                      ? 'bg-linear-to-r from-sky-500 to-sky-600 text-white shadow-sm'
                       : 'bg-gray-50 text-gray-600 border border-gray-200 hover:border-sky-300 hover:bg-sky-50 active:scale-95'
                   }`}
                   aria-current={isActive ? 'page' : undefined}
@@ -146,7 +148,7 @@ export const UserHeader = ({
       </div>
 
       {/* Effet de séparation */}
-      <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-gradient-to-r from-transparent via-sky-100 to-transparent"></div>
+      <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-linear-to-r from-transparent via-sky-100 to-transparent"></div>
     </header>
   );
 };

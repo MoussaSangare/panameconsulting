@@ -1,4 +1,3 @@
-// AdminMessages.tsx - Version Mobile avec Toast uniques
 import React, { useState, useEffect } from 'react';
 import { useAdminContactService } from '../../api/admin/AdminContactService';
 import { useAuth } from '../../context/AuthContext';
@@ -517,7 +516,7 @@ const AdminMessages: React.FC = () => {
               >
                 <div className='flex justify-between items-start mb-2'>
                   <div className='flex items-center flex-1 min-w-0'>
-                    <div className='bg-blue-100 p-2 rounded-full flex-shrink-0'>
+                    <div className='bg-blue-100 p-2 rounded-full shrink-0'>
                       <User className='w-4 h-4 text-blue-600' />
                     </div>
                     <div className='ml-3 min-w-0 flex-1'>
@@ -529,7 +528,7 @@ const AdminMessages: React.FC = () => {
                       </p>
                     </div>
                   </div>
-                  <div className='ml-2 flex-shrink-0'>
+                  <div className='ml-2 shrink-0'>
                     {renderStatusBadge(contact.isRead, !!contact.adminResponse)}
                   </div>
                 </div>

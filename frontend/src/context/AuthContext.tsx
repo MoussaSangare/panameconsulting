@@ -90,16 +90,6 @@ interface LogoutAllResponse {
   };
 }
 
-interface RefreshResponse {
-  access_token: string;
-  refresh_token?: string;
-  message?: string;
-  expiresIn?: number;
-  loggedOut?: boolean;
-  sessionExpired?: boolean;
-  requiresReauth?: boolean;
-}
-
 interface AuthContextType {
   user: User | null;
   access_token: string | null;
@@ -123,22 +113,12 @@ const AUTH_CONSTANTS = {
   ACCESS_TOKEN_EXPIRATION_MS: 15 * 60 * 1000,       // ✅ 15 minutes exactement
   ACCESS_TOKEN_EXPIRATION_SECONDS: 15 * 60,         // ✅ 15 minutes en secondes
   REFRESH_TOKEN_EXPIRATION_MS: 30 * 60 * 1000,      // ✅ 30 minutes
-  REFRESH_TOKEN_EXPIRATION_SECONDS: 30 * 60,        // ✅ 30 minutes en secondes
   MAX_SESSION_DURATION_MS: 30 * 60 * 1000,          // ✅ 30 minutes maximum
-  SESSION_EXPIRATION_SECONDS: 30 * 60,              // ✅ 30 minutes en secondes
   SESSION_EXPIRATION_MS: 30 * 60 * 1000,            // ✅ 30 minutes en ms
   
-  // Token de réinitialisation
-  RESET_TOKEN_EXPIRATION_MS: 20 * 60 * 1000,        // ✅ 20 minutes exactement
-  
   // Configuration rafraîchissement
-  PREVENTIVE_REFRESH_MS: 1 * 60 * 1000,             // ✅ 1 minute (préventif)
-  MAX_REFRESH_ATTEMPTS: 3,
-  MIN_REFRESH_INTERVAL_MS: 30000,                   // 30 secondes
-  
-  // Configuration sessions
-  MAX_ACTIVE_SESSIONS_PER_USER: 5,
-  SESSION_CHECK_INTERVAL: 30 * 1000,                // ✅ 30 secondes (au lieu de 20)
+  PREVENTIVE_REFRESH_MS: 5 * 60 * 1000,             // ✅ 5 minutes avant expiration (au lieu de 1)
+  SESSION_CHECK_INTERVAL: 60 * 1000,                // ✅ 1 minute (check toutes les minutes)
   
   // Codes d'erreur (alignés avec backend)
   ERROR_CODES: {
@@ -148,8 +128,6 @@ const AUTH_CONSTANTS = {
     COMPTE_TEMPORAIREMENT_DECONNECTE: 'COMPTE TEMPORAIREMENT DECONNECTE',
     MAINTENANCE_MODE: 'MAINTENANCE MODE',
     SESSION_EXPIRED: 'SESSION EXPIRED',
-    NO_PASSWORD_IN_DB: 'NO PASSWORD IN DB',
-    AUTH_ERROR: 'AUTH ERROR',
   } as const,
 } as const;
 
@@ -157,7 +135,6 @@ const STORAGE_KEYS = {
   ACCESS_TOKEN: 'access_token',
   USER_DATA: 'user_data',
   SESSION_START: 'session_start',
-  REFRESH_ATTEMPTS: 'refresh_attempts',
   LAST_REFRESH_TIME: 'last_refresh_time',
 } as const;
 
@@ -181,22 +158,20 @@ const TOAST_MESSAGES = {
   ACCOUNT_TEMP_DISCONNECTED: (hours: number) => `COMPTE TEMPORAIREMENT DECONNECTE:${hours}`,
   MAINTENANCE_MODE: 'MAINTENANCE MODE',
   PASSWORD_RESET_REQUIRED: 'PASSWORD RESET REQUIRED',
-  TOKEN_REFRESHED: 'Session rafraîchie',
   NETWORK_ERROR: 'Erreur réseau. Vérifiez votre connexion.',
-  TOKEN_INVALID: 'Session invalide. Veuillez vous reconnecter.',
 } as const;
 
 const API_CONFIG = {
   BASE_URL: import.meta.env.VITE_API_URL,
   ENDPOINTS: {
-    LOGIN: '/auth/login',
-    REGISTER: '/auth/register',
-    LOGOUT: '/auth/logout',
-    LOGOUT_ALL: '/auth/logout-all',
-    REFRESH: '/auth/refresh',
-    FORGOT_PASSWORD: '/auth/forgot-password',
-    RESET_PASSWORD: '/auth/reset-password',
-    ME: '/auth/me',
+    LOGIN: '/api/auth/login',
+    REGISTER: '/api/auth/register',
+    LOGOUT: '/api/auth/logout',
+    LOGOUT_ALL: '/api/auth/logout-all',
+    REFRESH: '/api/auth/refresh',
+    FORGOT_PASSWORD: '/api/auth/forgot-password',
+    RESET_PASSWORD: '/api/auth/reset-password',
+    ME: '/api/auth/me',
   } as const,
 } as const;
 
@@ -220,11 +195,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   });
 
   const [error, setError] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(false);
 
   const refreshTimeoutRef = useRef<number | null>(null);
   const sessionCheckIntervalRef = useRef<number | null>(null);
-  const refreshAttemptsRef = useRef(0);
   const isRefreshingRef = useRef(false);
 
   // ==================== FONCTIONS ESSENTIELLES ====================
@@ -236,8 +210,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     setAccessToken(null);
     setUser(null);
     setError(null);
-    
-    refreshAttemptsRef.current = 0;
     isRefreshingRef.current = false;
 
     if (refreshTimeoutRef.current) {
@@ -250,6 +222,33 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       sessionCheckIntervalRef.current = null;
     }
   }, []);
+
+  const handleAuthError = useCallback((error: any, context: string = ''): void => {
+    const errorMessage = error.message || 'Erreur inconnue';
+    
+    if (errorMessage.includes(AUTH_CONSTANTS.ERROR_CODES.PASSWORD_RESET_REQUIRED)) {
+      toast.error(TOAST_MESSAGES.PASSWORD_RESET_REQUIRED, { autoClose: 8000 });
+      navigate(REDIRECT_PATHS.RESET_PASSWORD_REQUIRED, { 
+        state: { email: error.email || '', reason: 'password_reset_required' } 
+      });
+    } else if (errorMessage.includes(AUTH_CONSTANTS.ERROR_CODES.COMPTE_DESACTIVE)) {
+      toast.error(TOAST_MESSAGES.ACCOUNT_DISABLED, { autoClose: 8000 });
+    } else if (errorMessage.includes(AUTH_CONSTANTS.ERROR_CODES.COMPTE_TEMPORAIREMENT_DECONNECTE)) {
+      const hoursMatch = errorMessage.match(/:(\d+)/);
+      const hours = hoursMatch ? parseInt(hoursMatch[1]) : 24;
+      toast.error(TOAST_MESSAGES.ACCOUNT_TEMP_DISCONNECTED(hours), { autoClose: 10000 });
+    } else if (errorMessage.includes(AUTH_CONSTANTS.ERROR_CODES.MAINTENANCE_MODE)) {
+      toast.error(TOAST_MESSAGES.MAINTENANCE_MODE, { autoClose: 8000 });
+    } else if (errorMessage.includes(AUTH_CONSTANTS.ERROR_CODES.INVALID_CREDENTIALS)) {
+      toast.error(TOAST_MESSAGES.INVALID_CREDENTIALS, { autoClose: 4000 });
+    } else if (error instanceof TypeError && error.message.includes('Failed to fetch')) {
+      toast.error(TOAST_MESSAGES.NETWORK_ERROR, { autoClose: 5000 });
+    } else {
+      toast.error(errorMessage, { autoClose: 5000 });
+    }
+    
+    setError(errorMessage);
+  }, [navigate]);
 
   const fetchWithAuth = useCallback(async (
     endpoint: string,
@@ -283,10 +282,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           navigate(REDIRECT_PATHS.LOGIN, { replace: true });
           throw new Error('SESSION_EXPIRED');
         }
-        
-        if (errorData.code) {
-          throw new Error(errorData.code);
-        }
       }
 
       return response;
@@ -296,9 +291,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   }, [access_token, cleanupAuthData, navigate]);
 
   const fetchUserData = useCallback(async (): Promise<void> => {
+    const token = access_token || window.localStorage?.getItem(STORAGE_KEYS.ACCESS_TOKEN);
+    if (!token) return;
+
     try {
-      const token = access_token || window.localStorage?.getItem(STORAGE_KEYS.ACCESS_TOKEN);
-      
       const response = await window.fetch(
         `${API_CONFIG.BASE_URL}${API_CONFIG.ENDPOINTS.ME}`,
         {
@@ -306,7 +302,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           credentials: 'include',
           headers: {
             'Content-Type': 'application/json',
-            ...(token && { Authorization: `Bearer ${token}` }),
+            Authorization: `Bearer ${token}`,
           }
         }
       );
@@ -315,13 +311,13 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         const userData = await response.json();
         
         const mappedUser: User = {
-          id: userData.id || userData._id || '',
-          email: userData.email || '',
-          firstName: userData.firstName || '',
-          lastName: userData.lastName || '',
+          id: userData.id,
+          email: userData.email,
+          firstName: userData.firstName,
+          lastName: userData.lastName,
           role: userData.role || UserRole.USER,
           isActive: userData.isActive !== false,
-          telephone: userData.telephone || '',
+          telephone: userData.telephone,
           isAdmin: userData.role === UserRole.ADMIN,
         };
 
@@ -330,52 +326,122 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           STORAGE_KEYS.USER_DATA,
           JSON.stringify(mappedUser)
         );
-      } else {
-        if (response.status === 401) {
-          cleanupAuthData();
-        }
+      } else if (response.status === 401) {
+        cleanupAuthData();
       }
     } catch (error) {
       console.warn('Erreur récupération utilisateur:', error);
     }
   }, [access_token, cleanupAuthData]);
 
-  const updateProfile = useCallback(async (): Promise<void> => {
-    await fetchUserData();
+  // ==================== GESTION DU TEMPS D'AUTHENTIFICATION ====================
+  const refreshToken = useCallback(async (): Promise<boolean> => {
+    if (isRefreshingRef.current) {
+      return false;
+    }
+
+    const lastRefreshTime = window.localStorage?.getItem(STORAGE_KEYS.LAST_REFRESH_TIME);
+    if (lastRefreshTime) {
+      const timeSinceLastRefresh = Date.now() - parseInt(lastRefreshTime);
+      if (timeSinceLastRefresh < 30000) { // 30 secondes minimum entre refresh
+        return false;
+      }
+    }
+
+    isRefreshingRef.current = true;
+
+    try {
+      const response = await window.fetch(
+        `${API_CONFIG.BASE_URL}${API_CONFIG.ENDPOINTS.REFRESH}`,
+        {
+          method: 'POST',
+          credentials: 'include',
+        }
+      );
+
+      if (response.status === 401) {
+        return false;
+      }
+
+      if (!response.ok) {
+        return false;
+      }
+
+      const data = await response.json();
+
+      if (!data.access_token) {
+        return false;
+      }
+
+      window.localStorage.setItem(STORAGE_KEYS.ACCESS_TOKEN, data.access_token);
+      setAccessToken(data.access_token);
+      
+      await fetchUserData();
+      
+      window.localStorage.setItem(STORAGE_KEYS.LAST_REFRESH_TIME, Date.now().toString());
+      
+      return true;
+
+    } catch (error) {
+      console.error('Erreur lors du refresh:', error);
+      return false;
+    } finally {
+      isRefreshingRef.current = false;
+    }
   }, [fetchUserData]);
 
-  const handleAuthError = useCallback((error: any, context: string = ''): void => {
-    const errorMessage = error.message || 'Erreur inconnue';
-    
-    if (import.meta.env.DEV) {
-      console.error(`❌ Erreur auth [${context}]:`, errorMessage);
+  const checkAuth = useCallback(async (): Promise<void> => {
+    const savedToken = window.localStorage?.getItem(STORAGE_KEYS.ACCESS_TOKEN);
+
+    if (!savedToken) {
+      return;
     }
-    
-    if (errorMessage.includes(AUTH_CONSTANTS.ERROR_CODES.PASSWORD_RESET_REQUIRED)) {
-      toast.error(TOAST_MESSAGES.PASSWORD_RESET_REQUIRED, { autoClose: 8000 });
-      navigate(REDIRECT_PATHS.RESET_PASSWORD_REQUIRED, { 
-        state: { email: error.email || '', reason: 'password_reset_required' } 
-      });
-    } else if (errorMessage.includes(AUTH_CONSTANTS.ERROR_CODES.COMPTE_DESACTIVE)) {
-      toast.error(TOAST_MESSAGES.ACCOUNT_DISABLED, { autoClose: 8000 });
-    } else if (errorMessage.includes(AUTH_CONSTANTS.ERROR_CODES.COMPTE_TEMPORAIREMENT_DECONNECTE)) {
-      const hoursMatch = errorMessage.match(/:(\d+)/);
-      const hours = hoursMatch ? parseInt(hoursMatch[1]) : 24;
-      toast.error(TOAST_MESSAGES.ACCOUNT_TEMP_DISCONNECTED(hours), { autoClose: 10000 });
-    } else if (errorMessage.includes(AUTH_CONSTANTS.ERROR_CODES.MAINTENANCE_MODE)) {
-      toast.error(TOAST_MESSAGES.MAINTENANCE_MODE, { autoClose: 8000 });
-    } else if (errorMessage.includes(AUTH_CONSTANTS.ERROR_CODES.INVALID_CREDENTIALS)) {
-      toast.error(TOAST_MESSAGES.INVALID_CREDENTIALS, { autoClose: 4000 });
-    } else if (errorMessage === 'SESSION_EXPIRED') {
-      // Ne pas montrer de toast supplémentaire
-    } else if (error instanceof TypeError && error.message.includes('Failed to fetch')) {
-      toast.error(TOAST_MESSAGES.NETWORK_ERROR, { autoClose: 5000 });
-    } else {
-      toast.error(errorMessage, { autoClose: 5000 });
+
+    try {
+      const decoded = jwtDecode<JwtPayload>(savedToken);
+      const currentTime = Date.now();
+      const tokenExpirationTime = decoded.exp * 1000;
+      const timeUntilExpiration = tokenExpirationTime - currentTime;
+
+      if (timeUntilExpiration < AUTH_CONSTANTS.PREVENTIVE_REFRESH_MS) {
+        // Refresh si le token expire dans moins de 5 minutes
+        if (!isRefreshingRef.current) {
+          await refreshToken();
+        }
+      } else if (!user) {
+        await fetchUserData();
+      }
+    } catch (error) {
+      console.warn('Erreur vérification auth:', error);
     }
-    
-    setError(errorMessage);
-  }, [navigate]);
+  }, [fetchUserData, refreshToken, user]);
+
+  const setupTokenRefresh = useCallback((accessToken: string): void => {
+    try {
+      const decoded = jwtDecode<JwtPayload>(accessToken);
+      const tokenExpirationMs = decoded.exp * 1000;
+      const currentTimeMs = Date.now();
+      const timeUntilExpiration = tokenExpirationMs - currentTimeMs;
+      
+      // Planifier le refresh 5 minutes avant expiration
+      const refreshTime = Math.max(
+        30000, // Minimum 30 secondes
+        timeUntilExpiration - AUTH_CONSTANTS.PREVENTIVE_REFRESH_MS
+      );
+
+      if (refreshTimeoutRef.current) {
+        window.clearTimeout(refreshTimeoutRef.current);
+      }
+      
+      if (refreshTime > 0) {
+        refreshTimeoutRef.current = window.setTimeout(async () => {
+          await refreshToken();
+        }, refreshTime);
+      }
+    } catch (error) {
+      console.warn('Erreur setup token refresh:', error);
+    }
+  }, [refreshToken]);
 
   // ==================== MÉTHODES D'AUTHENTIFICATION ====================
   const login = useCallback(
@@ -453,36 +519,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           Date.now().toString()
         );
 
-        const decoded = jwtDecode<JwtPayload>(data.access_token);
-        
-        if (refreshTimeoutRef.current) {
-          window.clearTimeout(refreshTimeoutRef.current);
-        }
-        
-        const tokenExpirationMs = decoded.exp * 1000;
-        const currentTimeMs = Date.now();
-        const timeUntilExpiration = tokenExpirationMs - currentTimeMs;
-        
-        const refreshTime = Math.max(
-          30000,
-          timeUntilExpiration - AUTH_CONSTANTS.PREVENTIVE_REFRESH_MS
-        );
-
-        if (refreshTime > 0) {
-          refreshTimeoutRef.current = window.setTimeout(async () => {
-            if (refreshAttemptsRef.current < AUTH_CONSTANTS.MAX_REFRESH_ATTEMPTS) {
-              const refreshed = await refreshToken();
-              if (refreshed) {
-                refreshAttemptsRef.current = 0;
-              } else {
-                refreshAttemptsRef.current++;
-              }
-            } else {
-              logout();
-              toast.info(TOAST_MESSAGES.SESSION_EXPIRED);
-            }
-          }, refreshTime);
-        }
+        // Configurer le refresh automatique
+        setupTokenRefresh(data.access_token);
 
         const redirectPath =
           data.user.role === UserRole.ADMIN
@@ -499,7 +537,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         setIsLoading(false);
       }
     },
-    [navigate, handleAuthError]
+    [navigate, handleAuthError, setupTokenRefresh]
   );
 
   const register = useCallback(
@@ -549,6 +587,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             data.access_token
           );
           setAccessToken(data.access_token);
+          
+          // Configurer le refresh automatique
+          setupTokenRefresh(data.access_token);
         }
 
         const userData: User = {
@@ -572,49 +613,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           Date.now().toString()
         );
 
-        if (data.access_token) {
-          try {
-            const decoded = jwtDecode<JwtPayload>(data.access_token);
-            
-            if (refreshTimeoutRef.current) {
-              window.clearTimeout(refreshTimeoutRef.current);
-            }
-            
-            const tokenExpirationMs = decoded.exp * 1000;
-            const currentTimeMs = Date.now();
-            const timeUntilExpiration = tokenExpirationMs - currentTimeMs;
-            
-            const refreshTime = Math.max(
-              30000,
-              timeUntilExpiration - AUTH_CONSTANTS.PREVENTIVE_REFRESH_MS
-            );
-
-            if (refreshTime > 0) {
-              refreshTimeoutRef.current = window.setTimeout(async () => {
-                if (refreshAttemptsRef.current < AUTH_CONSTANTS.MAX_REFRESH_ATTEMPTS) {
-                  const refreshed = await refreshToken();
-                  if (refreshed) {
-                    refreshAttemptsRef.current = 0;
-                  } else {
-                    refreshAttemptsRef.current++;
-                  }
-                } else {
-                  logout();
-                  toast.info(TOAST_MESSAGES.SESSION_EXPIRED);
-                }
-              }, refreshTime);
-            }
-          } catch (error) {
-            console.warn('⚠️ Erreur décodage token après inscription:', error);
-          }
-        }
-
         const redirectPath = userData.role === UserRole.ADMIN
           ? REDIRECT_PATHS.ADMIN_DASHBOARD
           : REDIRECT_PATHS.HOME;
 
         navigate(redirectPath, { replace: true });
-        
         toast.success(TOAST_MESSAGES.REGISTER_SUCCESS);
         
       } catch (err: any) {
@@ -624,74 +627,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         setIsLoading(false);
       }
     },
-    [navigate, handleAuthError]
+    [navigate, handleAuthError, setupTokenRefresh]
   );
-
-  const refreshToken = useCallback(async (): Promise<boolean> => {
-    if (isRefreshingRef.current) {
-      console.log('⚠️ Refresh déjà en cours');
-      return false;
-    }
-
-    const lastRefreshTime = window.localStorage?.getItem('last_refresh_time');
-    if (lastRefreshTime) {
-      const timeSinceLastRefresh = Date.now() - parseInt(lastRefreshTime);
-      if (timeSinceLastRefresh < 30000) {
-        return false;
-      }
-    }
-
-    isRefreshingRef.current = true;
-
-    try {
-      const response = await window.fetch(
-        `${API_CONFIG.BASE_URL}${API_CONFIG.ENDPOINTS.REFRESH}`,
-        {
-          method: 'POST',
-          credentials: 'include',
-        }
-      );
-
-      if (response.status === 401) {
-        console.log('❌ Refresh token invalide ou expiré');
-        return false;
-      }
-
-      if (!response.ok) {
-        console.warn(`❌ Refresh échoué: ${response.status}`);
-        return false;
-      }
-
-      const data = await response.json();
-
-      if (!data.access_token) {
-        console.error('❌ Pas de nouveau token reçu');
-        return false;
-      }
-
-      window.localStorage.setItem(STORAGE_KEYS.ACCESS_TOKEN, data.access_token);
-      setAccessToken(data.access_token);
-      
-      await fetchUserData();
-      
-      window.localStorage.setItem('last_refresh_time', Date.now().toString());
-      
-      console.log('✅ Token rafraîchi avec succès');
-      return true;
-
-    } catch (error) {
-      console.error('❌ Erreur lors du refresh:', error);
-      
-      if (error instanceof TypeError && error.message.includes('Failed to fetch')) {
-        console.warn('🌐 Erreur réseau - le token actuel reste valable');
-        return false;
-      }
-      
-      return false;
-    } finally {
-      isRefreshingRef.current = false;
-    }
-  }, [fetchUserData]);
 
   const logout = useCallback(async (): Promise<void> => {
     try {
@@ -701,9 +638,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         });
       }
     } catch (error) {
-      if (import.meta.env.DEV) {
-        console.error('⚠️ Erreur logout backend (peut être normal):', error);
-      }
+      // Ignorer les erreurs de déconnexion
     } finally {
       cleanupAuthData();
       navigate(REDIRECT_PATHS.LOGIN, { replace: true });
@@ -767,51 +702,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     [navigate, handleAuthError]
   );
 
-  const checkAuth = useCallback(async (): Promise<void> => {
-    setIsLoading(true);
-    
-    const savedToken = window.localStorage?.getItem(STORAGE_KEYS.ACCESS_TOKEN);
-
-    if (!savedToken) {
-      setIsLoading(false);
-      return;
-    }
-
-    try {
-      const decoded = jwtDecode<JwtPayload>(savedToken);
-      const currentTime = Date.now();
-      const tokenExpirationTime = decoded.exp * 1000;
-      const timeUntilExpiration = tokenExpirationTime - currentTime;
-
-      const isTokenExpired = timeUntilExpiration < -30000;
-      
-      if (isTokenExpired) {
-        console.log('⏰ Token expiré depuis plus de 30s, tentative de rafraîchissement...');
-        
-        if (!isRefreshingRef.current) {
-          const refreshed = await refreshToken();
-          if (!refreshed) {
-            console.warn('⚠️ Refresh échoué, mais on garde la session pour l\'instant');
-          }
-        }
-      } else if (timeUntilExpiration < AUTH_CONSTANTS.PREVENTIVE_REFRESH_MS) {
-        console.log(`🔄 Token expire bientôt, refresh préventif...`);
-        
-        if (!isRefreshingRef.current) {
-          await refreshToken();
-        }
-      } else {
-        if (!user) {
-          await fetchUserData();
-        }
-      }
-    } catch (error) {
-      console.warn('⚠️ Erreur vérification auth:', error);
-    } finally {
-      setIsLoading(false);
-    }
-  }, [fetchUserData, refreshToken, user]);
-
   const resetPassword = useCallback(
     async (token: string, newPassword: string): Promise<void> => {
       setIsLoading(true);
@@ -870,6 +760,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       await checkAuth();
 
       if (isMounted) {
+        // Vérifier la session toutes les minutes (max 30 minutes)
         sessionCheckIntervalRef.current = window.setInterval(() => {
           const sessionStart = window.localStorage?.getItem(
             STORAGE_KEYS.SESSION_START
@@ -877,11 +768,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           if (sessionStart) {
             const sessionAge = Date.now() - parseInt(sessionStart);
             if (sessionAge > AUTH_CONSTANTS.MAX_SESSION_DURATION_MS) {
-              logout();
+              cleanupAuthData();
               toast.info(TOAST_MESSAGES.SESSION_EXPIRED);
             }
           }
-        }, 60 * 1000);
+        }, AUTH_CONSTANTS.SESSION_CHECK_INTERVAL);
       }
     };
 
@@ -896,7 +787,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         window.clearInterval(sessionCheckIntervalRef.current);
       }
     };
-  }, [checkAuth, logout]);
+  }, [checkAuth, cleanupAuthData]);
 
   // ==================== VALEUR DU CONTEXT ====================
   const value: AuthContextType = {

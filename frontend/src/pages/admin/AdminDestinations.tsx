@@ -7,36 +7,12 @@ import {
   type Destination,
   type CreateDestinationData,
   type UpdateDestinationData,
+  
 } from '../../api/admin/AdminDestionService';
 import { Helmet } from 'react-helmet-async';
 import RequireAdmin from '../../context/RequireAdmin';
 
-const VITE_API_URL = (import.meta as any).env.VITE_API_URL;
 
-const getFullImageUrl = (imagePath: string) => {
-  if (!imagePath) return '/paname-consulting.jpg';
-
-  // URLs déjà complètes
-  if (imagePath.startsWith('http') || imagePath.startsWith('data:')) {
-    return imagePath;
-  }
-
-  // Images dans public (par défaut)
-  if (imagePath.startsWith('/')) {
-    return imagePath;
-  }
-
-  const baseUrl = VITE_API_URL;
-
-  // Images uploadées
-  let cleanPath = imagePath;
-  if (!cleanPath.startsWith('uploads/')) {
-    cleanPath = `uploads/${cleanPath}`;
-  }
-  cleanPath = cleanPath.replace(/\/\//g, '/');
-
-  return `${baseUrl}/${cleanPath}`;
-};
 
 interface DataSourceInfo {
   count: number;
@@ -49,6 +25,7 @@ const initialForm = {
 };
 
 const AdminDestinations: React.FC = (): React.JSX.Element => {
+  const { getFullImageUrl } = destinationService;
   const { access_token, user, isAuthenticated } = useAuth();
   const [destinations, setDestinations] = useState<Destination[]>([]);
   const [form, setForm] = useState(initialForm);
@@ -84,28 +61,21 @@ const AdminDestinations: React.FC = (): React.JSX.Element => {
         await destinationService.getAllDestinationsWithoutPagination();
       
       // Transformer les données pour inclure les URLs complètes des images
-      const transformedData = data.map((dest: Destination) => ({
-        ...dest,
-        imagePath: getFullImageUrl(dest.imagePath),
-      }));
+     const transformedData = data.map((dest: Destination) => ({
+      ...dest,
+      imagePath: destinationService.getFullImageUrl(dest.imagePath),  // ← Utiliser le service
+    }));
       
       setDestinations(transformedData);
 
-      // Pour déboguer - seulement en développement
-      if (import.meta.env.DEV) {
-        console.log('Destinations loaded:', data);
-        console.log('Transformed destinations:', transformedData);
-        if (transformedData.length > 0) {
-          console.log('First destination image URL:', transformedData[0]?.imagePath);
-        }
-      }
+
 
       // Mettre à jour les informations de source de données
       const stats = await destinationService.getStatistics();
 
-      if (import.meta.env.DEV) {
-        console.log('Stats:', stats);
-      }
+      // if (import.meta.env.DEV) {
+      //   console.log('Stats:', stats);
+      // }
 
       setDataSourceInfo({
         count: data.length,
@@ -135,26 +105,14 @@ const AdminDestinations: React.FC = (): React.JSX.Element => {
   // Vérifier les droits admin - CORRIGÉ
   const hasAdminRights = (): boolean => {
     if (!isAuthenticated || !user || !access_token) {
-      if (import.meta.env.DEV) {
-        console.log(
-          'hasAdminRights: false - not authenticated/no user/no token'
-        );
-      }
+    
       return false;
     }
 
     // Vérifier le rôle admin
     const isAdminUser = user.role === 'admin';
 
-    if (import.meta.env.DEV) {
-      console.log('hasAdminRights check:', {
-        isAuthenticated,
-        user,
-        role: user?.role,
-        hasToken: !!access_token,
-        isAdminUser,
-      });
-    }
+   
 
     return isAdminUser;
   };
@@ -244,9 +202,9 @@ const AdminDestinations: React.FC = (): React.JSX.Element => {
       setShowDeleteConfirm(null);
       fetchDestinations();
     } catch (error: any) {
-      if (import.meta.env.DEV) {
-        console.error('Erreur détaillée:', error);
-      }
+      // if (import.meta.env.DEV) {
+      //   console.error('Erreur détaillée:', error);
+      // }
       // Le message d'erreur est déjà géré par le service
     } finally {
       setLoading(false);
@@ -299,16 +257,7 @@ const AdminDestinations: React.FC = (): React.JSX.Element => {
   };
 
   useEffect(() => {
-    // Log d'état d'authentification pour déboguer
-    if (import.meta.env.DEV) {
-      console.log('AdminDestinations Auth State:', {
-        access_token,
-        user,
-        isAuthenticated,
-        isAdmin: user?.role === 'admin',
-        userObject: user,
-      });
-    }
+  
 
     fetchDestinations();
     return () => {
@@ -337,7 +286,7 @@ const AdminDestinations: React.FC = (): React.JSX.Element => {
       </Helmet>
 
       <RequireAdmin>
-        <div className='min-h-screen max-w-[1024px] mx-auto overflow-x-hidden'>
+        <div className='min-h-screen max-w-5xl mx-auto overflow-x-hidden'>
           {/* Header */}
           <div className='mb-4 px-4'>
             <div className='flex items-center gap-2 mb-1'>
@@ -783,7 +732,7 @@ const AdminDestinations: React.FC = (): React.JSX.Element => {
           {/* Liste des destinations */}
           <div className='bg-white rounded-xl border border-slate-200/60 overflow-hidden shadow-sm mx-4'>
             {/* En-tête */}
-            <div className='px-4 py-3 bg-gradient-to-r from-blue-500 to-blue-600 text-white'>
+            <div className='px-4 py-3 bg-linear-to-r from-blue-500 to-blue-600 text-white'>
               <div className='flex items-center justify-between'>
                 <div className='flex items-center gap-2'>
                   <svg
@@ -848,7 +797,7 @@ const AdminDestinations: React.FC = (): React.JSX.Element => {
                       className='p-4 hover:bg-slate-50 transition-colors'
                     >
                       <div className='flex gap-3'>
-                        <div className='flex-shrink-0'>
+                        <div className='shrink-0'>
                           <img
                             src={dest.imagePath}
                             alt={dest.country}
@@ -922,7 +871,7 @@ const AdminDestinations: React.FC = (): React.JSX.Element => {
 
             {/* Version desktop - Tableau */}
             <div className='hidden lg:block overflow-x-auto'>
-              <table className='w-full min-w-[600px]'>
+              <table className='w-full min-w-150'>
                 <thead className='bg-slate-50'>
                   <tr>
                     <th className='px-4 py-3 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider'>

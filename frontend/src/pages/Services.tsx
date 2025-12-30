@@ -41,7 +41,7 @@ export default function Services() {
                 }
               `}</style>
         </Helmet>
-        <main className='flex-1 mt-[10px] sm:mt-[35px] bg-gradient-to-b from-white via-sky-50 to-white'>
+        <main className='flex-1 mt-2.5 sm:mt-8.75 bg-linear-to-b from-white via-sky-50 to-white'>
           <ServicesGrid />
           <DestinationQuiz />
           <Destination />

@@ -7,8 +7,8 @@ export interface Destination {
   country: string;
   text: string;
   imagePath: string;
-  createdAt?: string;
-  updatedAt?: string;
+  createdAt?: string | Date;  
+  updatedAt?: string | Date;
 }
 
 export interface PaginatedResponse {
@@ -43,7 +43,7 @@ class DestinationService {
   private baseUrl: string;
 
   constructor() {
-    this.baseUrl = `${API_URL}/destinations`;
+    this.baseUrl = `${API_URL}/api/destinations`;
   }
 
   /**
@@ -372,7 +372,7 @@ class DestinationService {
   async getStatistics(): Promise<Statistics> {
     try {
       // Pour l'instant, on utilise la liste complète pour calculer les stats
-      // Vous pourriez ajouter un endpoint spécifique /destinations/stats dans le backend
+      // Vous pourriez ajouter un endpoint spécifique /api/destinations/stats dans le backend
       const destinations = await this.getAllDestinationsWithoutPagination();
 
       const uniqueCountries = new Set(
@@ -455,6 +455,7 @@ class DestinationService {
   /**
    * Générer l'URL complète d'une image
    */
+ 
   getFullImageUrl = (imagePath: string) => {
     if (!imagePath) return '/paname-consulting.jpg';
 
@@ -463,22 +464,18 @@ class DestinationService {
       return imagePath;
     }
 
-    const baseUrl = API_URL;
-
-    // Images dans public (par défaut) - utiliser le chemin relatif directement
+    // Images dans public (par défaut)
     if (imagePath.startsWith('/')) {
       return imagePath;
     }
 
-    // Images uploadées - construire l'URL complète avec le préfixe uploads
-    let cleanPath = imagePath;
+    const baseUrl = (import.meta as any).env.VITE_API_URL;
 
-    // Si le chemin ne commence pas par 'uploads/', l'ajouter
+    // Images uploadées
+    let cleanPath = imagePath;
     if (!cleanPath.startsWith('uploads/')) {
       cleanPath = `uploads/${cleanPath}`;
     }
-
-    // Nettoyer les doubles slash
     cleanPath = cleanPath.replace(/\/\//g, '/');
 
     return `${baseUrl}/${cleanPath}`;

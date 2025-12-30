@@ -1,17 +1,17 @@
 import { AnimatePresence, motion } from 'framer-motion';
 import React, { useState } from 'react';
 import {
-  FiBookOpen,
-  FiChevronDown,
-  FiCloud,
-  FiCreditCard,
-  FiGlobe,
-  FiMail,
-  FiSmartphone,
-  FiTarget,
-  FiThumbsUp,
-  FiUsers,
-} from 'react-icons/fi';
+  BookOpen as FiBookOpen,
+  ChevronDown as FiChevronDown,
+  Cloud as FiCloud,
+  CreditCard as FiCreditCard,
+  Globe as FiGlobe,
+  Mail as FiMail,
+  Smartphone as FiSmartphone,
+  Target as FiTarget,
+  ThumbsUp as FiThumbsUp,
+  Users as FiUsers,
+} from 'lucide-react';
 
 interface FaqItem {
   question: string;
@@ -95,7 +95,7 @@ const Faq = () => {
   const filteredFaqs = faqData.filter(item => item.category === activeCategory);
 
   return (
-    <section className='py-16 px-4 sm:px-6 lg:px-8 bg-gradient-to-br from-sky-50 to-white'>
+    <section className='py-16 px-4 sm:px-6 lg:px-8 bg-linear-to-br from-sky-50 to-white'>
       <div className='max-w-7xl mx-auto'>
         <motion.div
           initial={{ opacity: 0, y: 20 }}

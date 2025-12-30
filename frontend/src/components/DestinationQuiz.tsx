@@ -47,9 +47,9 @@ const Loader: React.FC<{ message?: string; subMessage?: string }> = ({
   return (
     <div className='text-center max-w-md'>
       <div className='relative w-24 h-24 mx-auto mb-6'>
-        <div className='absolute inset-0 bg-gradient-to-r from-sky-400 to-blue-500 rounded-full opacity-20 blur-xl animate-pulse'></div>
+        <div className='absolute inset-0 bg-linear-to-r from-sky-400 to-blue-500 rounded-full opacity-20 blur-xl animate-pulse'></div>
         <div className='absolute inset-4 border-4 border-sky-300 rounded-full border-t-transparent animate-spin'></div>
-        <div className='absolute inset-6 bg-gradient-to-r from-sky-100 to-blue-100 rounded-full flex items-center justify-center'>
+        <div className='absolute inset-6 bg-linear-to-r from-sky-100 to-blue-100 rounded-full flex items-center justify-center'>
           <Globe className='h-8 w-8 text-sky-600 animate-pulse' />
         </div>
       </div>
@@ -60,7 +60,7 @@ const Loader: React.FC<{ message?: string; subMessage?: string }> = ({
 
         <div className='w-full bg-gray-200 rounded-full h-1.5 mt-4'>
           <div
-            className='bg-gradient-to-r from-sky-500 to-blue-500 h-1.5 rounded-full animate-pulse'
+            className='bg-linear-to-r from-sky-500 to-blue-500 h-1.5 rounded-full animate-pulse'
             style={{ width: '75%' }}
           ></div>
         </div>
@@ -75,9 +75,9 @@ const DestinationCard: React.FC<{ destination: Destination; rank: number }> =
     <div
       className={`relative border-2 rounded-xl p-3 text-left flex flex-col h-full transition-all duration-300 hover:shadow-lg ${
         rank === 1
-          ? 'border-sky-400 bg-gradient-to-br from-sky-50 via-white to-blue-50 shadow-md'
+          ? 'border-sky-400 bg-linear-to-br from-sky-50 via-white to-blue-50 shadow-md'
           : rank === 2
-            ? 'border-blue-300 bg-gradient-to-br from-blue-50 to-white shadow-sm'
+            ? 'border-blue-300 bg-linear-to-br from-blue-50 to-white shadow-sm'
             : 'border-gray-200 bg-white shadow-xs'
       }`}
     >
@@ -85,10 +85,10 @@ const DestinationCard: React.FC<{ destination: Destination; rank: number }> =
       <div
         className={`absolute -top-2 -right-2 w-6 h-6 rounded-full flex items-center justify-center text-white font-bold text-xs shadow-md ${
           rank === 1
-            ? 'bg-gradient-to-r from-yellow-400 via-yellow-500 to-orange-500'
+            ? 'bg-linear-to-r from-yellow-400 via-yellow-500 to-orange-500'
             : rank === 2
-              ? 'bg-gradient-to-r from-gray-400 via-gray-500 to-gray-600'
-              : 'bg-gradient-to-r from-amber-700 via-amber-800 to-amber-900'
+              ? 'bg-linear-to-r from-gray-400 via-gray-500 to-gray-600'
+              : 'bg-linear-to-r from-amber-700 via-amber-800 to-amber-900'
         }`}
       >
         #{rank}
@@ -121,7 +121,7 @@ const DestinationCard: React.FC<{ destination: Destination; rank: number }> =
             </div>
           </div>
         </div>
-        <div className='flex items-center bg-gradient-to-r from-sky-100 to-blue-100 px-2 py-1 rounded-full shadow-xs'>
+        <div className='flex items-center bg-linear-to-r from-sky-100 to-blue-100 px-2 py-1 rounded-full shadow-xs'>
           <Sparkles className='h-3 w-3 text-sky-600 mr-1' />
           <span className='text-xs font-bold text-sky-700'>
             {destination.matchPercentage}%
@@ -130,7 +130,7 @@ const DestinationCard: React.FC<{ destination: Destination; rank: number }> =
       </div>
 
       {/* Description */}
-      <p className='text-gray-600 text-xs mb-3 flex-grow'>
+      <p className='text-gray-600 text-xs mb-3 grow'>
         {destination.description}
       </p>
 
@@ -151,7 +151,7 @@ const DestinationCard: React.FC<{ destination: Destination; rank: number }> =
         <ul className='space-y-1.5'>
           {destination.advantages.slice(0, 3).map((advantage, i) => (
             <li key={i} className='flex items-start group'>
-              <div className='h-1.5 w-1.5 rounded-full bg-sky-500 mr-2 mt-1 flex-shrink-0 group-hover:scale-125 transition-transform'></div>
+              <div className='h-1.5 w-1.5 rounded-full bg-sky-500 mr-2 mt-1 shrink-0 group-hover:scale-125 transition-transform'></div>
               <span className='text-gray-700 text-xs leading-relaxed'>
                 {advantage}
               </span>
@@ -605,13 +605,13 @@ const DestinationQuiz: React.FC = () => {
         <div className='max-w-6xl mx-auto'>
           {/* En-tête avec effet visuel */}
           <div className='text-center mb-8 relative'>
-            <div className='mx-auto flex items-center justify-center h-16 w-16 rounded-full bg-gradient-to-r from-sky-100 to-blue-100 shadow-md mb-4'>
+            <div className='mx-auto flex items-center justify-center h-16 w-16 rounded-full bg-linear-to-r from-sky-100 to-blue-100 shadow-md mb-4'>
               <MapPin className='h-8 w-8 text-sky-600' />
             </div>
             <div className='absolute top-0 right-10 w-20 h-20 bg-blue-100 rounded-full opacity-20 blur-lg'></div>
             <div className='absolute bottom-0 left-10 w-16 h-16 bg-sky-100 rounded-full opacity-20 blur-lg'></div>
 
-            <h1 className='text-2xl sm:text-3xl font-bold text-gray-900 mb-3 bg-gradient-to-r from-sky-600 to-blue-600 bg-clip-text text-transparent'>
+            <h1 className='text-2xl sm:text-3xl font-bold bg-linear-to-r from-sky-600 to-blue-600 bg-clip-text text-transparent'>
               Vos Destinations Idéales
             </h1>
             <p className='text-gray-600 max-w-2xl mx-auto text-sm'>
@@ -673,7 +673,7 @@ const DestinationQuiz: React.FC = () => {
             <div className='flex flex-col sm:flex-row justify-center gap-3'>
               <Link
                 to='/rendez-vous'
-                className='inline-flex items-center justify-center px-6 py-2.5 font-bold text-white bg-gradient-to-r from-sky-500 to-blue-500 rounded-lg shadow-md hover:shadow-lg transform hover:scale-105 transition-all duration-300 text-sm'
+                className='inline-flex items-center justify-center px-6 py-2.5 font-bold text-white bg-linear-to-r from-sky-500 to-blue-500 rounded-lg shadow-md hover:shadow-lg transform hover:scale-105 transition-all duration-300 text-sm'
               >
                 Discuter avec un conseiller
                 <ChevronRight className='ml-2 h-4 w-4' />
@@ -747,7 +747,7 @@ const DestinationQuiz: React.FC = () => {
           </div>
           <div className='w-full bg-gray-200 rounded-full h-2 shadow-inner'>
             <div
-              className='bg-gradient-to-r from-sky-500 to-blue-500 h-2 rounded-full transition-all duration-700 shadow-sm'
+              className='bg-linear-to-r from-sky-500 to-blue-500 h-2 rounded-full transition-all duration-700 shadow-sm'
               style={{ width: `${progress}%` }}
             ></div>
           </div>
@@ -756,7 +756,7 @@ const DestinationQuiz: React.FC = () => {
         {/* Carte de question */}
         <div className='bg-white rounded-xl shadow-lg border border-gray-100 overflow-hidden mb-6'>
           {/* En-tête */}
-          <div className='p-5 text-center border-b border-gray-100 bg-gradient-to-r from-sky-50 to-blue-50'>
+          <div className='p-5 text-center border-b border-gray-100 bg-linear-to-r from-sky-50 to-blue-50'>
             <div className='flex justify-center mb-4'>
               <div className='p-2.5 bg-white rounded-full shadow-xs'>
                 {currentQuestion.icon}
@@ -778,13 +778,13 @@ const DestinationQuiz: React.FC = () => {
                 onClick={() => handleAnswer(currentQuestion.id, option.value)}
                 className={`w-full p-3 text-left rounded-lg border-2 transition-all duration-300 transform hover:scale-[1.02] ${
                   selectedOption === option.value
-                    ? 'border-sky-500 bg-gradient-to-r from-sky-50 to-blue-50 shadow-md'
+                    ? 'border-sky-500 bg-linear-to-r from-sky-50 to-blue-50 shadow-md'
                     : 'border-gray-200 hover:border-sky-300 hover:bg-sky-50/50'
                 }`}
               >
                 <div className='flex items-start'>
                   <div
-                    className={`flex-shrink-0 flex items-center justify-center h-5 w-5 rounded-full border mr-3 mt-0.5 ${
+                    className={`shrink-0 flex items-center justify-center h-5 w-5 rounded-full border mr-3 mt-0.5 ${
                       selectedOption === option.value
                         ? 'border-sky-500 bg-sky-500'
                         : 'border-gray-300 bg-white'
@@ -844,7 +844,7 @@ const DestinationQuiz: React.FC = () => {
                 key={index}
                 className={`h-1.5 w-6 rounded-full transition-all duration-500 ${
                   index === currentStep
-                    ? 'bg-gradient-to-r from-sky-500 to-blue-500'
+                    ? 'bg-linear-to-r from-sky-500 to-blue-500'
                     : index < currentStep
                       ? 'bg-green-400'
                       : 'bg-gray-300'

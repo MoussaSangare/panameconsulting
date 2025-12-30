@@ -163,10 +163,10 @@ const ResetPassword: React.FC = () => {
   );
 
   return (
-    <div className='min-h-screen bg-gradient-to-br from-sky-50 to-blue-100 flex items-center justify-center p-4'>
+    <div className='min-h-screen bg-linear-to-br from-sky-50 to-blue-100 flex items-center justify-center p-4'>
       <div className='max-w-md w-full bg-white rounded-2xl shadow-lg overflow-hidden'>
         {/* Header */}
-        <div className='bg-gradient-to-r from-sky-500 to-sky-600 p-6 text-white text-center'>
+        <div className='bg-linear-to-r from-sky-500 to-sky-600 p-6 text-white text-center'>
           <div className='w-16 h-16 bg-white/20 rounded-full flex items-center justify-center mx-auto mb-4'>
             <Lock className='w-8 h-8' />
           </div>
@@ -269,11 +269,6 @@ const ResetPassword: React.FC = () => {
                       met={passwordStrength.hasNumber}
                       text='Au moins un chiffre (0-9)'
                     />
-                    {/* ✅ SUPPRIMÉ: Caractère spécial non requis
-                    <PasswordRequirement
-                      met={passwordStrength.hasSpecialChar}
-                      text='Au moins un caractère spécial (!@#$%^&*)'
-                    /> */}
                     <p className='text-xs text-gray-500 pt-2 border-t border-gray-200 mt-2'>
                       Ces critères correspondent exactement à la validation du serveur.
                     </p>
@@ -350,7 +345,7 @@ const ResetPassword: React.FC = () => {
               <button
                 type='submit'
                 disabled={!canSubmit || loading}
-                className={`w-full bg-gradient-to-r from-sky-500 to-sky-600 text-white py-3 px-4 rounded-lg font-medium hover:from-sky-600 hover:to-sky-700 disabled:from-gray-400 disabled:to-gray-500 disabled:cursor-not-allowed transition-all duration-200 flex items-center justify-center gap-2 focus:outline-none focus:ring-2 focus:ring-sky-500/50 ${
+                className={`w-full bg-linear-to-r from-sky-500 to-sky-600 text-white py-3 px-4 rounded-lg font-medium hover:from-sky-600 hover:to-sky-700 disabled:from-gray-400 disabled:to-gray-500 disabled:cursor-not-allowed transition-all duration-200 flex items-center justify-center gap-2 focus:outline-none focus:ring-2 focus:ring-sky-500/50 ${
                   canSubmit && !loading ? 'hover:shadow-md' : ''
                 }`}
               >

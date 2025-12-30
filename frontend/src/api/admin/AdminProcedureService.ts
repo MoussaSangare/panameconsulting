@@ -39,7 +39,9 @@ export interface Procedure {
   email: string;
   telephone?: string;
   destination: string;
+  destinationAutre?: string;
   filiere?: string;
+  filiereAutre?: string;
   niveauEtude?: string;
   statut: ProcedureStatus;
   steps: Step[];
@@ -48,9 +50,9 @@ export interface Procedure {
   deletionReason?: string;
   raisonRejet?: string;
   dateCompletion?: string;
+  dateDerniereModification?: string;
   createdAt: string;
   updatedAt: string;
-  // Champs supplémentaires du rendez-vous
   rendezVous?: {
     _id: string;
     firstName: string;
@@ -161,20 +163,22 @@ const ERROR_MAPPING: Record<string, string> = {
 // ==================== UTILITY FUNCTIONS ====================
 const maskSensitiveData = {
   email: (email: string): string => {
-    if (!email) return '[email_masqué]';
+    if (!email) return '***';
     const [name, domain] = email.split('@');
-    if (!name || !domain) return '[email_invalide]';
-    return `${name.charAt(0)}***@${domain}`;
+    if (!name || !domain) return '***';
+    const maskedName = name.length > 2 
+      ? name.substring(0, 2) + '*'.repeat(Math.max(name.length - 2, 1))
+      : '*'.repeat(name.length);
+    return `${maskedName}@${domain}`;
   },
 
   id: (id: string): string => {
-    if (!id) return '[id_masqué]';
+    if (!id) return '***';
     if (id.length <= 8) return id;
     return `${id.substring(0, 4)}***${id.substring(id.length - 4)}`;
   },
 };
 
-// Fonction delay compatible SSR
 const delay = (ms: number) => {
   if (typeof globalThis !== 'undefined' && globalThis.setTimeout) {
     return new Promise(resolve => globalThis.setTimeout(resolve, ms));
@@ -196,9 +200,9 @@ const showToast = {
   },
 
   error: (message: string, code?: string) => {
-    const userMessage =
-      code && ERROR_MAPPING[code] ? `${ERROR_MAPPING[code]}` : message;
-
+    const userMessage = code && ERROR_MAPPING[code] 
+      ? ERROR_MAPPING[code] 
+      : message;
     toast.error(userMessage, {
       position: 'top-right',
       autoClose: 5000,
@@ -220,9 +224,7 @@ const showToast = {
 // ==================== MAIN SERVICE CLASS ====================
 export class ProcedureService {
   private accessToken: string | null = null;
-  private logoutCallback:
-    | ((redirectPath?: string, silent?: boolean) => void)
-    | null = null;
+  private logoutCallback: ((redirectPath?: string, silent?: boolean) => void) | null = null;
 
   constructor(
     accessToken?: string | null,
@@ -236,9 +238,7 @@ export class ProcedureService {
     this.accessToken = token;
   }
 
-  setLogoutCallback(
-    callback: (redirectPath?: string, silent?: boolean) => void
-  ) {
+  setLogoutCallback(callback: (redirectPath?: string, silent?: boolean) => void) {
     this.logoutCallback = callback;
   }
 
@@ -248,26 +248,17 @@ export class ProcedureService {
     options: RequestInit = {},
     retryCount = 0
   ): Promise<T> {
-    // Vérifier si nous sommes dans un environnement navigateur
     if (typeof globalThis === 'undefined' || !globalThis.setTimeout) {
-      throw new ProcedureError(
-        'Environnement non supporté',
-        'ENVIRONMENT_ERROR'
-      );
+      throw new ProcedureError('Environnement non supporté', 'ENVIRONMENT_ERROR');
     }
 
     const controller = new AbortController();
-    const timeoutId = globalThis.setTimeout(
-      () => controller.abort(),
-      API_TIMEOUT
-    );
+    const timeoutId = globalThis.setTimeout(() => controller.abort(), API_TIMEOUT);
 
     try {
       const headers: HeadersInit = {
         'Content-Type': 'application/json',
-        ...(this.accessToken && {
-          Authorization: `Bearer ${this.accessToken}`,
-        }),
+        ...(this.accessToken && { Authorization: `Bearer ${this.accessToken}` }),
         ...options.headers,
       };
 
@@ -296,10 +287,7 @@ export class ProcedureService {
         // Gestion des erreurs spécifiques
         if (response.status === 401) {
           errorCode = 'UNAUTHORIZED';
-          showToast.error(
-            'Session expirée. Veuillez vous reconnecter.',
-            'UNAUTHORIZED'
-          );
+          showToast.error('Session expirée. Veuillez vous reconnecter.', 'UNAUTHORIZED');
           if (this.logoutCallback) {
             this.logoutCallback('/connexion', true);
           }
@@ -309,19 +297,14 @@ export class ProcedureService {
         } else if (response.status === 404) {
           errorCode = 'NOT_FOUND';
         } else if (response.status === 400) {
-          // Mapping des erreurs de validation
           Object.keys(ERROR_MAPPING).forEach(code => {
-            if (
-              errorMessage.includes(code) ||
-              errorMessage.includes(ERROR_MAPPING[code])
-            ) {
+            if (errorMessage.includes(code) || errorMessage.includes(ERROR_MAPPING[code])) {
               errorCode = code;
               errorMessage = ERROR_MAPPING[code];
             }
           });
         }
 
-        // Tentative de reconnexion pour certaines erreurs
         if (response.status >= 500 && retryCount < 2) {
           await delay(1000 * (retryCount + 1));
           return this.makeRequest<T>(endpoint, options, retryCount + 1);
@@ -336,27 +319,18 @@ export class ProcedureService {
       globalThis.clearTimeout(timeoutId);
 
       if (error.name === 'AbortError') {
-        throw new ProcedureError(
-          'La requête a expiré. Veuillez réessayer.',
-          'TIMEOUT'
-        );
+        throw new ProcedureError('La requête a expiré. Veuillez réessayer.', 'TIMEOUT');
       }
 
       if (error.name === 'TypeError' && error.message.includes('fetch')) {
-        throw new ProcedureError(
-          'Erreur de connexion au serveur. Vérifiez votre connexion internet.',
-          'NETWORK_ERROR'
-        );
+        throw new ProcedureError('Erreur de connexion au serveur. Vérifiez votre connexion internet.', 'NETWORK_ERROR');
       }
 
       if (error instanceof ProcedureError) {
         throw error;
       }
 
-      throw new ProcedureError(
-        error.message || 'Erreur inconnue',
-        'UNKNOWN_ERROR'
-      );
+      throw new ProcedureError(error.message || 'Erreur inconnue', 'UNKNOWN_ERROR');
     }
   }
 
@@ -374,18 +348,23 @@ export class ProcedureService {
     params.append('limit', limit.toString());
 
     if (filters.email) params.append('email', filters.email);
-    if (filters.statut) params.append('statut', filters.statut);
+    
+    // CORRECTION : Gérer le statut avec type safe
+    if (filters.statut !== undefined && filters.statut !== '') {
+      params.append('statut', filters.statut as string);
+    }
+    
     if (filters.destination) params.append('destination', filters.destination);
     if (filters.filiere) params.append('filiere', filters.filiere);
     if (filters.search) params.append('search', filters.search);
 
     return this.makeRequest<PaginatedResponse>(
-      `/procedures/admin/all?${params.toString()}`
+      `/api/procedures/admin/all?${params.toString()}`
     );
   }
 
   async getAdminProcedureDetails(id: string): Promise<Procedure> {
-    return this.makeRequest<Procedure>(`/procedures/admin/${id}`);
+    return this.makeRequest<Procedure>(`/api/procedures/admin/${id}`);
   }
 
   async updateAdminStep(
@@ -393,9 +372,33 @@ export class ProcedureService {
     stepName: string,
     updates: UpdateStepDto
   ): Promise<Procedure> {
+    // Validation frontend
+    if (updates.statut === StepStatus.REJECTED) {
+      if (!updates.raisonRefus || updates.raisonRefus.trim() === '') {
+        throw new ProcedureError(
+          'La raison du refus est obligatoire lorsque le statut est "Rejeté"',
+          'VALIDATION_RAISON_REQUISE'
+        );
+      }
+      
+      if (updates.raisonRefus.trim().length < 5) {
+        throw new ProcedureError(
+          'La raison doit contenir au moins 5 caractères',
+          'VALIDATION_RAISON_TROP_COURTE'
+        );
+      }
+      
+      if (updates.raisonRefus.length > 500) {
+        throw new ProcedureError(
+          'La raison ne doit pas dépasser 500 caractères',
+          'VALIDATION_RAISON_TROP_LONGUE'
+        );
+      }
+    }
+    
     const encodedStepName = encodeURIComponent(stepName);
     const result = await this.makeRequest<Procedure>(
-      `/procedures/admin/${procedureId}/steps/${encodedStepName}`,
+      `/api/procedures/admin/${procedureId}/steps/${encodedStepName}`,
       {
         method: 'PUT',
         body: JSON.stringify(updates),
@@ -413,7 +416,7 @@ export class ProcedureService {
     const result = await this.makeRequest<{
       success: boolean;
       message: string;
-    }>(`/procedures/admin/${id}`, {
+    }>(`/api/procedures/admin/${id}`, {
       method: 'DELETE',
       body: reason ? JSON.stringify({ reason }) : undefined,
     });
@@ -423,8 +426,27 @@ export class ProcedureService {
   }
 
   async rejectAdminProcedure(id: string, reason: string): Promise<Procedure> {
+    // Validation frontend
+    if (!reason || reason.trim() === '') {
+      throw new ProcedureError('La raison du rejet est obligatoire', 'VALIDATION_RAISON_REQUISE');
+    }
+    
+    if (reason.trim().length < 5) {
+      throw new ProcedureError(
+        'La raison doit contenir au moins 5 caractères',
+        'VALIDATION_RAISON_TROP_COURTE'
+      );
+    }
+    
+    if (reason.length > 500) {
+      throw new ProcedureError(
+        'La raison ne doit pas dépasser 500 caractères',
+        'VALIDATION_RAISON_TROP_LONGUE'
+      );
+    }
+    
     const result = await this.makeRequest<Procedure>(
-      `/procedures/admin/${id}/reject`,
+      `/api/procedures/admin/${id}/reject`,
       {
         method: 'PUT',
         body: JSON.stringify({ reason }),
@@ -440,7 +462,7 @@ export class ProcedureService {
     updates: UpdateProcedureDto
   ): Promise<Procedure> {
     const result = await this.makeRequest<Procedure>(
-      `/procedures/admin/${id}`,
+      `/api/procedures/admin/${id}`,
       {
         method: 'PUT',
         body: JSON.stringify(updates),
@@ -455,7 +477,7 @@ export class ProcedureService {
     rendezVousId: string
   ): Promise<Procedure> {
     const result = await this.makeRequest<Procedure>(
-      '/procedures/admin/create',
+      '/api/procedures/admin/create',
       {
         method: 'POST',
         body: JSON.stringify({ rendezVousId }),
@@ -467,7 +489,7 @@ export class ProcedureService {
   }
 
   async getAdminProceduresOverview(): Promise<StatsResponse> {
-    return this.makeRequest<StatsResponse>('/procedures/admin/stats');
+    return this.makeRequest<StatsResponse>('/api/procedures/admin/stats');
   }
 
   // === USER METHODS ===
@@ -478,12 +500,12 @@ export class ProcedureService {
     limit: number = 10
   ): Promise<PaginatedResponse> {
     return this.makeRequest<PaginatedResponse>(
-      `/procedures/user?email=${encodeURIComponent(email)}&page=${page}&limit=${limit}`
+      `/api/procedures/user?email=${encodeURIComponent(email)}&page=${page}&limit=${limit}`
     );
   }
 
   async getUserProcedureDetails(id: string): Promise<Procedure> {
-    return this.makeRequest<Procedure>(`/procedures/${id}`);
+    return this.makeRequest<Procedure>(`/api/procedures/${id}`);
   }
 
   async cancelUserProcedure(
@@ -492,7 +514,7 @@ export class ProcedureService {
     reason?: string
   ): Promise<Procedure> {
     const result = await this.makeRequest<Procedure>(
-      `/procedures/${id}/cancel`,
+      `/api/procedures/${id}/cancel`,
       {
         method: 'PUT',
         body: JSON.stringify({ reason, email }),
@@ -505,7 +527,7 @@ export class ProcedureService {
 
   async getUserProceduresByEmail(email: string): Promise<Procedure[]> {
     return this.makeRequest<Procedure[]>(
-      `/procedures/email/${encodeURIComponent(email)}`
+      `/api/procedures/email/${encodeURIComponent(email)}`
     );
   }
 
@@ -513,7 +535,7 @@ export class ProcedureService {
 
   async findProceduresByEmail(email: string): Promise<Procedure[]> {
     return this.makeRequest<Procedure[]>(
-      `/procedures/find?email=${encodeURIComponent(email)}`
+      `/api/procedures/find?email=${encodeURIComponent(email)}`
     );
   }
 
@@ -528,20 +550,37 @@ export class ProcedureService {
     if (email) params.append('email', email);
 
     return this.makeRequest<PaginatedResponse>(
-      `/procedures/active?${params.toString()}`
+      `/api/procedures/active?${params.toString()}`
     );
   }
 
   async softDeleteProcedure(id: string, reason?: string): Promise<Procedure> {
+    // Validation frontend
+    if (reason) {
+      if (reason.trim().length < 5) {
+        throw new ProcedureError(
+          'La raison doit contenir au moins 5 caractères',
+          'VALIDATION_RAISON_TROP_COURTE'
+        );
+      }
+      
+      if (reason.length > 500) {
+        throw new ProcedureError(
+          'La raison ne doit pas dépasser 500 caractères',
+          'VALIDATION_RAISON_TROP_LONGUE'
+        );
+      }
+    }
+    
     const result = await this.makeRequest<Procedure>(
-      `/procedures/${id}/soft-delete`,
+      `/api/procedures/admin/${id}`,
       {
         method: 'DELETE',
-        body: reason ? JSON.stringify({ reason }) : undefined,
+        body: reason ? JSON.stringify({ reason }) : '{}',
       }
     );
 
-    showToast.success('Procédure archivée avec succès');
+    showToast.success('Procédure supprimée avec succès');
     return result;
   }
 
@@ -570,26 +609,13 @@ export class ProcedureService {
       return { canModify: false, reason: 'Étape non trouvée' };
     }
 
-    if (
-      [
-        StepStatus.COMPLETED,
-        StepStatus.REJECTED,
-        StepStatus.CANCELLED,
-      ].includes(step.statut)
-    ) {
+    if ([StepStatus.COMPLETED, StepStatus.REJECTED, StepStatus.CANCELLED].includes(step.statut)) {
       return { canModify: false, reason: 'Étape déjà finalisée' };
     }
 
     if (stepName !== StepName.DEMANDE_ADMISSION) {
-      const admissionStep = procedure.steps.find(
-        s => s.nom === StepName.DEMANDE_ADMISSION
-      );
-      if (
-        admissionStep &&
-        [StepStatus.REJECTED, StepStatus.CANCELLED].includes(
-          admissionStep.statut
-        )
-      ) {
+      const admissionStep = procedure.steps.find(s => s.nom === StepName.DEMANDE_ADMISSION);
+      if (admissionStep && [StepStatus.REJECTED, StepStatus.CANCELLED].includes(admissionStep.statut)) {
         return {
           canModify: false,
           reason: `Impossible de modifier car l'admission est ${admissionStep.statut.toLowerCase()}`,
@@ -598,13 +624,8 @@ export class ProcedureService {
     }
 
     if (stepName === StepName.PREPARATIF_VOYAGE) {
-      const visaStep = procedure.steps.find(
-        s => s.nom === StepName.DEMANDE_VISA
-      );
-      if (
-        visaStep &&
-        [StepStatus.REJECTED, StepStatus.CANCELLED].includes(visaStep.statut)
-      ) {
+      const visaStep = procedure.steps.find(s => s.nom === StepName.DEMANDE_VISA);
+      if (visaStep && [StepStatus.REJECTED, StepStatus.CANCELLED].includes(visaStep.statut)) {
         return {
           canModify: false,
           reason: `Impossible de modifier car le visa est ${visaStep.statut.toLowerCase()}`,
@@ -612,13 +633,8 @@ export class ProcedureService {
       }
     }
 
-    if (
-      stepName === StepName.DEMANDE_VISA &&
-      newStatus !== StepStatus.REJECTED
-    ) {
-      const admissionStep = procedure.steps.find(
-        s => s.nom === StepName.DEMANDE_ADMISSION
-      );
+    if (stepName === StepName.DEMANDE_VISA && newStatus !== StepStatus.REJECTED) {
+      const admissionStep = procedure.steps.find(s => s.nom === StepName.DEMANDE_ADMISSION);
       if (admissionStep && admissionStep.statut !== StepStatus.COMPLETED) {
         return {
           canModify: false,
@@ -627,18 +643,12 @@ export class ProcedureService {
       }
     }
 
-    if (
-      stepName === StepName.PREPARATIF_VOYAGE &&
-      newStatus !== StepStatus.REJECTED
-    ) {
-      const visaStep = procedure.steps.find(
-        s => s.nom === StepName.DEMANDE_VISA
-      );
+    if (stepName === StepName.PREPARATIF_VOYAGE && newStatus !== StepStatus.REJECTED) {
+      const visaStep = procedure.steps.find(s => s.nom === StepName.DEMANDE_VISA);
       if (visaStep && visaStep.statut !== StepStatus.COMPLETED) {
         return {
           canModify: false,
-          reason:
-            'Le visa doit être terminé avant de démarrer les préparatifs de voyage',
+          reason: 'Le visa doit être terminé avant de démarrer les préparatifs de voyage',
         };
       }
     }
@@ -647,28 +657,28 @@ export class ProcedureService {
   }
 
   static getStatusColor(status: ProcedureStatus | StepStatus): string {
-  if (status === ProcedureStatus.IN_PROGRESS || status === StepStatus.IN_PROGRESS) {
-    return 'blue';
-  }
-  
-  if (status === ProcedureStatus.COMPLETED || status === StepStatus.COMPLETED) {
-    return 'green';
-  }
-  
-  if (status === ProcedureStatus.REJECTED || status === StepStatus.REJECTED) {
-    return 'red';
-  }
-  
-  if (status === ProcedureStatus.CANCELLED || status === StepStatus.CANCELLED) {
+    if (status === ProcedureStatus.IN_PROGRESS || status === StepStatus.IN_PROGRESS) {
+      return 'blue';
+    }
+    
+    if (status === ProcedureStatus.COMPLETED || status === StepStatus.COMPLETED) {
+      return 'green';
+    }
+    
+    if (status === ProcedureStatus.REJECTED || status === StepStatus.REJECTED) {
+      return 'red';
+    }
+    
+    if (status === ProcedureStatus.CANCELLED || status === StepStatus.CANCELLED) {
+      return 'gray';
+    }
+    
+    if (status === StepStatus.PENDING) {
+      return 'yellow';
+    }
+    
     return 'gray';
   }
-  
-  if (status === StepStatus.PENDING) {
-    return 'yellow';
-  }
-  
-  return 'gray';
-}
 
   static formatDate(dateString: string): string {
     try {
@@ -733,7 +743,6 @@ export const useProcedureActions = (service: ProcedureService) => {
       } catch (err: any) {
         const errorMessage = err.message || 'Une erreur est survenue';
         setError(errorMessage);
-
 
         throw err;
       } finally {

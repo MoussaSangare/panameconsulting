@@ -300,6 +300,7 @@ export class ProcedureService {
         throw new NotFoundException(`Étape "${decodedStepName}" non trouvée dans cette procédure`);
       }
 
+      // ==================== VALIDATION DE LA RAISON DE REFUS ====================
       if (
         updateDto.statut === StepStatus.REJECTED &&
         (!updateDto.raisonRefus || updateDto.raisonRefus.trim() === '')
@@ -308,6 +309,7 @@ export class ProcedureService {
           'La raison du refus est obligatoire lorsque le statut est "Rejeté"',
         );
       }
+      // ==================== FIN VALIDATION ====================
 
       const admissionStep = procedure.steps.find((s) => s.nom === StepName.DEMANDE_ADMISSION);
 
@@ -357,13 +359,13 @@ export class ProcedureService {
 
       procedure.steps[stepIndex] = updatedStep;
 
+      // ==================== LOGIQUE DE REJET EN CASCADE ====================
       if (
         decodedStepName === StepName.DEMANDE_ADMISSION &&
         updateDto.statut &&
         [StepStatus.REJECTED, StepStatus.CANCELLED].includes(updateDto.statut)
       ) {
         procedure.steps.forEach((step, _index) => {
-          // ✅ CORRECTION: _index non utilisé
           if (step.nom !== StepName.DEMANDE_ADMISSION) {
             step.statut = updateDto.statut!; // ✅ Utilisation de ! car nous savons que c'est défini ici
             if (updateDto.raisonRefus && !step.raisonRefus) {
@@ -396,6 +398,7 @@ export class ProcedureService {
           }
         }
       }
+      // ==================== FIN LOGIQUE CASCADE ====================
 
       this.updateProcedureGlobalStatus(procedure);
 
@@ -699,6 +702,20 @@ export class ProcedureService {
   async rejectProcedure(id: string, reason: string): Promise<Procedure> {
     const maskedId = this.maskId(id);
     this.logger.log(`Rejet procédure: ${maskedId}`);
+
+    // ==================== VALIDATION DE LA RAISON ====================
+    if (!reason || reason.trim() === '') {
+      throw new BadRequestException('La raison du rejet est obligatoire');
+    }
+
+    if (reason.trim().length < 5) {
+      throw new BadRequestException('La raison doit contenir au moins 5 caractères');
+    }
+
+    if (reason.length > 500) {
+      throw new BadRequestException('La raison ne doit pas dépasser 500 caractères');
+    }
+    // ==================== FIN VALIDATION ====================
 
     const procedure = await this.procedureModel.findById(id);
     if (!procedure) throw new NotFoundException('Procédure non trouvée');

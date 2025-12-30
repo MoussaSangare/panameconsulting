@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import { toast } from 'react-toastify';
 
 // Types exportés - alignés avec le backend
-export type RendezvousStatus = 'En attente' | 'Confirmé' | 'Terminé' | 'Annulé';
+export type RendezvousStatus = 'En attente' | 'Confirmé' | 'Terminé' | 'Annulé' | 'Expiré';
 export type AdminOpinion = 'Favorable' | 'Défavorable';
 
 export interface Rendezvous {
@@ -83,8 +83,9 @@ const RENDEZVOUS_STATUS = {
   PENDING: 'En attente' as const,
   CONFIRMED: 'Confirmé' as const,
   COMPLETED: 'Terminé' as const,
-  CANCELLED: 'Annulé' as const
-};
+  CANCELLED: 'Annulé' as const,
+  EXPIRED: 'Expiré' as const  // Ajouter
+}
 
 const ADMIN_OPINION = {
   FAVORABLE: 'Favorable' as const,
@@ -136,11 +137,12 @@ interface ErrorMessages {
   ADMIN_REQUIRED_STATUS: string;
   TERMINATE_REQUIRES_AVIS: string;
   INVALID_AVIS: string;
+  FUTURE_CANT_BE_COMPLETED: string;
   DESTINATION_REQUIRED: string;
   FILIERE_REQUIRED: string;
   NO_ACCOUNT_FOUND: string;
   CANT_UPDATE_OTHERS: string;
-  
+  EXPIRED_NO_EDIT: string;
   // Messages de succès
   CREATE_SUCCESS: string;
   UPDATE_SUCCESS: string;
@@ -150,6 +152,8 @@ interface ErrorMessages {
   TERMINATE_SUCCESS: string;
   FETCH_SUCCESS: string;
 }
+
+
 
 // Messages d'erreur alignés avec le backend
 const ERROR_MESSAGES: ErrorMessages = {
@@ -161,7 +165,8 @@ const ERROR_MESSAGES: ErrorMessages = {
   NOT_FOUND: 'Rendez-vous non trouvé.',
   VALIDATION_ERROR: 'Données invalides.',
   RATE_LIMIT: 'Trop de requêtes. Veuillez patienter.',
-  
+  EXPIRED_NO_EDIT: 'Impossible de modifier un rendez-vous expiré',
+  FUTURE_CANT_BE_COMPLETED: 'Impossible de marquer comme terminé un rendez-vous futur',
   // Messages spécifiques au rendez-vous
   ACCOUNT_REQUIRED: 'Vous devez avoir un compte pour prendre un rendez-vous. Veuillez vous inscrire d\'abord.',
   EMAIL_MISMATCH: 'L\'email doit correspondre exactement à votre compte de connexion',
@@ -197,7 +202,6 @@ const ERROR_MESSAGES: ErrorMessages = {
 
 export class AdminRendezVousService {
   private fetchWithAuth: (endpoint: string, options?: RequestInit) => Promise<Response>;
-  private baseUrl: string = import.meta.env.VITE_API_URL || '';
   private lastRequestTime: number = 0;
   private MIN_REQUEST_INTERVAL = 1000;
   private requestQueue: Promise<any> = Promise.resolve();
@@ -265,19 +269,19 @@ export class AdminRendezVousService {
         .then(async () => {
           this.isProcessingQueue = true;
           try {
-            console.log(`⌛ ${operationName} en cours...`);
+            console.log(` ${operationName} en cours...`);
             const result = await operation();
-            console.log(`✅ ${operationName} réussi`);
+            console.log(` ${operationName} réussi`);
             resolve(result);
           } catch (error) {
-            console.error(`❌ ${operationName} échoué:`, error);
+            console.error(` ${operationName} échoué:`, error);
             reject(error);
           } finally {
             this.isProcessingQueue = false;
           }
         })
         .catch((error) => {
-          console.error(`❌ Erreur dans la file d'attente pour ${operationName}:`, error);
+          console.error(` Erreur dans la file d'attente pour ${operationName}:`, error);
           reject(error);
         });
     });
@@ -406,17 +410,12 @@ export class AdminRendezVousService {
       try {
         const queryParams: FilterParams = { page, limit, ...filters };
         const queryString = this.buildQueryString(queryParams);
-        const response = await this.rateLimitedFetch(`/rendezvous${queryString}`);
+        const response = await this.rateLimitedFetch(`/api/rendezvous${queryString}`);
         
         const data = await this.handleResponse<RendezvousListResponse>(
           response,
           'Chargement des rendez-vous'
         );
-        
-        toast.success(`${data.data.length} rendez-vous chargés`, {
-          autoClose: 2000,
-          position: "top-right",
-        });
         
         return data;
       } catch (error) {
@@ -476,7 +475,7 @@ export class AdminRendezVousService {
           }
         }
 
-        const response = await this.rateLimitedFetch('/rendezvous', {
+        const response = await this.rateLimitedFetch('/api/rendezvous', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -503,7 +502,7 @@ export class AdminRendezVousService {
 
   // Méthode pour récupérer les rendez-vous d'un utilisateur spécifique
   async fetchUserRendezvous(
-    userEmail: string,
+    _userEmail: string,
     page: number = 1,
     limit: number = 10,
     status?: RendezvousStatus
@@ -514,7 +513,7 @@ export class AdminRendezVousService {
         if (status) queryParams.status = status;
         
         const queryString = this.buildQueryString(queryParams);
-        const response = await this.rateLimitedFetch(`/rendezvous/user${queryString}`);
+        const response = await this.rateLimitedFetch(`/api/rendezvous/user${queryString}`);
         
         const data = await this.handleResponse<RendezvousListResponse>(
           response,
@@ -539,7 +538,7 @@ export class AdminRendezVousService {
       }
 
       try {
-        const response = await this.rateLimitedFetch(`/rendezvous/${id}`);
+        const response = await this.rateLimitedFetch(`/api/rendezvous/${id}`);
         
         const data = await this.handleResponse<Rendezvous>(
           response,
@@ -636,7 +635,7 @@ export class AdminRendezVousService {
           }
         }
 
-        const response = await this.rateLimitedFetch(`/rendezvous/${id}`, {
+        const response = await this.rateLimitedFetch(`/api/rendezvous/${id}`, {
           method: 'PUT',
           headers: {
             'Content-Type': 'application/json',
@@ -666,7 +665,7 @@ export class AdminRendezVousService {
     id: string, 
     status: RendezvousStatus, 
     avisAdmin?: AdminOpinion, 
-    userEmail?: string
+    _userEmail?: string
   ): Promise<Rendezvous> {
     return this.queueRequest(async () => {
       if (!id || id.trim() === '' || id === 'undefined') {
@@ -689,7 +688,7 @@ export class AdminRendezVousService {
           body.avisAdmin = avisAdmin;
         }
 
-        const response = await this.rateLimitedFetch(`/rendezvous/${id}/status`, {
+        const response = await this.rateLimitedFetch(`/api/rendezvous/${id}/status`, {
           method: 'PUT',
           headers: {
             'Content-Type': 'application/json',
@@ -717,8 +716,8 @@ export class AdminRendezVousService {
   // Méthode pour annuler un rendez-vous (admin ou utilisateur)
   async cancelRendezvous(
     id: string, 
-    userEmail: string, 
-    isAdmin: boolean = false, 
+    _userEmail: string, 
+    _isAdmin: boolean = false, 
     cancellationReason?: string
   ): Promise<Rendezvous> {
     return this.queueRequest(async () => {
@@ -730,7 +729,7 @@ export class AdminRendezVousService {
       }
 
       try {
-        const response = await this.rateLimitedFetch(`/rendezvous/${id}`, {
+        const response = await this.rateLimitedFetch(`/api/rendezvous/${id}`, {
           method: 'DELETE',
           headers: {
             'Content-Type': 'application/json',
@@ -766,7 +765,7 @@ export class AdminRendezVousService {
       }
 
       try {
-        const response = await this.rateLimitedFetch(`/rendezvous/${id}/confirm`, {
+        const response = await this.rateLimitedFetch(`/api/rendezvous/${id}/confirm`, {
           method: 'PUT',
           headers: {
             'Content-Type': 'application/json',
@@ -811,7 +810,7 @@ export class AdminRendezVousService {
 
       try {
         const response = await this.rateLimitedFetch(
-          `/rendezvous/available-slots?date=${encodeURIComponent(date)}`
+          `/api/rendezvous/available-slots?date=${encodeURIComponent(date)}`
         );
 
         const data = await this.handleResponse<string[]>(
@@ -833,7 +832,7 @@ export class AdminRendezVousService {
   async fetchAvailableDates(): Promise<string[]> {
     return this.queueRequest(async () => {
       try {
-        const response = await this.rateLimitedFetch('/rendezvous/available-dates');
+        const response = await this.rateLimitedFetch('/api/rendezvous/available-dates');
         
         const data = await this.handleResponse<string[]>(
           response,
@@ -982,18 +981,18 @@ export class AdminRendezVousService {
   }
 
   // Méthode pour obtenir le statut avec style
-  getStatusStyle(status: RendezvousStatus): { bg: string; text: string; icon: string } {
+  getStatusStyle(status: RendezvousStatus): { bg: string; text: string} {
     switch (status) {
       case 'En attente':
-        return { bg: 'bg-amber-100', text: 'text-amber-800', icon: '⏱️' };
+        return { bg: 'bg-amber-100', text: 'text-amber-800' };
       case 'Confirmé':
-        return { bg: 'bg-sky-100', text: 'text-sky-800', icon: '✅' };
+        return { bg: 'bg-sky-100', text: 'text-sky-800' };
       case 'Terminé':
-        return { bg: 'bg-green-100', text: 'text-green-800', icon: '✓' };
+        return { bg: 'bg-green-100', text: 'text-green-800' };
       case 'Annulé':
-        return { bg: 'bg-red-100', text: 'text-red-800', icon: '✗' };
+        return { bg: 'bg-red-100', text: 'text-red-800' };
       default:
-        return { bg: 'bg-gray-100', text: 'text-gray-800', icon: '❓' };
+        return { bg: 'bg-gray-100', text: 'text-gray-800' };
     }
   }
 

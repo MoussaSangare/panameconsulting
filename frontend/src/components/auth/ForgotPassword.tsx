@@ -2,7 +2,8 @@
 
 import { useAuth } from '../../context/AuthContext';
 import React, { useState } from 'react';
-import { FiAlertCircle, FiArrowLeft, FiMail } from 'react-icons/fi';
+import { FiAlertCircle, FiMail } from 'react-icons/fi';
+import { ArrowLeft } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { toast } from 'react-toastify';
 
@@ -39,10 +40,10 @@ const ForgotPassword: React.FC = (): React.JSX.Element => {
   };
 
   return (
-    <div className='min-h-screen flex items-center justify-center bg-gradient-to-br from-sky-50 to-sky-100 p-4'>
+    <div className='min-h-screen flex items-center justify-center bg-linear-to-br from-sky-50 to-sky-100 p-4'>
       <div className='w-full max-w-md'>
         <div className='bg-white rounded-2xl shadow-xl overflow-hidden'>
-          <div className='bg-gradient-to-r from-sky-500 to-sky-600 p-6 text-center'>
+          <div className='bg-linear-to-r from-sky-500 to-sky-600 p-6 text-center'>
             <div className='flex items-center justify-center space-x-2'>
               <div className='bg-white p-2 rounded-full'>
                 <div className='w-10 h-10 rounded-full bg-sky-500 flex items-center justify-center'>
@@ -69,7 +70,7 @@ const ForgotPassword: React.FC = (): React.JSX.Element => {
 
               {error && (
                 <div className='p-3 rounded-lg bg-red-50 border border-red-200 text-red-600 flex items-center'>
-                  <FiAlertCircle className='mr-2 flex-shrink-0' />
+                  <FiAlertCircle className='mr-2 shrink-0' />
                   <span>{error}</span>
                 </div>
               )}
@@ -104,7 +105,7 @@ const ForgotPassword: React.FC = (): React.JSX.Element => {
                 <button
                   type='submit'
                   disabled={isLoading}
-                  className={`w-full flex justify-center py-2.5 px-4 border border-transparent rounded shadow-sm text-white bg-gradient-to-r from-sky-500 to-sky-600 hover:from-sky-600 hover:to-sky-700 focus:outline-none focus:ring-none font-medium transition-all duration-200 ${isLoading ? 'opacity-80 cursor-not-allowed' : ''}`}
+                  className={`w-full flex justify-center py-2.5 px-4 border border-transparent rounded shadow-sm text-white bg-linear-to-r from-sky-500 to-sky-600 hover:from-sky-600 hover:to-sky-700 focus:outline-none focus:ring-none font-medium transition-all duration-200 ${isLoading ? 'opacity-80 cursor-not-allowed' : ''}`}
                 >
                   {isLoading
                     ? 'Envoi en cours...'
@@ -116,7 +117,7 @@ const ForgotPassword: React.FC = (): React.JSX.Element => {
                   onClick={() => navigate(-1)}
                   className='w-full flex items-center justify-center py-2.5 px-4 text-sky-600 bg-sky-50 rounded hover:bg-sky-100 focus:outline-none focus:ring-none font-medium transition-colors duration-200'
                 >
-                  <FiArrowLeft className='mr-2' />
+                  <ArrowLeft className='mr-2' />
                   Retour
                 </button>
               </div>

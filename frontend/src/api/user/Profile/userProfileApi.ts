@@ -55,11 +55,11 @@ export interface AuthContextFunctions {
 
 // ==================== CONSTANTS ====================
 const API_ENDPOINTS = {
-  PROFILE_ME: '/users/profile/me',
-  AUTH_ME: '/auth/me',
-  UPDATE_PASSWORD: '/auth/update-password',
-  FORGOT_PASSWORD: '/auth/forgot-password',
-  RESET_PASSWORD: '/auth/reset-password',
+  PROFILE_ME: '/api/users/profile/me',
+  AUTH_ME: '/api/auth/me',
+  UPDATE_PASSWORD: '/api/auth/update-password',
+  FORGOT_PASSWORD: '/api/auth/forgot-password',
+  RESET_PASSWORD: '/api/auth/reset-password',
 } as const;
 
 const ERROR_MESSAGES = {
@@ -98,7 +98,7 @@ class UserProfileService {
       const userData = await response.json();
 
       const user: User = {
-        id: userData.id || userData._id,
+        id: userData.id,
         email: userData.email,
         firstName: userData.firstName,
         lastName: userData.lastName,
@@ -183,7 +183,7 @@ class UserProfileService {
       toast.success(ERROR_MESSAGES.PROFILE_UPDATE_SUCCESS);
 
       return {
-        id: result.id || result._id,
+        id: result.id,
         email: result.email,
         firstName: result.firstName,
         lastName: result.lastName,
@@ -347,7 +347,7 @@ class UserProfileService {
         throw new Error('Mot de passe invalide');
       }
 
-      const VITE_API_URL = import.meta.env.VITE_API_URL;
+      const VITE_API_URL = import.meta.env.VITE_API_URL ;
       const response = await window.fetch(
         `${VITE_API_URL}${API_ENDPOINTS.RESET_PASSWORD}`,
         {

@@ -34,8 +34,7 @@ import MotdePasseoublie from './pages/MotdePasseoublie';
 // Pages admin (lazy loaded)
 const UsersManagement = lazy(() => import('./pages/admin/UsersManagement'));
 const AdminLayout = lazy(() => import('./AdminLayout'));
-const AdminMessages = lazy(() =>
-  import('./pages/admin/AdminMessages'));
+const AdminMessages = lazy(() => import('./pages/admin/AdminMessages'));
 const AdminProfile = lazy(() => import('./pages/admin/AdminProfile'));
 const AdminProcedure = lazy(() => import('./pages/admin/AdminProcedure'));
 const AdminDestinations = lazy(() => import('./pages/admin/AdminDestinations'));
@@ -66,6 +65,53 @@ const MinimalLayout = ({ children }: { children: ReactNode }) => {
   return (
     <div className='flex flex-col min-h-screen w-full overflow-x-hidden touch-pan-y'>
       <main className='flex-1'>{children}</main>
+    </div>
+  );
+};
+
+// Layout pour la page d'accueil avec loader intégré
+const AccueilLayout = ({ children }: { children: ReactNode }) => {
+  const location = useLocation();
+  const [showLoader, setShowLoader] = useState(true);
+  const [hasLoaded, setHasLoaded] = useState(false);
+
+  useEffect(() => {
+    // Timer pour montrer le loader sur la page d'accueil seulement
+    const timer = setTimeout(() => {
+      setShowLoader(false);
+      setHasLoaded(true);
+    }, 2000); // Durée du loader sur la page d'accueil
+
+    return () => clearTimeout(timer);
+  }, []);
+
+  // Si ce n'est pas la page d'accueil, ne pas montrer le loader
+  if (location.pathname !== '/') {
+    return (
+      <div className='flex flex-col min-h-screen w-full overflow-x-hidden touch-pan-y'>
+        <Header />
+        <main className='flex-1 mt-20'>{children}</main>
+        <Footer />
+      </div>
+    );
+  }
+
+  return (
+    <div className='flex flex-col min-h-screen w-full overflow-x-hidden touch-pan-y'>
+      <Header />
+      <main className='flex-1 mt-20'>
+        {/* Loader uniquement sur la page d'accueil */}
+        {showLoader ? (
+          <div className="fixed inset-0 flex items-center justify-center bg-white z-50">
+            <Loader />
+          </div>
+        ) : null}
+        {/* Contenu avec transition */}
+        <div className={showLoader ? 'opacity-0' : 'opacity-100 transition-opacity duration-500'}>
+          {children}
+        </div>
+      </main>
+      <Footer />
     </div>
   );
 };
@@ -116,6 +162,7 @@ function App() {
     setIsAOSInitialized(true);
   }, [isAOSInitialized]);
 
+  // Loader global pendant le chargement de l'authentification
   if (isLoading) {
     return <Loader />;
   }
@@ -131,8 +178,7 @@ function App() {
           name='description'
           content="Paname Consulting : expert en accompagnement étudiant à l'étranger, organisation de voyages d'affaires et demandes de visa. Conseil personnalisé pour votre réussite internationale."
         />
-          <meta http-equiv="X-UA-Compatible" content="IE=edge" />
-
+        <meta http-equiv="X-UA-Compatible" content="IE=edge" />
         <meta 
           name="viewport" 
           content="width=device-width, initial-scale=1, maximum-scale=5" 
@@ -142,20 +188,21 @@ function App() {
         <link rel="apple-touch-icon" href="/paname-consulting.png" />
         <link rel="manifest" href="/manifest.json" />
         <meta property="og:url" content="https://panameconsulting.vercel.app" />
-
       </Helmet>
 
       <div key={navigationKey}>
         <Routes>
+          {/* Page d'accueil avec loader */}
           <Route
             path='/'
             element={
-              <PublicLayout>
+              <AccueilLayout>
                 <Accueil />
-              </PublicLayout>
+              </AccueilLayout>
             }
           />
 
+          {/* Autres pages publiques sans loader */}
           <Route
             path='/services'
             element={
@@ -183,6 +230,7 @@ function App() {
             }
           />
 
+          {/* Routes authentifiées (utilisateurs) */}
           <Route
             path='/rendez-vous'
             element={
@@ -196,69 +244,6 @@ function App() {
                   replace
                   state={{ from: location.pathname }}
                 />
-              )
-            }
-          />
-
-          <Route
-            path='/reset-password'
-            element={
-              <MinimalLayout>
-                <ResetPassword />
-              </MinimalLayout>
-            }
-          />
-
-          <Route
-            path='/connexion'
-            element={
-              isAuthenticated ? (
-                <Navigate
-                  to={user?.role === 'admin' || user?.isAdmin === true 
-                    ? '/gestionnaire/statistiques' 
-                    : '/'}
-                  replace
-                />
-              ) : (
-                <MinimalLayout>
-                  <Connexion />
-                </MinimalLayout>
-              )
-            }
-          />
-
-          <Route
-            path='/inscription'
-            element={
-              isAuthenticated ? (
-                <Navigate
-                  to={user?.role === 'admin' || user?.isAdmin === true 
-                    ? '/gestionnaire/statistiques' 
-                    : '/'}
-                  replace
-                />
-              ) : (
-                <MinimalLayout>
-                  <Inscription />
-                </MinimalLayout>
-              )
-            }
-          />
-
-          <Route
-            path='/mot-de-passe-oublie'
-            element={
-              isAuthenticated ? (
-                <Navigate
-                  to={user?.role === 'admin' || user?.isAdmin === true 
-                    ? '/gestionnaire/statistiques' 
-                    : '/'}
-                  replace
-                />
-              ) : (
-                <MinimalLayout>
-                  <MotdePasseoublie />
-                </MinimalLayout>
               )
             }
           />
@@ -314,32 +299,170 @@ function App() {
             }
           />
 
+          {/* Routes d'authentification */}
           <Route
-            path='/gestionnaire/*'
+            path='/reset-password'
+            element={
+              <MinimalLayout>
+                <ResetPassword />
+              </MinimalLayout>
+            }
+          />
+
+          <Route
+            path='/connexion'
+            element={
+              isAuthenticated ? (
+                <Navigate
+                  to={user?.role === 'admin' || user?.isAdmin === true 
+                    ? '/'  // ← MODIFIÉ: Redirige vers la page d'accueil, pas vers /gestionnaire/statistiques
+                    : '/'}
+                  replace
+                />
+              ) : (
+                <MinimalLayout>
+                  <Connexion />
+                </MinimalLayout>
+              )
+            }
+          />
+
+          <Route
+            path='/inscription'
+            element={
+              isAuthenticated ? (
+                <Navigate
+                  to={user?.role === 'admin' || user?.isAdmin === true 
+                    ? '/'  // ← MODIFIÉ: Redirige vers la page d'accueil, pas vers /gestionnaire/statistiques
+                    : '/'}
+                  replace
+                />
+              ) : (
+                <MinimalLayout>
+                  <Inscription />
+                </MinimalLayout>
+              )
+            }
+          />
+
+          <Route
+            path='/mot-de-passe-oublie'
+            element={
+              isAuthenticated ? (
+                <Navigate
+                  to={user?.role === 'admin' || user?.isAdmin === true 
+                    ? '/'  // ← MODIFIÉ: Redirige vers la page d'accueil, pas vers /gestionnaire/statistiques
+                    : '/'}
+                  replace
+                />
+              ) : (
+                <MinimalLayout>
+                  <MotdePasseoublie />
+                </MinimalLayout>
+              )
+            }
+          />
+
+          {/* Routes admin - TOUTES LES ROUTES EXPLICITES */}
+          {/* /gestionnaire seul → NotFound */}
+          <Route path="/gestionnaire" element={<NotFound />} />
+
+          {/* Routes admin avec layout */}
+          <Route
+            path='/gestionnaire/statistiques'
             element={
               <RequireAdmin>
                 <Suspense fallback={<Loader />}>
-                  <AdminLayout />
+                  <AdminLayout>
+                    <AdminDashboard />
+                  </AdminLayout>
                 </Suspense>
               </RequireAdmin>
             }
-          >
-            <Route index element={<Navigate to='statistiques' replace />} />
-            <Route path='utilisateurs' element={<UsersManagement />} />
-            <Route path='statistiques' element={<AdminDashboard />} />
-            <Route path='messages' element={<AdminMessages />} />
-            <Route path='procedures' element={<AdminProcedure />} />
-            <Route path='profil' element={<AdminProfile />} />
-            <Route path='destinations' element={<AdminDestinations />} />
-            <Route path='rendez-vous' element={<AdminRendezVous />} />
-          </Route>
-
-         
+          />
+          
           <Route
-            path='/gestionnaire'
-            element={<Navigate to='/gestionnaire/statistiques' replace />}
+            path='/gestionnaire/utilisateurs'
+            element={
+              <RequireAdmin>
+                <Suspense fallback={<Loader />}>
+                  <AdminLayout>
+                    <UsersManagement />
+                  </AdminLayout>
+                </Suspense>
+              </RequireAdmin>
+            }
+          />
+          
+          <Route
+            path='/gestionnaire/messages'
+            element={
+              <RequireAdmin>
+                <Suspense fallback={<Loader />}>
+                  <AdminLayout>
+                    <AdminMessages />
+                  </AdminLayout>
+                </Suspense>
+              </RequireAdmin>
+            }
+          />
+          
+          <Route
+            path='/gestionnaire/procedures'
+            element={
+              <RequireAdmin>
+                <Suspense fallback={<Loader />}>
+                  <AdminLayout>
+                    <AdminProcedure />
+                  </AdminLayout>
+                </Suspense>
+              </RequireAdmin>
+            }
+          />
+          
+          <Route
+            path='/gestionnaire/profil'
+            element={
+              <RequireAdmin>
+                <Suspense fallback={<Loader />}>
+                  <AdminLayout>
+                    <AdminProfile />
+                  </AdminLayout>
+                </Suspense>
+              </RequireAdmin>
+            }
+          />
+          
+          <Route
+            path='/gestionnaire/destinations'
+            element={
+              <RequireAdmin>
+                <Suspense fallback={<Loader />}>
+                  <AdminLayout>
+                    <AdminDestinations />
+                  </AdminLayout>
+                </Suspense>
+              </RequireAdmin>
+            }
+          />
+          
+          <Route
+            path='/gestionnaire/rendez-vous'
+            element={
+              <RequireAdmin>
+                <Suspense fallback={<Loader />}>
+                  <AdminLayout>
+                    <AdminRendezVous />
+                  </AdminLayout>
+                </Suspense>
+              </RequireAdmin>
+            }
           />
 
+          {/* Autres routes sous /gestionnaire → NotFound */}
+          <Route path="/gestionnaire/*" element={<NotFound />} />
+
+          {/* Route 404 pour toutes les autres routes */}
           <Route path='*' element={<NotFound />} />
         </Routes>
       </div>

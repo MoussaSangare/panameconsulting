@@ -1,4 +1,3 @@
-// UserProfile.tsx - COMPLET ET SÉCURISÉ
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { toast } from 'react-toastify';
 import { UserHeader, usePageConfig } from '../../components/user/UserHeader';
@@ -7,7 +6,7 @@ import { userProfileService, UserUpdateData} from '../../api/user/Profile/userPr
 import { Loader2, Mail, Phone, Shield, User, UserCheck, Lock, Eye, EyeOff, CheckCircle, XCircle } from 'lucide-react';
 
 const UserProfile = () => {
-  const { user, updateProfile, fetchWithAuth, refreshToken, access_token } = useAuth();
+  const { user, fetchWithAuth, refreshToken, access_token } = useAuth();
   const pageConfig = usePageConfig();
   
   const [isLoading, setIsLoading] = useState(false);
@@ -48,6 +47,7 @@ const UserProfile = () => {
 
   // Référence pour éviter les chargements multiples
   const isInitialLoad = useRef(false);
+  const hasLoadedProfile = useRef(false);
 
   // Validation de l'email
   const validateEmail = (email: string): boolean => {
@@ -109,9 +109,9 @@ const UserProfile = () => {
     }
   }, [passwordData.newPassword, passwordData.confirmNewPassword, validatePasswordInRealTime]);
 
-  // Charger les données du profil
+  // Charger les données du profil UNE SEULE FOIS
   const loadUserProfile = useCallback(async () => {
-    if (isLoading) return;
+    if (isLoading || hasLoadedProfile.current) return;
     
     setIsLoading(true);
     try {
@@ -126,6 +126,7 @@ const UserProfile = () => {
           email: userData.email || '',
           telephone: userData.telephone || '',
         });
+        hasLoadedProfile.current = true;
       }
     } catch (error) {
       console.error('Erreur lors du chargement du profil:', error);
@@ -135,22 +136,25 @@ const UserProfile = () => {
           email: user.email || '',
           telephone: user.telephone || '',
         });
+        hasLoadedProfile.current = true;
       }
     } finally {
       setIsLoading(false);
     }
   }, [fetchWithAuth, refreshToken, access_token, user, isLoading]);
 
-  // Rafraîchir les données
+  // Rafraîchir les données MANUELLEMENT seulement
   const handleRefresh = useCallback(async () => {
     if (isRefreshing) return;
     
     setIsRefreshing(true);
     try {
+      hasLoadedProfile.current = false;
       await loadUserProfile();
       toast.success('Profil actualisé');
     } catch (error) {
       console.error('Erreur lors du rafraîchissement:', error);
+      toast.error('Erreur lors du rafraîchissement');
     } finally {
       setIsRefreshing(false);
     }
@@ -196,11 +200,14 @@ const UserProfile = () => {
         updateData
       );
       
-      await updateProfile();
+      // Rafraîchir seulement après une mise à jour réussie
+      hasLoadedProfile.current = false;
+      await loadUserProfile();
       
       toast.success('Profil mis à jour avec succès');
       
     } catch (error: any) {
+      console.error('Erreur lors de la mise à jour du profil:', error);
       if (error.message !== 'SESSION_EXPIRED') {
         toast.error(error.message || 'Erreur lors de la mise à jour du profil');
       }
@@ -257,6 +264,7 @@ const UserProfile = () => {
       toast.success('Mot de passe changé avec succès');
       
     } catch (error: any) {
+      console.error('Erreur lors du changement de mot de passe:', error);
       if (error.message !== 'SESSION_EXPIRED') {
         toast.error(error.message || 'Erreur lors du changement de mot de passe');
       }
@@ -265,26 +273,27 @@ const UserProfile = () => {
     }
   };
 
-  // Effet initial - charger les données
+  // Effet initial - charger les données UNE SEULE FOIS
   useEffect(() => {
-    if (!isInitialLoad.current && user) {
+    if (!isInitialLoad.current && user && !hasLoadedProfile.current) {
       isInitialLoad.current = true;
       loadUserProfile();
     }
   }, [user, loadUserProfile]);
 
-  // Synchroniser avec les données du contexte
+  // Synchroniser avec les données du contexte (sans appel API supplémentaire)
   useEffect(() => {
-    if (user && !profileData.email) {
+    if (user && !hasLoadedProfile.current) {
       setProfileData({
         email: user.email || '',
         telephone: user.telephone || '',
       });
+      hasLoadedProfile.current = true;
     }
-  }, [user, profileData.email]);
+  }, [user]);
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-gray-50 to-white pt-16 pb-8">
+    <div className="min-h-screen bg-linear-to-b from-gray-50 to-white pt-16 pb-8">
       <UserHeader
         title={pageConfig.title}
         subtitle={pageConfig.subtitle}
@@ -383,7 +392,7 @@ const UserProfile = () => {
                 <button
                   type="submit"
                   disabled={isLoading}
-                  className="w-full py-3 px-4 bg-gradient-to-r from-sky-500 to-sky-600 text-white font-medium rounded-xl hover:from-sky-600 hover:to-sky-700 active:scale-95 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed shadow-md"
+                  className="w-full py-3 px-4 bg-linear-to-r from-sky-500 to-sky-600 text-white font-medium rounded-xl hover:from-sky-600 hover:to-sky-700 active:scale-95 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed shadow-md"
                 >
                   {isLoading ? (
                     <span className="flex items-center justify-center gap-2">
@@ -564,7 +573,7 @@ const UserProfile = () => {
               <button
                 type="submit"
                 disabled={isUpdatingPassword || passwordErrors.length > 0 || !passwordData.currentPassword}
-                className="w-full py-3 px-4 bg-gradient-to-r from-emerald-500 to-emerald-600 text-white font-medium rounded-xl hover:from-emerald-600 hover:to-emerald-700 active:scale-95 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed shadow-md"
+                className="w-full py-3 px-4 bg-linear-to-r from-emerald-500 to-emerald-600 text-white font-medium rounded-xl hover:from-emerald-600 hover:to-emerald-700 active:scale-95 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed shadow-md"
               >
                 {isUpdatingPassword ? (
                   <span className="flex items-center justify-center gap-2">
@@ -589,7 +598,7 @@ const UserProfile = () => {
 
             <div className="space-y-4">
               {/* Statut du compte */}
-              <div className="flex items-center justify-between p-4 bg-gradient-to-r from-sky-50 to-blue-50 rounded-xl border border-sky-100">
+              <div className="flex items-center justify-between p-4 bg-linear-to-r from-sky-50 to-blue-50 rounded-xl border border-sky-100">
                 <div className="flex items-center gap-3">
                   <div className={`w-3 h-3 rounded-full ${
                     user?.isActive ? 'bg-green-500' : 'bg-red-500'
@@ -611,25 +620,25 @@ const UserProfile = () => {
               <h3 className="font-medium text-gray-900 mb-3">Conseils de sécurité</h3>
               <ul className="space-y-2">
                 <li className="flex items-start gap-2">
-                  <div className="w-1.5 h-1.5 bg-sky-500 rounded-full mt-2 flex-shrink-0" />
+                  <div className="w-1.5 h-1.5 bg-sky-500 rounded-full mt-2 shrink-0" />
                   <span className="text-sm text-gray-600">
                     Utilisez des mots de passe uniques et complexes
                   </span>
                 </li>
                 <li className="flex items-start gap-2">
-                  <div className="w-1.5 h-1.5 bg-sky-500 rounded-full mt-2 flex-shrink-0" />
+                  <div className="w-1.5 h-1.5 bg-sky-500 rounded-full mt-2 shrink-0" />
                   <span className="text-sm text-gray-600">
                     Ne partagez jamais vos identifiants de connexion
                   </span>
                 </li>
                 <li className="flex items-start gap-2">
-                  <div className="w-1.5 h-1.5 bg-sky-500 rounded-full mt-2 flex-shrink-0" />
+                  <div className="w-1.5 h-1.5 bg-sky-500 rounded-full mt-2 shrink-0" />
                   <span className="text-sm text-gray-600">
                     Déconnectez-vous des appareils publics après utilisation
                   </span>
                 </li>
                 <li className="flex items-start gap-2">
-                  <div className="w-1.5 h-1.5 bg-sky-500 rounded-full mt-2 flex-shrink-0" />
+                  <div className="w-1.5 h-1.5 bg-sky-500 rounded-full mt-2 shrink-0" />
                   <span className="text-sm text-gray-600">
                     Activez l'authentification à deux facteurs si disponible
                   </span>

@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion';
-import { FiExternalLink, FiMapPin, FiStar, FiGlobe } from 'react-icons/fi';
+import { ExternalLink, MapPin, Star, Globe } from 'lucide-react';
 
 /**
  * Liste des partenaires institutionnels
@@ -68,7 +68,7 @@ const partners = [
 const Partners = () => {
   return (
     <section
-      className='py-16 sm:py-20 px-4 sm:px-6 lg:px-8 bg-gradient-to-br from-sky-50 via-white to-blue-50 relative overflow-hidden'
+      className='py-16 sm:py-20 px-4 sm:px-6 lg:px-8 bg-linear-to-br from-sky-50 via-white to-blue-50 relative overflow-hidden'
       aria-labelledby='partners-heading'
     >
       {/* Effets de fond décoratifs améliorés */}
@@ -96,7 +96,7 @@ const Partners = () => {
             className='text-4xl sm:text-5xl font-bold text-gray-900 mb-4'
           >
             Nos Institutions{' '}
-            <span className='text-transparent bg-clip-text bg-gradient-to-r from-sky-600 to-blue-600'>
+            <span className='text-transparent bg-clip-text bg-linear-to-r from-sky-600 to-blue-600'>
               Partenaires
             </span>
           </motion.h2>
@@ -136,13 +136,13 @@ const Partners = () => {
                 {/* Badge de catégorie */}
                 <div className='absolute top-4 left-4 z-10'>
                   <span className='inline-flex items-center gap-1 bg-white/90 backdrop-blur-sm text-sky-700 text-xs font-medium px-3 py-1.5 rounded-full border border-sky-200/50'>
-                    <FiGlobe className='w-3 h-3' />
+                    <Globe className='w-3 h-3' />
                     {partner.category}
                   </span>
                 </div>
 
                 {/* Container d'image avec overlay amélioré */}
-                <div className='relative h-44 sm:h-52 bg-gradient-to-br from-gray-100 to-gray-200 overflow-hidden'>
+                <div className='relative h-44 sm:h-52 bg-linear-to-br from-gray-100 to-gray-200 overflow-hidden'>
                   <motion.div
                     whileHover={{ scale: 1.08 }}
                     transition={{ type: 'spring', stiffness: 300 }}
@@ -159,10 +159,10 @@ const Partners = () => {
                   </motion.div>
 
                   {/* Overlay de gradient amélioré */}
-                  <div className='absolute inset-0 bg-gradient-to-t from-black/30 via-transparent to-transparent opacity-60 group-hover:opacity-30 transition-opacity duration-500' />
+                  <div className='absolute inset-0 bg-linear-to-t from-black/30 via-transparent to-transparent opacity-60 group-hover:opacity-30 transition-opacity duration-500' />
 
                   {/* Effet de brillance au survol */}
-                  <div className='absolute inset-0 bg-gradient-to-r from-transparent via-white/40 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-1000' />
+                  <div className='absolute inset-0 bg-linear-to-r from-transparent via-white/40 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-1000' />
                 </div>
 
                 {/* Contenu de la carte */}
@@ -173,8 +173,8 @@ const Partners = () => {
                     </h3>
 
                     <div className='flex items-center text-gray-600 mb-3'>
-                      <FiMapPin
-                        className='w-4 h-4 text-sky-500 mr-2 flex-shrink-0'
+                      <MapPin
+                        className='w-4 h-4 text-sky-500 mr-2 shrink-0'
                         aria-hidden='true'
                       />
                       <span className='text-sm font-medium'>
@@ -199,9 +199,9 @@ const Partners = () => {
                     )}
                     <motion.span
                       whileHover={{ scale: 1.05 }}
-                      className='inline-flex items-center gap-1 bg-gradient-to-r from-sky-500 to-blue-500 text-white text-xs font-semibold px-3 py-1 rounded-full'
+                      className='inline-flex items-center gap-1 bg-linear-to-r from-sky-500 to-blue-500 text-white text-xs font-semibold px-3 py-1 rounded-full'
                     >
-                      <FiStar className='w-3 h-3' />
+                      <Star className='w-3 h-3' />
                       Actif
                     </motion.span>
                   </div>
@@ -217,7 +217,7 @@ const Partners = () => {
                     aria-label={`Visiter le site de ${partner.name}`}
                   >
                     <span className='text-sm'>Visiter le site</span>
-                    <FiExternalLink
+                    <ExternalLink
                       className='w-4 h-4 transition-transform duration-300 group-hover/btn:translate-x-0.5'
                       aria-hidden='true'
                     />
@@ -225,7 +225,7 @@ const Partners = () => {
                 </div>
 
                 {/* Bordure animée */}
-                <div className='absolute inset-0 rounded-2xl bg-gradient-to-r from-sky-500/10 to-blue-500/10 opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none' />
+                <div className='absolute inset-0 rounded-2xl bg-linear-to-r from-sky-500/10 to-blue-500/10 opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none' />
               </div>
             </motion.article>
           ))}

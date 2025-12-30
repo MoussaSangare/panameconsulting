@@ -15,7 +15,7 @@ import {
   ChevronLeft,
   ChevronRight,
   LogOutIcon,
-  Shield,
+  Settings2Icon,
   AlertTriangle,
 } from 'lucide-react';
 
@@ -63,9 +63,9 @@ const AdminSidebar: React.FC<AdminSidebarProps> = ({ children }) => {
   const menuItems = [
     {
       name: 'Tableau de bord',
-      path: '/gestionnaire',
+      path: '/gestionnaire/statistiques',
       icon: <LayoutDashboard className='w-5 h-5' />,
-      basePath: '/gestionnaire',
+      basePath: '/gestionnaire/statistiques',
     },
     {
       name: 'Utilisateurs',
@@ -199,7 +199,7 @@ const AdminSidebar: React.FC<AdminSidebarProps> = ({ children }) => {
   return (
     <>
       {/* Version Desktop et Tablet */}
-      <div className='hidden md:flex h-screen bg-gradient-to-br from-slate-50 to-blue-50/30'>
+      <div className='hidden md:flex h-screen bg-linear-to-br from-slate-50 to-blue-50/30'>
         {/* Sidebar */}
         <div
           className={`bg-white h-full fixed left-0 top-0 z-40 shadow-xl border-r border-slate-200 flex flex-col transition-all duration-300 ${
@@ -209,12 +209,12 @@ const AdminSidebar: React.FC<AdminSidebarProps> = ({ children }) => {
           }`}
         >
           {/* En-tête */}
-          <div className='p-4 border-b border-slate-200 bg-gradient-to-r from-sky-500 to-sky-600'>
+          <div className='p-4 border-b border-slate-200 bg-linear-to-r from-sky-500 to-sky-600'>
             <div className='flex items-center justify-between'>
               <div className='flex items-center space-x-3'>
-                <div className='w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center backdrop-blur-sm'>
-                  <Shield className='w-6 h-6 text-white' />
-                </div>
+                <Link to='/' className='w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center backdrop-blur-sm'>
+                  <Settings2Icon className='w-6 h-6 text-white' />
+                </Link>
                 <div>
                   <h1 className='text-lg font-bold text-white tracking-tight'>
                     Administration
@@ -265,7 +265,7 @@ const AdminSidebar: React.FC<AdminSidebarProps> = ({ children }) => {
           {/* Section utilisateur et déconnexion */}
           <div className='p-4 border-t border-slate-200 space-y-3'>
             <div className='flex items-center space-x-3 px-3 py-2'>
-              <div className='w-10 h-10 bg-gradient-to-br from-sky-500 to-sky-600 rounded-full flex items-center justify-center text-white text-sm font-semibold shadow-lg'>
+              <div className='w-10 h-10 bg-linear-to-br from-sky-500 to-sky-600 rounded-full flex items-center justify-center text-white text-sm font-semibold shadow-lg'>
                 {getNameInitial()}
               </div>
               <div className='flex-1 min-w-0'>
@@ -273,7 +273,7 @@ const AdminSidebar: React.FC<AdminSidebarProps> = ({ children }) => {
                   {getDisplayName()}
                 </p>
                 <p className='text-xs text-slate-500 flex items-center gap-1'>
-                  <Shield className='w-3 h-3' />
+                  <Settings2Icon className='w-3 h-3' />
                   Administrateur
                 </p>
               </div>
@@ -284,7 +284,7 @@ const AdminSidebar: React.FC<AdminSidebarProps> = ({ children }) => {
               {/* ✅ CORRECTION: Bouton "Déconnecter tous" toujours visible */}
               <button
                 onClick={() => setIsLogoutAllOpen(true)}
-                className='w-full flex items-center justify-center space-x-2 px-4 py-2.5 bg-gradient-to-r from-rose-500 to-pink-600 text-white rounded-lg hover:from-rose-600 hover:to-pink-700 transition-all duration-200 shadow-sm hover:shadow-md focus:outline-none focus:ring-2 focus:ring-rose-500/30'
+                className='w-full flex items-center justify-center space-x-2 px-4 py-2.5 bg-linear-to-r from-rose-500 to-pink-600 text-white rounded-lg hover:from-rose-600 hover:to-pink-700 transition-all duration-200 shadow-sm hover:shadow-md focus:outline-none focus:ring-2 focus:ring-rose-500/30'
               >
                 <LogOutIcon className='w-4 h-4' />
                 <span className='font-medium text-sm'>Déconnecter tous</span>
@@ -305,7 +305,7 @@ const AdminSidebar: React.FC<AdminSidebarProps> = ({ children }) => {
         {isCollapsed && (
           <button
             onClick={toggleSidebar}
-            className='fixed left-4 top-4 z-50 p-2 bg-gradient-to-r from-sky-500 to-sky-600 text-white rounded-lg shadow-lg hover:shadow-xl transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-sky-500/50'
+            className='fixed left-4 top-4 z-50 p-2 bg-linear-to-r from-sky-500 to-sky-600 text-white rounded-lg shadow-lg hover:shadow-xl transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-sky-500/50'
             aria-label='Ouvrir le menu'
           >
             <ChevronRight className='w-5 h-5' />
@@ -323,15 +323,15 @@ const AdminSidebar: React.FC<AdminSidebarProps> = ({ children }) => {
       </div>
 
       {/* Version Mobile - Mobile First Design */}
-      <div className='md:hidden flex flex-col h-screen bg-gradient-to-b from-slate-50 to-blue-50/20'>
+      <div className='md:hidden flex flex-col h-screen bg-linear-to-b from-slate-50 to-blue-50/20'>
         {/* Header Mobile */}
         <header className='sticky top-0 z-50 bg-white/95 backdrop-blur-md border-b border-slate-200 shadow-sm'>
           <div className='px-4'>
             <div className='flex justify-between items-center h-16'>
               <div className='flex items-center space-x-3'>
-                <div className='w-10 h-10 bg-gradient-to-r from-sky-500 to-sky-600 rounded-xl flex items-center justify-center shadow-md'>
-                  <Shield className='w-6 h-6 text-white' />
-                </div>
+                <Link to='/' className='w-10 h-10 bg-linear-to-r from-sky-500 to-sky-600 rounded-xl flex items-center justify-center shadow-md'>
+                  <Settings2Icon className='w-6 h-6 text-white' />
+                </Link>
                 <div>
                   <h1 className='text-lg font-bold text-slate-800'>Admin</h1>
                   <p className='text-xs text-slate-500'>Paname Consulting</p>
@@ -342,7 +342,7 @@ const AdminSidebar: React.FC<AdminSidebarProps> = ({ children }) => {
                 {/* ✅ Bouton "Déconnecter tous" visible sur mobile */}
                 <button
                   onClick={() => setIsLogoutAllOpen(true)}
-                  className='p-2 rounded-lg bg-gradient-to-r from-rose-500 to-pink-600 text-white shadow-sm hover:shadow-md focus:outline-none focus:ring-2 focus:ring-rose-500/30'
+                  className='p-2 rounded-lg bg-linear-to-r from-rose-500 to-pink-600 text-white shadow-sm hover:shadow-md focus:outline-none focus:ring-2 focus:ring-rose-500/30'
                   title='Déconnecter tous'
                 >
                   <LogOutIcon className='w-5 h-5' />
@@ -420,7 +420,7 @@ const AdminSidebar: React.FC<AdminSidebarProps> = ({ children }) => {
         <footer className='sticky bottom-0 bg-white/95 backdrop-blur-md border-t border-slate-200 px-4 py-3'>
           <div className='flex items-center justify-between'>
             <div className='flex items-center space-x-3'>
-              <div className='w-8 h-8 bg-gradient-to-br from-sky-500 to-sky-600 rounded-full flex items-center justify-center text-white text-xs font-semibold'>
+              <div className='w-8 h-8 bg-linear-to-br from-sky-500 to-sky-600 rounded-full flex items-center justify-center text-white text-xs font-semibold'>
                 {getNameInitial()}
               </div>
               <div>
@@ -432,7 +432,7 @@ const AdminSidebar: React.FC<AdminSidebarProps> = ({ children }) => {
             </div>
             <button
               onClick={() => setIsLogoutAllOpen(true)}
-              className='px-4 py-2 bg-gradient-to-r from-rose-500 to-pink-600 text-white text-sm font-medium rounded-lg shadow-sm hover:shadow-md focus:outline-none focus:ring-2 focus:ring-rose-500/30 transition-all duration-200'
+              className='px-4 py-2 bg-linear-to-r from-rose-500 to-pink-600 text-white text-sm font-medium rounded-lg shadow-sm hover:shadow-md focus:outline-none focus:ring-2 focus:ring-rose-500/30 transition-all duration-200'
             >
               Déconnecter tous
             </button>
@@ -442,12 +442,12 @@ const AdminSidebar: React.FC<AdminSidebarProps> = ({ children }) => {
 
       {/* ✅ Modal de confirmation amélioré */}
       {isLogoutAllOpen && (
-        <div className='fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm'>
+        <div className='fixed inset-0 z-100 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm'>
           <div className='bg-white rounded-2xl shadow-2xl w-full max-w-md transform transition-all duration-300 scale-100 opacity-100'>
             {/* En-tête */}
             <div className='p-6 border-b border-slate-200'>
               <div className='flex items-center space-x-3'>
-                <div className='w-12 h-12 bg-gradient-to-r from-rose-100 to-pink-100 rounded-xl flex items-center justify-center'>
+                <div className='w-12 h-12 bg-linear-to-r from-rose-100 to-pink-100 rounded-xl flex items-center justify-center'>
                   <AlertTriangle className='w-6 h-6 text-rose-600' />
                 </div>
                 <div>
@@ -503,9 +503,9 @@ const AdminSidebar: React.FC<AdminSidebarProps> = ({ children }) => {
               ) : (
                 <>
                   <div className='text-center mb-6'>
-                    <div className='w-20 h-20 mx-auto bg-gradient-to-br from-sky-100 to-blue-100 rounded-full flex items-center justify-center mb-4'>
-                      <Shield className='w-10 h-10 text-sky-600' />
-                    </div>
+                    <Link to='/' className='w-20 h-20 mx-auto bg-linear-to-br from-sky-100 to-blue-100 rounded-full flex items-center justify-center mb-4'>
+                      <Settings2Icon className='w-10 h-10 text-sky-600' />
+                    </Link>
                     <h3 className='text-lg font-semibold text-slate-800 mb-2'>
                       Confirmer la déconnexion globale
                     </h3>
@@ -515,7 +515,7 @@ const AdminSidebar: React.FC<AdminSidebarProps> = ({ children }) => {
                     </p>
                   </div>
 
-                  <div className='bg-gradient-to-r from-sky-50 to-blue-50/50 rounded-xl p-4 border border-sky-100 mb-6'>
+                  <div className='bg-linear-to-r from-sky-50 to-blue-50/50 rounded-xl p-4 border border-sky-100 mb-6'>
                     <div className='flex items-start space-x-3'>
                       <AlertTriangle className='w-5 h-5 text-sky-600 mt-0.5' />
                       <div>
@@ -548,7 +548,7 @@ const AdminSidebar: React.FC<AdminSidebarProps> = ({ children }) => {
                   <button
                     onClick={handleLogoutAll}
                     disabled={isLogoutAllLoading}
-                    className='flex-1 px-4 py-3 bg-gradient-to-r from-rose-500 to-pink-600 text-white rounded-xl hover:from-rose-600 hover:to-pink-700 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-rose-500/30'
+                    className='flex-1 px-4 py-3 bg-linear-to-r from-rose-500 to-pink-600 text-white rounded-xl hover:from-rose-600 hover:to-pink-700 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-rose-500/30'
                   >
                     {isLogoutAllLoading ? (
                       <div className='flex items-center justify-center space-x-2'>
@@ -571,7 +571,7 @@ const AdminSidebar: React.FC<AdminSidebarProps> = ({ children }) => {
                       // La déconnexion est gérée par le AuthContext
                     }
                   }}
-                  className='flex-1 px-4 py-3 bg-gradient-to-r from-sky-500 to-sky-600 text-white rounded-xl hover:from-sky-600 hover:to-sky-700 transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-sky-500/30'
+                  className='flex-1 px-4 py-3 bg-linear-to-r from-sky-500 to-sky-600 text-white rounded-xl hover:from-sky-600 hover:to-sky-700 transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-sky-500/30'
                 >
                   {logoutAllResult.success ? 'Fermer' : 'Compris'}
                 </button>

@@ -2,7 +2,7 @@ import { ArrowRight } from 'lucide-react';
 import React from 'react';
 import { Link } from 'react-router-dom';
 import '../index.css';
-import { FaBookOpen } from 'react-icons/fa';
+import { BookOpen as FaBookOpen } from 'lucide-react';
 
 interface CtaSectionProps {
   className?: string;
@@ -11,7 +11,7 @@ interface CtaSectionProps {
 const CtaSection: React.FC<CtaSectionProps> = ({ className }) => {
   return (
     <section
-      className={`relative py-12 md:py-16 mb-3 overflow-hidden bg-gradient-to-br from-sky-500 via-sky-600 to-sky-700 ${className || ''}`}
+      className={`relative py-12 md:py-16 mb-3 overflow-hidden bg-linear-to-br from-sky-500 via-sky-600 to-sky-700 ${className || ''}`}
     >
       {/* Background decorations */}
       <div className='absolute inset-0 pointer-events-none z-0'>
@@ -24,9 +24,10 @@ const CtaSection: React.FC<CtaSectionProps> = ({ className }) => {
             backgroundSize: '10px 10px',
           }}
         />
+         
 
         {/* Light overlay gradient */}
-        <div className='absolute inset-0 bg-gradient-to-r from-sky-600/30 to-transparent' />
+        <div className='absolute inset-0 bg-linear-to-r from-sky-600/30 to-transparent' />
 
         {/* Decorative blobs */}
         <div className='absolute top-0 left-0 w-60 h-60 bg-sky-400/30 rounded-full filter blur-2xl' />
@@ -46,7 +47,7 @@ const CtaSection: React.FC<CtaSectionProps> = ({ className }) => {
             </div>
 
             <h3 className='text-2xl sm:text-3xl md:text-4xl font-bold leading-tight'>
-              <span className='block mt-1 bg-gradient-to-r from-white via-sky-100 to-white bg-clip-text text-transparent'>
+              <span className='block mt-1 bg-linear-to-r from-white via-sky-100 to-white bg-clip-text text-transparent'>
                 PANAME CONSULTING
               </span>
               <span className='text-white'>LE CAP VERS L'EXCELLENCE</span>

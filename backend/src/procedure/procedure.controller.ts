@@ -22,6 +22,7 @@ import { CreateProcedureDto, CancelProcedureDto } from './dto/create-procedure.d
 import { UpdateProcedureDto } from './dto/update-procedure.dto';
 import { UpdateStepDto } from './dto/update-step.dto';
 import { UserRole } from '../schemas/user.schema';
+import { StepStatus } from '../schemas/procedure.schema';
 import { Request } from 'express';
 
 // ✅ Interface pour l'utilisateur authentifié
@@ -83,6 +84,21 @@ export class ProcedureController {
   @ApiOperation({ summary: 'Rejeter une procédure (Admin)' })
   async rejectProcedure(@Param('id') id: string, @Body('reason') reason: string) {
     this.logger.log(`Rejet procédure - ID: ${this.maskId(id)}`);
+    
+    // ==================== VALIDATION COUCHE CONTROLLER ====================
+    if (!reason || reason.trim() === '') {
+      throw new BadRequestException('La raison du rejet est obligatoire');
+    }
+    
+    if (reason.trim().length < 5) {
+      throw new BadRequestException('La raison doit contenir au moins 5 caractères');
+    }
+    
+    if (reason.length > 500) {
+      throw new BadRequestException('La raison ne doit pas dépasser 500 caractères');
+    }
+    // ==================== FIN VALIDATION ====================
+    
     return this.procedureService.rejectProcedure(id, reason);
   }
 
@@ -105,6 +121,25 @@ export class ProcedureController {
     @Body() updateDto: UpdateStepDto,
   ) {
     this.logger.log(`Modification étape - Procédure: ${this.maskId(id)}, Étape: ${stepName}`);
+    
+    // ==================== VALIDATION PRÉLIMINAIRE ====================
+    if (updateDto.statut === StepStatus.REJECTED) {
+      if (!updateDto.raisonRefus || updateDto.raisonRefus.trim() === '') {
+        throw new BadRequestException(
+          'La raison du refus est obligatoire lorsque le statut est "Rejeté"',
+        );
+      }
+      
+      if (updateDto.raisonRefus.trim().length < 5) {
+        throw new BadRequestException('La raison doit contenir au moins 5 caractères');
+      }
+      
+      if (updateDto.raisonRefus.length > 500) {
+        throw new BadRequestException('La raison ne doit pas dépasser 500 caractères');
+      }
+    }
+    // ==================== FIN VALIDATION ====================
+    
     return this.procedureService.updateStep(id, stepName, updateDto);
   }
 

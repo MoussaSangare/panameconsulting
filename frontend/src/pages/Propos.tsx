@@ -45,7 +45,7 @@ export default function Propos() {
                   }
                `}</style>
         </Helmet>
-        <main className='flex-1 bg-gradient-to-b from-white via-sky-50 to-white'>
+        <main className='flex-1 bg-linear-to-b from-white via-sky-50 to-white'>
           <About />
           <Valeur />
           <CTASection />

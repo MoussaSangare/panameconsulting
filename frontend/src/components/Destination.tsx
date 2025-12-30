@@ -87,7 +87,7 @@ const Destination = () => {
     try {
       setLoading(true);
       const response = await globalThis.fetch(
-        `${VITE_API_URL}/destinations`,
+        `${VITE_API_URL}/api/destinations`,
         {
           credentials: 'include',
           headers: { Accept: 'application/json' },
