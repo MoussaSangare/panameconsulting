@@ -374,7 +374,7 @@ export class AuthService {
     }
   }
 
- async logoutAll(): Promise<{
+async logoutAll(): Promise<{
   success: boolean;
   message: string;
   stats: {
@@ -389,27 +389,37 @@ export class AuthService {
   const startTime = Date.now();
   
   try {
-    this.logger.log("🚀 Début déconnexion temporaire (24h) des utilisateurs NON-ADMIN");
+    this.logger.log(" Début déconnexion temporaire (24h) des utilisateurs NON-ADMIN");
 
-    // ✅ PROTECTION STRICTE : SEULEMENT l'email du .env
+    //  PROTECTION STRICTE : SEULEMENT l'email du .env
     const adminEmail = process.env.EMAIL_USER;
     
     if (!adminEmail) {
-      this.logger.error("❌ EMAIL_USER non configuré");
+      this.logger.error(" EMAIL_USER non configuré");
       throw new BadRequestException("EMAIL_USER non défini dans l'environnement");
     }
 
-    // ✅ DÉCONNECTER TOUS SAUF EMAIL_USER
+    //  CORRECTION CRITIQUE : Vérifier que l'admin connecté n'est PAS inclus
+    const adminUser = await this.userModel.findOne({ email: adminEmail }).exec();
+    
+    if (!adminUser) {
+      this.logger.error(" Admin non trouvé en base de données");
+      throw new BadRequestException("Administrateur principal non trouvé");
+    }
+
+    //  CORRECTION : Exclure explicitement l'admin par SON ID
     const activeNonAdminUsers = await this.userModel
       .find({
-        email: { $ne: adminEmail }, // EXCLURE UNIQUEMENT EMAIL_USER
+        email: { $ne: adminEmail }, // Exclusion par email
+        role: { $ne: UserRole.ADMIN }, // ET exclusion par rôle
         isActive: true,
       })
       .select('id email firstName lastName role')
       .lean()
       .exec();
 
-    this.logger.log(`📊 ${activeNonAdminUsers.length} utilisateurs non-admin trouvés`);
+    this.logger.log(` ${activeNonAdminUsers.length} utilisateurs non-admin trouvés`);
+    this.logger.log(` Admin ${this.maskEmail(adminEmail)} (ID: ${adminUser.id}) préservé`);
 
     if (activeNonAdminUsers.length === 0) {
       return {
@@ -427,13 +437,16 @@ export class AuthService {
     }
 
     const userIds = activeNonAdminUsers.map(user => user.id);
-    const userEmails = activeNonAdminUsers.map(user => this.maskEmail(user.email));
 
     const logoutUntilDate = new Date(Date.now() + 24 * 60 * 60 * 1000);
 
+    //  CORRECTION : Mettre à jour UNIQUEMENT les non-admin
     await Promise.all([
       this.userModel.updateMany(
-        { id: { $in: userIds } },
+        { 
+          id: { $in: userIds },
+          email: { $ne: adminEmail } // Double vérification
+        },
         {
           $set: {
             logoutUntil: logoutUntilDate,
@@ -443,7 +456,10 @@ export class AuthService {
       ).exec(),
 
       this.sessionModel.updateMany(
-        { user: { $in: userIds }, isActive: true },
+        { 
+          user: { $in: userIds }, 
+          isActive: true 
+        },
         {
           isActive: false,
           deactivatedAt: new Date(),
@@ -456,12 +472,10 @@ export class AuthService {
       this.resetTokenModel.deleteMany({ user: { $in: userIds } }).exec(),
     ]);
 
-    await this.usersService.clearAllCache();
-
     const executionTime = Date.now() - startTime;
 
-    this.logger.log(`✅ DÉCONNEXION GLOBALE RÉUSSIE : ${activeNonAdminUsers.length} utilisateurs déconnectés`);
-    this.logger.log(`✅ ADMIN PRÉSERVÉ : ${this.maskEmail(adminEmail)}`);
+    this.logger.log(` DÉCONNEXION GLOBALE RÉUSSIE : ${activeNonAdminUsers.length} utilisateurs déconnectés`);
+    this.logger.log(` ADMIN PRÉSERVÉ : ${this.maskEmail(adminEmail)} - ID: ${adminUser.id}`);
 
     return {
       success: true,
@@ -472,15 +486,16 @@ export class AuthService {
         adminEmail: this.maskEmail(adminEmail),
         duration: "24 heures",
         timestamp: new Date().toISOString(),
-        userEmails,
+        userEmails: [] // Pour confidentialité
       }
     };
 
   } catch (error) {
-    this.logger.error(`❌ ÉCHEC déconnexion globale: ${error.message}`);
+    this.logger.error(` ÉCHEC déconnexion globale: ${error.message}`);
     throw new BadRequestException(`Échec de la déconnexion globale: ${error.message}`);
   }
 }
+
 
   async revokeToken(token: string, expiresAt: Date): Promise<void> {
     try {
@@ -556,7 +571,7 @@ export class AuthService {
     }
   }
 
- async validateUser(email: string, password: string): Promise<User | null> {
+async validateUser(email: string, password: string): Promise<User | null> {
   try {
     const attempts = this.getLoginAttempts(email);
 
@@ -587,29 +602,32 @@ export class AuthService {
       return null;
     }
 
-    // ✅ VÉRIFICATION STRICTE : SEUL L'EMAIL DU .ENV PEUT ÊTRE ADMIN
-    if (user.role === UserRole.ADMIN) {
-      const adminEmail = process.env.EMAIL_USER;
-      
-      if (!adminEmail) {
-        this.logger.error('❌ EMAIL_USER non configuré dans .env');
-        throw new UnauthorizedException("Configuration système invalide");
-      }
-      
-      if (user.email !== adminEmail) {
-        this.logger.error(`❌ ADMIN NON AUTORISÉ DÉTECTÉ: ${this.maskEmail(user.email)}`);
+    //  VÉRIFICATION STRICTE : SEUL L'EMAIL DU .ENV PEUT ÊTRE ADMIN
+    const adminEmail = process.env.EMAIL_USER;
+    
+    if (!adminEmail) {
+      this.logger.error(' EMAIL_USER non configuré dans .env');
+      throw new UnauthorizedException("Configuration système invalide");
+    }
+
+    const isAdminEmail = user.email === adminEmail;
+    const isAdminRole = user.role === UserRole.ADMIN;
+
+    //  LOGIQUE DE SÉCURITÉ RENFORCÉE POUR L'ADMIN
+    if (isAdminRole) {
+      // Si le rôle est ADMIN mais l'email ne correspond pas → REJETER
+      if (!isAdminEmail) {
+        this.logger.error(` ADMIN NON AUTORISÉ DÉTECTÉ: ${this.maskEmail(user.email)} (email ne correspond pas à ${this.maskEmail(adminEmail)})`);
         this.incrementLoginAttempts(email);
         throw new UnauthorizedException("Accès refusé");
       }
       
-      this.logger.log(`✅ ADMIN LÉGITIME: ${this.maskEmail(user.email)}`);
-    }
-
-    if (!user.password || user.password.trim() === '') {
-      this.logger.error(`❌ CRITICAL: User ${this.maskEmail(email)} has no password in database`);
+      //  ADMIN LÉGITIME - IGNORER TOUTES LES RESTRICTIONS
+      this.logger.log(` ADMIN LÉGITIME DÉTECTÉ: ${this.maskEmail(user.email)}`);
       
-      if (user.role === UserRole.ADMIN) {
-        this.logger.warn(`Admin ${this.maskEmail(email)} n'a pas de mot de passe - réinitialisation requise`);
+      // Vérification du mot de passe pour l'admin
+      if (!user.password || user.password.trim() === '') {
+        this.logger.error(` CRITICAL: Admin ${this.maskEmail(email)} has no password in database`);
         throw new UnauthorizedException(
           AuthConstants.ERROR_MESSAGES.PASSWORD_RESET_REQUIRED,
           {
@@ -617,10 +635,53 @@ export class AuthService {
             cause: "NO_PASSWORD_IN_DB"
           }
         );
-      } else {
+      }
+
+      if (!password || password.trim() === '') {
+        this.logger.warn(`Mot de passe vide fourni pour admin: ${this.maskEmail(email)}`);
         this.incrementLoginAttempts(email);
         return null;
       }
+
+      let isPasswordValid = false;
+      try {
+        const cleanPassword = password.trim();
+        
+        if (!user.password || !cleanPassword) {
+          this.logger.error(`Arguments manquants pour bcrypt.compare (admin)`);
+          throw new Error('Arguments manquants pour la comparaison');
+        }
+        
+        isPasswordValid = await bcrypt.compare(cleanPassword, user.password);
+        
+      } catch (bcryptError) {
+        this.logger.error(` Erreur bcrypt.compare pour admin ${this.maskEmail(email)}: ${bcryptError.message}`);
+        this.incrementLoginAttempts(email);
+        return null;
+      }
+
+      if (!isPasswordValid) {
+        this.logger.warn(`Mot de passe incorrect pour admin: ${this.maskEmail(email)}`);
+        this.incrementLoginAttempts(email);
+        return null;
+      }
+
+      //  L'admin ignore COMPLÈTEMENT logoutUntil, isActive, etc.
+      this.logger.log(` Admin ${this.maskEmail(user.email)} - accès accordé (ignore toutes restrictions)`);
+      
+      this.resetLoginAttempts(email);
+      
+      const userWithoutPassword = user.toObject();
+      delete userWithoutPassword.password;
+      
+      return userWithoutPassword;
+    }
+
+    //  LOGIQUE POUR LES UTILISATEURS NORMALS (NON-ADMIN)
+    if (!user.password || user.password.trim() === '') {
+      this.logger.error(` CRITICAL: User ${this.maskEmail(email)} has no password in database`);
+      this.incrementLoginAttempts(email);
+      return null;
     }
 
     if (!password || password.trim() === '') {
@@ -641,10 +702,10 @@ export class AuthService {
       isPasswordValid = await bcrypt.compare(cleanPassword, user.password);
       
     } catch (bcryptError) {
-      this.logger.error(`❌ Erreur bcrypt.compare pour ${this.maskEmail(email)}: ${bcryptError.message}`);
+      this.logger.error(` Erreur bcrypt.compare pour ${this.maskEmail(email)}: ${bcryptError.message}`);
       
       if (bcryptError.message.includes('data and hash arguments required')) {
-        this.logger.error(`❌ BCrypt arguments manquants - user.password: ${!!user.password}, password: ${!!password}`);
+        this.logger.error(` BCrypt arguments manquants - user.password: ${!!user.password}, password: ${!!password}`);
       }
       
       this.incrementLoginAttempts(email);
@@ -657,8 +718,10 @@ export class AuthService {
       return null;
     }
 
-    // ✅ UTILISATION DE id AU LIEU DE _id
+    //  UTILISATION DE id AU LIEU DE _id
     const userId = user.id;
+    
+    //  VÉRIFICATION D'ACCÈS POUR LES UTILISATEURS NORMALS SEULEMENT
     const accessCheck = await this.usersService.checkUserAccess(userId);
     
     if (!accessCheck.canAccess) {
@@ -683,7 +746,7 @@ export class AuthService {
     const userWithoutPassword = user.toObject();
     delete userWithoutPassword.password;
     
-    this.logger.log(`✅ Connexion réussie pour: ${this.maskEmail(email)}`);
+    this.logger.log(` Connexion réussie pour: ${this.maskEmail(email)}`);
     return userWithoutPassword;
 
   } catch (error) {
@@ -693,13 +756,14 @@ export class AuthService {
     }
     
     this.logger.error(
-      `❌ Erreur inattendue validateUser ${this.maskEmail(email)}: ${error.message}`,
+      ` Erreur inattendue validateUser ${this.maskEmail(email)}: ${error.message}`,
       error.stack
     );
     
     return null;
   }
 }
+
 
   async validateToken(token: string): Promise<boolean> {
     try {
@@ -732,7 +796,7 @@ export class AuthService {
         throw new NotFoundException("Utilisateur non trouvé");
       }
 
-      // ✅ UTILISATION DE id AU LIEU DE convertObjectIdToString
+      //  UTILISATION DE id AU LIEU DE convertObjectIdToString
       const userId = user.id;
       await this.usersService.resetPassword(userId, newPassword);
 
@@ -749,7 +813,7 @@ export class AuthService {
     const nodeEnv = process.env.NODE_ENV || "development";
 
     if (url && url.includes(",")) {
-      this.logger.warn("⚠️ URL frontend malformée détectée, nettoyage en cours");
+      this.logger.warn(" URL frontend malformée détectée, nettoyage en cours");
       url = url.split(",")[0].trim();
     }
 
@@ -765,7 +829,7 @@ export class AuthService {
   private buildResetUrl(token: string): string {
     const baseUrl = this.getFrontendUrl();
 
-    this.logger.log(`🔧 URL frontend nettoyée: ${baseUrl}`);
+    this.logger.log(` URL frontend nettoyée: ${baseUrl}`);
 
     if (!baseUrl.startsWith("http://") && !baseUrl.startsWith("https://")) {
       throw new Error(
@@ -774,7 +838,7 @@ export class AuthService {
     }
 
     const resetUrl = `${baseUrl}/reset-password?token=${token}`;
-    this.logger.log(`🔧 URL de reset finale résolue: ${resetUrl.substring(0, 50)}...`);
+    this.logger.log(` URL de reset finale résolue: ${resetUrl.substring(0, 50)}...`);
 
     return resetUrl;
   }
@@ -820,10 +884,10 @@ export class AuthService {
 
   async getProfile(userId: string): Promise<User> {
     try {
-      this.logger.log(`🛠️ getProfile appelé avec userId: ${this.maskUserId(userId)}`);
+      this.logger.log(` getProfile appelé avec userId: ${this.maskUserId(userId)}`);
 
       if (!userId || userId === "undefined" || userId === "null" || userId === "") {
-        this.logger.warn("⚠️ userId manquant ou invalide dans getProfile");
+        this.logger.warn(" userId manquant ou invalide dans getProfile");
         throw new BadRequestException("ID utilisateur manquant");
       }
 
@@ -837,21 +901,21 @@ export class AuthService {
           throw new NotFoundException("Utilisateur non trouvé");
         }
 
-        this.logger.log(`✅ Profil récupéré avec succès pour l'ID: ${this.maskUserId(cleanUserId)}`);
+        this.logger.log(` Profil récupéré avec succès pour l'ID: ${this.maskUserId(cleanUserId)}`);
         return user;
       }
 
-      this.logger.log(`🔍 Recherche par email: ${this.maskEmail(cleanUserId)}`);
+      this.logger.log(` Recherche par email: ${this.maskEmail(cleanUserId)}`);
 
       if (cleanUserId.includes("@")) {
         const userByEmail = await this.usersService.findByEmail(cleanUserId);
         if (userByEmail) {
-          this.logger.log(`✅ Utilisateur trouvé par email: ${this.maskEmail(cleanUserId)}`);
+          this.logger.log(` Utilisateur trouvé par email: ${this.maskEmail(cleanUserId)}`);
           return userByEmail;
         }
       }
 
-      this.logger.error(`❌ Aucun utilisateur trouvé avec l'identifiant: ${this.maskUserId(cleanUserId)}`);
+      this.logger.error(` Aucun utilisateur trouvé avec l'identifiant: ${this.maskUserId(cleanUserId)}`);
       throw new NotFoundException("Utilisateur non trouvé");
     } catch (error) {
       if (error instanceof BadRequestException || error instanceof NotFoundException) {

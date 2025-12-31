@@ -168,122 +168,179 @@ export class UsersService {
   }
 
   async checkUserAccess(userId: string): Promise<{
-    canAccess: boolean;
-    reason?: string;
-    user?: any;
-    details?: any;
-  }> {
-    const cacheKey = this.getCacheKey("checkUserAccess", userId);
-    const cached = this.getCache(cacheKey);
+  canAccess: boolean;
+  reason?: string;
+  user?: any;
+  details?: any;
+}> {
+  const cacheKey = this.getCacheKey("checkUserAccess", userId);
+  const cached = this.getCache(cacheKey);
+  
+  if (cached !== null) {
+    return cached;
+  }
+
+  const user = await this.userModel.findById(userId).lean().exec();
+  if (!user) {
+    const result = { 
+      canAccess: false, 
+      reason: "Utilisateur non trouvé" 
+    };
+    this.setCache(cacheKey, result);
+    return result;
+  }
+
+  // ✅ Définir des variables booléennes claires
+  const isUser = user.role === UserRole.USER;
+  const isAdmin = user.role === UserRole.ADMIN;
+  const adminEmail = process.env.EMAIL_USER;
+  const isMainAdmin = adminEmail && user.email === adminEmail && isAdmin;
+
+  // ✅ ADMIN UNIQUE : IGNORER TOUTES LES RESTRICTIONS
+  if (isMainAdmin) {
+    this.logger.log(`🔓 ADMIN DÉTECTÉ: ${this.maskEmail(user.email)} - Accès illimité accordé`);
     
-    if (cached !== null) {
-      return cached;
-    }
-
-    const user = await this.userModel.findById(userId).lean().exec();
-    if (!user) {
-      const result = { 
-        canAccess: false, 
-        reason: "Utilisateur non trouvé" 
-      };
-      this.setCache(cacheKey, result);
-      return result;
-    }
-
-    const isMaintenance = await this.isMaintenanceMode();
-    if (isMaintenance && user.role !== UserRole.ADMIN) {
-      const result = {
-        canAccess: false,
-        reason: "Mode maintenance activé",
-        user: {
-          id: user.id, // ✅ id (pas _id)
-          email: user.email,
-          firstName: user.firstName,
-          lastName: user.lastName,
-          role: user.role,
-          isActive: user.isActive,
-          isAdmin: UserRole.ADMIN,
-        },
-        details: { maintenanceMode: true }
-      };
-      this.setCache(cacheKey, result);
-      return result;
-    }
-
-    if (user.role !== UserRole.ADMIN && !user.isActive) {
-      const result = {
-        canAccess: false,
-        reason: "Compte désactivé",
-        user: {
-          id: user.id, // ✅ id (pas _id)
-          email: user.email,
-          firstName: user.firstName,
-          lastName: user.lastName,
-          telephone: user.telephone,
-          role: user.role,
-          isActive: user.isActive,
-          isAdmin: UserRole.ADMIN,
-        }
-      };
-      this.setCache(cacheKey, result);
-      return result;
-    }
-
-    if (user.logoutUntil && new Date() < new Date(user.logoutUntil)) {
-      const remainingHours = Math.ceil(
-        (new Date(user.logoutUntil).getTime() - Date.now()) / (1000 * 60 * 60)
-      );
-      const result = {
-        canAccess: false,
-        reason: `Déconnecté temporairement (reste ${remainingHours}h)`,
-        user: {
-          id: user.id, // ✅ id (pas _id)
-          email: user.email,
-          firstName: user.firstName,
-          lastName: user.lastName,
-          role: user.role,
-          isActive: user.isActive,
-          logoutUntil: user.logoutUntil,
-          isAdmin: user.role === UserRole.ADMIN
-        },
-        details: {
-          logoutUntil: user.logoutUntil,
-          remainingHours,
-          isTemporarilyLoggedOut: true
-        }
-      };
-      this.setCache(cacheKey, result);
-      return result;
-    }
-
     const result = {
       canAccess: true,
       user: {
-        id: user.id, // ✅ id (pas _id)
+        id: user.id,
+        email: user.email,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        role: user.role,
+        telephone: user.telephone,
+        isActive: true,
+        logoutUntil: null,
+        isAdmin: true,
+      },
+      details: {
+        isTemporarilyLoggedOut: false,
+        canLogin: true,
+        maintenanceMode: false,
+        logoutUntil: null,
+        isAdmin: true,
+        hasUnlimitedAccess: true
+      }
+    };
+    
+    this.setCache(cacheKey, result);
+    setTimeout(() => {
+      this.cache.delete(cacheKey);
+    }, this.CACHE_TTL);
+    
+    return result;
+  }
+
+  // 🔐 VÉRIFICATIONS POUR TOUS LES AUTRES
+  const isMaintenance = await this.isMaintenanceMode();
+
+  // Mode maintenance : seulement pour les users normaux
+  if (isMaintenance && isUser) {
+    const result = {
+      canAccess: false,
+      reason: "Mode maintenance activé",
+      user: {
+        id: user.id,
+        email: user.email,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        role: user.role,
+        isActive: user.isActive,
+        isAdmin: isAdmin,
+      },
+      details: { 
+        maintenanceMode: true,
+        isAdmin: isAdmin
+      }
+    };
+    this.setCache(cacheKey, result);
+    return result;
+  }
+
+  // Compte désactivé : seulement pour les users normaux
+  if (isUser && !user.isActive) {
+    const result = {
+      canAccess: false,
+      reason: "Compte désactivé",
+      user: {
+        id: user.id,
+        email: user.email,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        telephone: user.telephone,
+        role: user.role,
+        isActive: user.isActive,
+        isAdmin: isAdmin,
+      },
+      details: {
+        isAdmin: isAdmin
+      }
+    };
+    this.setCache(cacheKey, result);
+    return result;
+  }
+
+  // logoutUntil : pour tous sauf admin principal (déjà filtré)
+  if (user.logoutUntil && new Date() < new Date(user.logoutUntil)) {
+    const remainingHours = Math.ceil(
+      (new Date(user.logoutUntil).getTime() - Date.now()) / (1000 * 60 * 60)
+    );
+    const result = {
+      canAccess: false,
+      reason: `Déconnecté temporairement (reste ${remainingHours}h)`,
+      user: {
+        id: user.id,
         email: user.email,
         firstName: user.firstName,
         lastName: user.lastName,
         role: user.role,
         isActive: user.isActive,
         logoutUntil: user.logoutUntil,
-        isAdmin: user.role === UserRole.ADMIN
+        isAdmin: isAdmin
       },
       details: {
-        isTemporarilyLoggedOut: false,
-        canLogin: true,
-        maintenanceMode: isMaintenance
+        logoutUntil: user.logoutUntil,
+        remainingHours,
+        isTemporarilyLoggedOut: true,
+        isAdmin: isAdmin
       }
     };
-
-    const cacheTTL = result.canAccess ? this.CACHE_TTL : 60000;
     this.setCache(cacheKey, result);
-    
-    setTimeout(() => {
-      this.cache.delete(cacheKey);
-    }, cacheTTL);
-
     return result;
   }
+
+  // ✅ ACCÈS AUTORISÉ
+  const result = {
+    canAccess: true,
+    user: {
+      id: user.id,
+      email: user.email,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      role: user.role,
+      telephone: user.telephone,
+      isActive: user.isActive,
+      logoutUntil: user.logoutUntil,
+      isAdmin: isAdmin
+    },
+    details: {
+      isTemporarilyLoggedOut: false,
+      canLogin: true,
+      maintenanceMode: isMaintenance,
+      isAdmin: isAdmin,
+      hasUnlimitedAccess: false
+    }
+  };
+
+  const cacheTTL = result.canAccess ? this.CACHE_TTL : 60000;
+  this.setCache(cacheKey, result);
+  
+  setTimeout(() => {
+    this.cache.delete(cacheKey);
+  }, cacheTTL);
+
+  return result;
+}
 
   async isMaintenanceMode(): Promise<boolean> {
     const cacheKey = this.getCacheKey("isMaintenanceMode", "status");
