@@ -1,60 +1,51 @@
-// contact.schema.ts
-import { Prop, Schema, SchemaFactory } from "@nestjs/mongoose";
-import { IsOptional, IsString, MaxLength, Matches } from "class-validator";
-import { Document, Types } from "mongoose";
+import {
+  IsEmail,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  MinLength,
+  MaxLength,
+} from "class-validator";
+import { ApiProperty } from "@nestjs/swagger";
 
-export type ContactDocument = Contact & Document;
-
-@Schema({
-  timestamps: true,
-  collection: "contacts",
-  versionKey: false,
-})
-export class Contact {
+export class CreateContactDto {
+  @ApiProperty({
+    example: "Jean",
+    description: "Prénom",
+    required: false,
+  })
   @IsOptional()
   @IsString({ message: "Le prénom doit être une chaîne de caractères" })
   @MaxLength(50, { message: "Le prénom ne doit pas dépasser 50 caractères" })
-  @Matches(/^[a-zA-ZÀ-ÿ\s-]*$/, { 
-    message: "Le prénom ne doit contenir que des lettres, espaces et tirets" 
-  })
   firstName?: string;
 
-  @Prop({ trim: true, maxlength: 50 })
+  @ApiProperty({
+    example: "Dupont",
+    description: "Nom",
+    required: false,
+  })
+  @IsOptional()
+  @IsString({ message: "Le nom doit être une chaîne de caractères" })
+  @MaxLength(50, { message: "Le nom ne doit pas dépasser 50 caractères" })
   lastName?: string;
 
-  @Prop({
-    required: true,
-    lowercase: true,
-    trim: true,
-    match: /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
+  @ApiProperty({
+    example: "jean.dupont@example.com",
+    description: "Email",
   })
+  @IsNotEmpty({ message: "L'email est obligatoire" })
+  @IsEmail({}, { message: "Format d'email invalide" })
   email: string;
 
-  @Prop({
-    required: true,
-    minlength: 10,
-    maxlength: 2000,
+  @ApiProperty({
+    example: "Bonjour, je souhaite obtenir des informations...",
+    description: "Message",
+  })
+  @IsNotEmpty({ message: "Le message est obligatoire" })
+  @IsString({ message: "Le message doit être une chaîne de caractères" })
+  @MinLength(10, { message: "Le message doit contenir au moins 10 caractères" })
+  @MaxLength(2000, {
+    message: "Le message ne doit pas dépasser 2000 caractères",
   })
   message: string;
-
-  @Prop({ default: false })
-  isRead: boolean;
-
-  @Prop({ maxlength: 2000 })
-  adminResponse?: string;
-
-  @Prop()
-  respondedAt?: Date;
-
-  @Prop({ type: Types.ObjectId, ref: "User" })
-  respondedBy?: Types.ObjectId;
-
-  // Champs timestamps automatiques
-  @Prop({ default: Date.now })
-  createdAt: Date;
-
-  @Prop({ default: Date.now })
-  updatedAt: Date;
 }
-
-export const ContactSchema = SchemaFactory.createForClass(Contact);
