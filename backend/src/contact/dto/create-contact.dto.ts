@@ -11,8 +11,6 @@ export type ContactDocument = Contact & Document;
   versionKey: false,
 })
 export class Contact {
-
-  
   @IsOptional()
   @IsString({ message: "Le prénom doit être une chaîne de caractères" })
   @MaxLength(50, { message: "Le prénom ne doit pas dépasser 50 caractères" })
