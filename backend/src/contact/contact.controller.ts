@@ -155,6 +155,7 @@ export class ContactController {
     const maskedLocal = localPart.length > 2 
       ? localPart.substring(0, 2) + '*'.repeat(localPart.length - 2)
       : '*'.repeat(localPart.length);
+    
     return `${maskedLocal}@${domain}`;
   }
 }
